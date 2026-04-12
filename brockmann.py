@@ -694,64 +694,256 @@ def extract_results(model, successor):
 
 
 # =============================================================================
-# MINIMAL EXAMPLE (2 customers, 1 charger, 1 secant segment)
+# TEST INSTANCES
 # =============================================================================
 
-def make_example_data():
-    """
-    Small toy instance to verify the model builds and solves correctly.
+def _charging_params(Y_max=480.0, K0=350.0, K1=120.0):
+    """Return piecewise-linear charging params for a single station."""
+    bp   = 0.80 * Y_max
+    B1   = bp - K1 * (bp / K0)
+    return bp, K0, K1, B1
 
-    Route: depot(0) → customer_1 → customer_2 → depot_end(3)
-    Charger: 'f1' located between customer 1 and 2
-    Battery: 480 kWh (BT480), two secant segments (CC + CV phase)
+
+def _make_data(N, F, Z, D, W_break=4.5, W_day=9.0, B=0.75,
+               Y_max=480.0, h=0.85, D_safety=50.0, M=1e5, speed=80.0,
+               K_vals=None):
     """
-    N = [0, 1, 2,3,4]       # 3 nodes: start depot, 1 customer, end depot
+    Build a complete data dict from distances D and topology (N, F, Z).
+
+    D      : dict of distances in km for every needed (a, b) pair
+    K_vals : optional dict  {f: (K0, K1)}  per station; defaults to 350/120 kW
+    """
+    T = {k: v / speed for k, v in D.items()}
+    R = [0, 1]
+
+    s, K, B_int = {}, {}, {}
+    for f in F:
+        k0, k1 = (K_vals or {}).get(f, (350.0, 120.0))
+        bp, K0, K1, Bint1 = _charging_params(Y_max, k0, k1)
+        s[f, 0]     = 0.0;   s[f, 1]     = bp
+        K[f, 0]     = K0;    K[f, 1]     = K1
+        B_int[f, 0] = 0.0;   B_int[f, 1] = Bint1
+
+    return dict(N=N, F=F, R=R, Z=Z, T_travel=T, D_dist=D,
+                h=h, D_safety=D_safety, Y_max=Y_max,
+                B=B, W_break=W_break, W_day=W_day, M=M,
+                s=s, K=K, B_intercept=B_int, y0=Y_max)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 1 – No charging needed, charger is out of the way
+#
+# Expected: x[0]=1 (direct arc), no charger visit.
+# Route: 0 → 1  (300 km, 3.75 h)
+# Battery: 480 - 300*0.85 = 225 kWh  → well above safety (42.5 kWh)
+# HOS:     3.75 h < 4.5 h limit → no break needed
+# Charger f1 adds a 60 km detour each way → z[0,f1] must not be chosen.
+# ---------------------------------------------------------------------------
+def make_instance_no_charging_needed():
+    """
+    Charger is available but out of the way and not needed energetically.
+    Expected optimal: direct arc, no stop.
+    """
+    N = [0, 1]
     F = ["f1"]
-    R = [0, 1]          # two piecewise segments
-    Z = [(1, "f1")]   # detour option on both legs
-
-    # All distances in km, travel times in hours (approx 80 km/h)
+    Z = [(0, "f1")]
     D = {
-        (0, 1): 200.0, (1, 2): 200.0, (2, 3): 100.0, (3, 4): 100.0,
-        (1, "f1"): 100.0, ("f1", 2): 105.0,
+        (0, 1):      300.0,          # direct leg: 300 km, 3.75 h
+        (0, "f1"):   200.0,          # detour adds 200+160=360 km vs 300
+        ("f1", 1):   160.0,
     }
+    return _make_data(N, F, Z, D)
 
-    T = {k: v / 80.0 for k, v in D.items()}  # time = dist / speed
 
-    Y_max = 480.0   # kWh
-    h     = 0.85    # kWh/km (MAN eTGX typical)
-
-    # Two-segment piecewise charging:
-    #  Segment 0 (CC): 0–80% SOC at 350 kW  =>  E = 350*t + 0
-    #  Segment 1 (CV): 80–100% SOC at ~120 kW
-    bp = 0.80 * Y_max   # 384 kWh
-    # Segment 1 intercept: at t=bp/350 hours, E=bp, so B_int_1 = bp - 350*(bp/350) = 0
-    # After 384 kWh charged at 350 kW, time elapsed = 384/350 h
-    # CV phase: E = 120*t + (384 - 120*(384/350))
-    t_bp = bp / 350.0
-    B1 = bp - 120.0 * t_bp
-
-    s       = {("f1", 0): 0.0,   ("f1", 1): bp}
-    K       = {("f1", 0): 350.0, ("f1", 1): 120.0}
-    B_int   = {("f1", 0): 0.0,   ("f1", 1): B1}
-
-    return {
-        "N": N, "F": F, "R": R, "Z": Z,
-        "T_travel": T,
-        "D_dist":   D,
-        "h":        h,
-        "D_safety": 50.0,
-        "Y_max":    Y_max,
-        "B":        0.75,       # 45 min break
-        "W_break":  4.5,        # 4.5 h max before break
-        "W_day":    9.0,        # 9 h max driving per day
-        "M":        1e5,
-        "s":        s,
-        "K":        K,
-        "B_intercept": B_int,
-        # Initial energy (add as a separate parameter or as y[0] fixed):
-        "y0": Y_max,            # start fully charged
+# ---------------------------------------------------------------------------
+# INSTANCE 2 – Charging is necessary (battery would run out otherwise)
+#
+# Expected: z[0,f1]=1, truck charges enough to complete the route.
+# Route: 0 → f1 → 1  (total 650 km)
+# Direct would require: 530 km × 0.85 = 450.5 kWh; battery is 480 kWh but
+# safety reserve is 50*0.85=42.5 kWh so usable = 437.5 kWh → infeasible direct.
+# Via charger: 300 km to f1 (255 kWh used, 225 kWh remaining) then charge,
+# then 350 km from f1 to 1 (297.5 kWh needed).
+# ---------------------------------------------------------------------------
+def make_instance_charging_necessary():
+    """
+    Single leg that exceeds battery range without a stop.
+    Expected optimal: detour via charger.
+    """
+    N = [0, 1]
+    F = ["f1"]
+    Z = [(0, "f1")]
+    D = {
+        (0, 1):      530.0,   # direct: 530*0.85=450.5 kWh > 437.5 usable
+        (0, "f1"):   300.0,
+        ("f1", 1):   350.0,
     }
+    return _make_data(N, F, Z, D)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 3 – HOS break required but NOT at a charger
+#
+# Two legs both under battery range. Total drive = 5.5 h > W_break=4.5 h
+# so a break is mandatory. No charger is on a useful path.
+# Expected: x[0]=1, x[1]=1, w[1]=1 (break at customer 1).
+# ---------------------------------------------------------------------------
+def make_instance_break_at_customer():
+    """
+    HOS break required; charger is so far out of the way it is never chosen.
+    Expected: direct arcs, break at the intermediate customer.
+    """
+    N = [0, 1, 2]
+    F = ["f1"]
+    Z = [(0, "f1"), (1, "f1")]
+    D = {
+        (0, 1):      280.0,   # 3.5 h
+        (1, 2):      160.0,   # 2.0 h  → total 5.5 h > 4.5 h limit
+        (0, "f1"):   400.0,   # huge detour → never chosen
+        ("f1", 1):   400.0,
+        (1, "f1"):   400.0,
+        ("f1", 2):   400.0,
+    }
+    return _make_data(N, F, Z, D)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 4 – Break-and-charge: charger on route, long enough to be a break
+#
+# Leg 0→1 is 3.0 h; leg 1→2 is 3.0 h.  Total = 6 h > W_break.
+# Charger f1 lies between 1 and 2, adding only 10 km detour.
+# Charging needed (leg 1→2 = 350 km, available after leg 0→1 = 480-200=280 kWh,
+# need 350*0.85=297.5 kWh → must charge at least 297.5-280+42.5 = 60 kWh).
+# Charging 60 kWh at 350 kW takes ~10 min < 45 min → w_prime must be 0.
+# Still need a break somewhere.  The model should place w[1]=1.
+# ---------------------------------------------------------------------------
+def make_instance_charge_and_separate_break():
+    """
+    Charging is needed AND a HOS break is needed, but charging time < 45 min
+    so the charging stop alone cannot serve as the break.
+    Expected: z[1,f1]=1 (charge), w[1]=1 (separate break at customer 1).
+    """
+    N = [0, 1, 2]
+    F = ["f1"]
+    Z = [(1, "f1")]
+    D = {
+        (0, 1):      240.0,   # 3.0 h, uses 204 kWh → y[1]=276 kWh
+        (1, 2):      350.0,   # direct would use 297.5 kWh → y[2]=276-297.5=-21 infeasible
+        (1, "f1"):    50.0,   # small detour
+        ("f1", 2):   305.0,   # 305*0.85=259.25 kWh needed from charger
+    }
+    return _make_data(N, F, Z, D)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 5 – Break-and-charge: charging time >= 45 min serves as the break
+#
+# Leg 0→1 is 3.0 h; leg 1→2 needs heavy charging (low SOC on arrival).
+# Battery after leg 0→1: 480 - 380*0.85 = 157 kWh.
+# Leg to charger: 30 km → SOC at charger = 157 - 25.5 = 131.5 kWh.
+# Leg from charger to 2: 330 km needs 280.5 kWh → need at least 149 kWh charge.
+# At 350 kW, 149 kWh takes ~25 min; but HOS requires 45 min break after 3.0 h
+# of driving into leg 1→f1 (another 0.375 h = 3.375 h total).
+# Next leg f1→2 adds 4.125 h → total from last break = 3.375+4.125 = 7.5 h >> 4.5 h
+# So w_prime[1] must be 1 and t'' >= 45 min → truck charges >= 350*0.75 = 262.5 kWh.
+# ---------------------------------------------------------------------------
+def make_instance_break_and_charge():
+    """
+    Charging stop naturally lasts >= 45 min (large energy deficit),
+    so it can serve as the mandatory HOS break (w_prime=1).
+    Expected: z[1,f1]=1, w_prime[1]=1, no separate customer break needed.
+    """
+    N = [0, 1, 2]
+    F = ["f1"]
+    Z = [(1, "f1")]
+    D = {
+        (0, 1):      380.0,   # 4.75 h, y[1] = 480-323=157 kWh
+        (1, 2):      450.0,   # direct: needs 382.5 kWh > 157-42.5=114.5 available
+        (1, "f1"):    30.0,   # short detour to charger
+        ("f1", 2):   330.0,   # 330*0.85=280.5 kWh needed
+    }
+    return _make_data(N, F, Z, D)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 6 – Two chargers available, only the closer one should be chosen
+#
+# Leg 0→1: 350 km. Both f1 and f2 can service it; f1 is 20 km detour,
+# f2 is 100 km detour. Both provide enough charge.
+# Expected: z[0,f1]=1 (f1 chosen, shorter detour), z[0,f2]=0.
+# ---------------------------------------------------------------------------
+def make_instance_two_chargers_pick_closer():
+    """
+    Two chargers available on the same leg; model should pick the closer one.
+    Expected: z[0,f1]=1, z[0,f2]=0.
+    """
+    N = [0, 1]
+    F = ["f1", "f2"]
+    Z = [(0, "f1"), (0, "f2")]
+    D = {
+        (0, 1):       430.0,  # direct: 430*0.85=365.5 > usable 437.5 kWh?
+                               # y[1] = 480-365.5=114.5 > 42.5 → direct feasible
+                               # but both chargers are faster
+        (0, "f1"):    200.0,  ("f1", 1): 220.0,   # detour: +220+200-430=−10 → shorter!
+        (0, "f2"):    260.0,  ("f2", 1): 270.0,   # detour: +260+270-430=+100 → longer
+    }
+    # Make direct infeasible so charging is forced
+    D[(0, 1)] = 530.0  # 530*0.85=450.5 > 437.5 → must charge
+    return _make_data(N, F, Z, D)
+
+
+# ---------------------------------------------------------------------------
+# INSTANCE 7 – Three legs, charger only needed on the middle leg
+#
+# Expected: x[0]=1, z[1,f1]=1, x[2]=1.
+# The first and last legs are short; only the middle leg is long enough
+# to require charging.
+# ---------------------------------------------------------------------------
+def make_instance_charge_middle_leg_only():
+    """
+    Three-leg route; charging only necessary on leg 1→2.
+    Expected: direct on legs 0→1 and 2→3, charger detour on leg 1→2.
+    """
+    N = [0, 1, 2, 3]
+    F = ["f1"]
+    Z = [(0, "f1"), (1, "f1"), (2, "f1")]
+    D = {
+        (0, 1):      100.0,   # short: 85 kWh used
+        (1, 2):      480.0,   # long: 408 kWh > 395-42.5=352.5 usable → must charge
+        (2, 3):      100.0,   # short
+        (0, "f1"):   200.0, ("f1", 1): 200.0,  # detour on leg 0→1: adds 400-100=300km
+        (1, "f1"):   200.0, ("f1", 2): 280.0,  # detour on leg 1→2: small
+        (2, "f1"):   200.0, ("f1", 3): 200.0,  # detour on leg 2→3: adds 300km
+    }
+    return _make_data(N, F, Z, D)
+
+
+def make_example_data(instance=1):
+    """
+    Return a data dict for one of the test instances.
+
+    instance : int 1–7
+      1  No charging needed, charger out of the way  → expect: direct, no stop
+      2  Charging necessary (range exceeded)          → expect: charger detour
+      3  HOS break needed, no useful charger          → expect: break at customer
+      4  Charge needed + break needed separately      → expect: z=1, w=1
+      5  Break-and-Charge (charging time >= 45 min)  → expect: z=1, w'=1
+      6  Two chargers: pick the closer one            → expect: z[0,f1]=1
+      7  Three legs: charge only on middle leg        → expect: z[1,f1]=1 only
+    """
+    dispatch = {
+        1: make_instance_no_charging_needed,
+        2: make_instance_charging_necessary,
+        3: make_instance_break_at_customer,
+        4: make_instance_charge_and_separate_break,
+        5: make_instance_break_and_charge,
+        6: make_instance_two_chargers_pick_closer,
+        7: make_instance_charge_middle_leg_only,
+    }
+    assert instance in dispatch, f"instance must be 1–7, got {instance}"
+    data = dispatch[instance]()
+    print(f"[Instance {instance}] {dispatch[instance].__doc__.strip().splitlines()[0]}")
+    return data
 
 def validate_solution(model, successor, data, tol=1e-4):
     """
@@ -943,19 +1135,24 @@ def validate_solution(model, successor, data, tol=1e-4):
 
 if __name__ == "__main__":
     import brockmann_graphs as gr
-    data = make_example_data()
-    model, successor = build_bet_tdsp_model(data)
+    for ex in range(1, 8):
+        data = make_example_data(ex)
+        model, successor = build_bet_tdsp_model(data)
 
-    N_sorted = sorted(data["N"])
-    model.y[N_sorted[0]].fix(data["y0"])
+        N_sorted = sorted(data["N"])
+        model.y[N_sorted[0]].fix(data["y0"])
 
-    print("Model built successfully.")
-    print(f"  Variables : {model.nvariables()}")
-    print(f"  Constraints: {model.nconstraints()}")
-    print(f"  Objectives : {model.nobjectives()}")
+        print("Model built successfully.")
+        print(f"  Variables : {model.nvariables()}")
+        print(f"  Constraints: {model.nconstraints()}")
+        print(f"  Objectives : {model.nobjectives()}")
 
-    # Uncomment to solve (requires Gurobi, CBC, or HiGHS):
-    results = solve_model(model, solver_name="highs")
-    extract_results(model, successor)
-    validate_solution(model, successor, data)
-    gr.plot_all(model, successor, data)
+        # Uncomment to solve (requires Gurobi, CBC, or HiGHS):
+        try:
+            results = solve_model(model, solver_name="highs")
+            extract_results(model, successor)
+            validate_solution(model, successor, data)
+        except Exception as e:
+            print(f"Solver error: {e}")
+            print("Skipping solution and validation for this instance.")
+        #gr.plot_all(model, successor, data)
