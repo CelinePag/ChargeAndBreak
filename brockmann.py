@@ -140,6 +140,7 @@ from pyomo.environ import (
     Binary, NonNegativeReals, minimize, value, SolverFactory
 )
 
+import brockmann_graphs as gr
 
 # =============================================================================
 # HELPER: build successor mapping
@@ -243,7 +244,7 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
               doc="1 if BET arrives at charger f (on leg i→i+1) with SOC in segment r")
     m.w = Var(m.N, domain=Binary,
               doc="1 if mandatory HOS break is taken at customer location i")
-    m.w_prime = Var(m.Z, domain=Binary,
+    m.w_prime = Var(m.N, domain=Binary,
                     doc="1 if charging time at station f (after customer i) >= B hours")
 
     # -------------------------------------------------------------------------
@@ -273,8 +274,8 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     # Time-before-break counters (HOS tracking)
     m.t_b = Var(m.N, domain=NonNegativeReals,
                 doc="Remaining drive time before mandatory break on arrival at i")
-    m.t_b_f = Var(m.Z, domain=NonNegativeReals,
-                  doc="Remaining drive time before mandatory break on arrival at f")
+    m.t_b_prime = Var(m.N, domain=NonNegativeReals,
+                  doc="Remaining drive time before mandatory break on arrival at CS after i")
 
     # -------------------------------------------------------------------------
     # OBJECTIVE  (Eq. 1)
@@ -464,7 +465,7 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     # HOS BREAK CONSTRAINTS  (Eqs. 19–28)
     # The truck must take a break of >= B hours every W_break driving hours.
     # w[i]=1 means the break is taken at customer i.
-    # w_prime[i,f]=1 means the break is taken at charger f (during charging).
+    # w_prime[i]=1 means the break is taken at charger after i (during charging).
     # -------------------------------------------------------------------------
 
     # Eqs. 19–20: charging time at f counts as a break only if >= B hours
@@ -478,7 +479,7 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
 
     def c_bac_ub(mdl, i, f):
         return (mdl.t_dbl_prime[i, f] - mdl.W_break * mdl.w[i]
-                + mdl.M * (1 - mdl.z[i, f]) >= mdl.B_break - mdl.W_break)
+                + mdl.M * (1 - mdl.z[i, f]) <= mdl.B_break - mdl.W_break)
 
     m.c_bac_ub = Constraint(m.Z, rule=c_bac_ub,
                             doc="Eq.20: break-and-charge lower bound")
@@ -513,34 +514,48 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_tb_direct_lb = Constraint(m.N, rule=c_tb_direct_lb,
                                   doc="Eq.22: t_b update on direct arc (lower)")
 
-    # Eqs. 23–24: t^b at charger f after customer i (upper & lower)
+    # Eqs 23: domain of t_b
+    def c_tb_domain(mdl, i):
+        return mdl.t_b[i] <= mdl.W_break
+
+    m.c_tb_domain = Constraint(m.N, rule=c_tb_domain,
+                               doc="Eq.23: t_b in [0, W_break]")
+
+
+    # Eqs. 24-25: t^b at charger after customer i (upper & lower)
     def c_tb_f_ub(mdl, i, f):
-        return (mdl.t_b_f[i, f] <=
+        return (mdl.t_b_prime[i] <=
                 mdl.t_b[i] - mdl.T_travel[i, f]
-                + mdl.M * (1 - mdl.z[i, f]))
+                + mdl.W_break * (1 - mdl.z[i, f] + mdl.w[i]))
 
     m.c_tb_f_ub = Constraint(m.Z, rule=c_tb_f_ub,
-                             doc="Eq.23: t_b on arrival at charger f (upper)")
+                             doc="Eq.24: t_b on arrival at charger f (upper)")
 
     def c_tb_f_lb(mdl, i, f):
-        return (mdl.t_b_f[i, f] <=
-                (mdl.W_break - mdl.T_travel[i, f]) * mdl.z[i, f])
+        return (mdl.t_b_prime[i] <=
+                (mdl.W_break - mdl.T_travel[i, f]) * (1 - mdl.z[i, f] + mdl.w[i]) + mdl.M * (1 - mdl.z[i, f]))
 
     m.c_tb_f_lb = Constraint(m.Z, rule=c_tb_f_lb,
-                             doc="Eq.24: t_b on arrival at charger f (lower)")
+                             doc="Eq.25: t_b on arrival at charger f (lower)")
 
-    # Eqs. 25–26: t^b at i+1 when travelling via charger f
+
+    # Eqs 26: domain of t_b_prime
+    def c_tb_prime_domain(mdl, i):
+        return mdl.t_b_prime[i] <= mdl.W_break
+
+    m.c_tb_prime_domain = Constraint(m.N, rule=c_tb_prime_domain,
+                                     doc="Eq.26: t_b' in [0, W_break]")
+
+    # Eqs. 27-28: t^b at i+1
     def c_tb_via_f_ub(mdl, i, f):
         if i not in successor:
             return Constraint.Skip
         ip1 = successor[i]
         return (mdl.t_b[ip1] <=
-                mdl.t_b_f[i, f] + mdl.W_break * mdl.w_prime[i, f]
-                - mdl.T_travel[f, ip1]
-                + mdl.M * (1 - mdl.z[i, f]))
+                mdl.t_b[i] - (mdl.T_travel[i, f] + mdl.T_travel[f, ip1]) + mdl.W_break * (1 - mdl.z[i, f] + mdl.w_prime[i]))
 
     m.c_tb_via_f_ub = Constraint(m.Z, rule=c_tb_via_f_ub,
-                                 doc="Eq.25: t_b at i+1 via charger (upper)")
+                                 doc="Eq.27: t_b at i+1 via charger (upper)")
 
     def c_tb_via_f_lb(mdl, i, f):
         if i not in successor:
@@ -548,18 +563,12 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
         ip1 = successor[i]
         return (mdl.t_b[ip1] <=
                 (mdl.W_break - mdl.T_travel[f, ip1])
-                * (mdl.z[i, f] + mdl.w_prime[i, f])
+                * (1 - mdl.z[i, f] + mdl.w_prime[i])
                 + mdl.M * (1 - mdl.z[i, f]))
 
     m.c_tb_via_f_lb = Constraint(m.Z, rule=c_tb_via_f_lb,
                                  doc="Eq.26: t_b at i+1 via charger (lower)")
 
-    # Eqs. 27–28: domain of t_b
-    def c_tb_domain(mdl, i):
-        return mdl.t_b[i] <= mdl.W_break
-
-    m.c_tb_domain = Constraint(m.N, rule=c_tb_domain,
-                               doc="Eq.27-28: t_b in [0, W_break]")
 
     return m, successor
 
@@ -632,9 +641,49 @@ def extract_results(model, successor):
         if value(model.w[i]) > 0.5:
             print(f"  Customer {i}: break taken (45 min)")
 
+    for (i,f) in model.Z:
+        if value(model.t_dbl_prime[i, f]) > 0:
+            print(f"  CS {f} from customer {i}: charge time = {value(model.t_dbl_prime[i,f])*60:.1f} min")
+
+    print("\nEnergy levels at customer locations [kWh]:")
     print("\nEnergy levels at customer locations [kWh]:")
     for i in model.N:
         print(f"  y[{i}] = {value(model.y[i]):.1f} kWh")
+
+    print("\nSummary of the route:")
+
+    T_drive = 0.0 # cumulative driving time
+    T_break = 0.0 # cumulative break time
+    T_charge = 0.0 # cumulative charging time
+
+    for i in model.N:
+
+        print(f"  Customer {i}")
+        print(f"    Time of arrival: {T_drive+T_break+T_charge:.2f} h")
+        print(f"    y={value(model.y[i]):.1f} kWh")
+        print(f"    w={value(model.w[i])}")
+        print(f"    t_b={value(model.t_b[i]):.2f} h")
+
+        T_break += value(model.w[i]) * value(model.B_break)
+
+
+        for f in model.F:
+            if (i, f) in model.Z and value(model.z[i, f]) > 0.5:
+                T_drive += value(model.T_travel[i, f])
+                print(f"    Detour: via {f}")
+                print(f"      Time of arrival: {T_drive+T_break+T_charge:.2f} h")
+                print(f"      y'={value(model.y_prime[i,f]):.1f} kWh on arrival at {f}")
+                print(f"      y''={value(model.y_dbl_prime[i,f]):.1f} kWh recharged at {f}")
+                print(f"      t''={value(model.t_dbl_prime[i,f])*60:.1f} min to charge at {f}")
+                print(f"      t'_b={value(model.t_b_prime[i]):.2f} h")
+                print(f"      w'={value(model.w_prime[i])}")
+
+                T_break += value(model.w_prime[i]) * value(model.t_dbl_prime[i,f])
+                T_charge += value(model.t_dbl_prime[i, f])
+                T_drive += value(model.T_travel[f, successor[i]])
+
+        T_drive += sum(model.T_travel[i, successor[i]] * value(model.x[i]) for i in model.N if i in successor)
+
 
     return {
         "T_total": value(model.T_total),
@@ -656,17 +705,17 @@ def make_example_data():
     Charger: 'f1' located between customer 1 and 2
     Battery: 480 kWh (BT480), two secant segments (CC + CV phase)
     """
-    N = [0, 1, 2]       # 3 nodes: start depot, 1 customer, end depot
+    N = [0, 1, 2,3,4]       # 3 nodes: start depot, 1 customer, end depot
     F = ["f1"]
     R = [0, 1]          # two piecewise segments
-    Z = [(0, "f1"), (1, "f1")]   # detour option on both legs
+    Z = [(1, "f1")]   # detour option on both legs
 
     # All distances in km, travel times in hours (approx 80 km/h)
     D = {
-        (0, 1): 200.0, (1, 2): 200.0,
-        (0, "f1"): 100.0, ("f1", 1): 105.0,
+        (0, 1): 200.0, (1, 2): 200.0, (2, 3): 100.0, (3, 4): 100.0,
         (1, "f1"): 100.0, ("f1", 2): 105.0,
     }
+
     T = {k: v / 80.0 for k, v in D.items()}  # time = dist / speed
 
     Y_max = 480.0   # kWh
@@ -704,12 +753,199 @@ def make_example_data():
         "y0": Y_max,            # start fully charged
     }
 
+def validate_solution(model, successor, data, tol=1e-4):
+    """
+    Simulate the optimal route chronologically and verify:
+      1. Route coverage  – every leg has exactly one arc chosen
+      2. SOC evolution   – energy consumed matches distances, stays in bounds
+      3. Charging        – energy gained matches time × rate (piecewise linear)
+      4. HOS regulation  – cumulative drive time never exceeds W_break without a break
+      5. Break logic     – w=1 only when a real break of length B is taken;
+                           w'=1 only when t'' >= B at the charging station
+
+    Returns a dict with keys 'passed' (bool) and 'events' (list of step dicts).
+    Prints a formatted report.
+    """
+    from pyomo.environ import value as V
+
+    W   = data["W_break"]   # 4.5 h
+    B   = data["B"]         # 0.75 h
+    h   = data["h"]         # kWh/km
+    Ym  = data["Y_max"]
+    Ds  = data["D_safety"]
+    N_s = sorted(data["N"])
+
+    PASS = "\033[92m PASS\033[0m"
+    FAIL = "\033[91m FAIL\033[0m"
+
+    failures = []
+    events   = []
+    clock    = 0.0
+    soc      = data["y0"]
+    hos      = 0.0   # cumulative drive since last break (0 = fresh)
+
+    def fail(msg):
+        failures.append(msg)
+        return f"{FAIL}  {msg}"
+
+    def ok(msg):
+        return f"{PASS}  {msg}"
+
+    def check(cond, pass_msg, fail_msg):
+        if cond:
+            return ok(pass_msg)
+        return fail(fail_msg)
+
+    sep = "─" * 62
+    print(f"\n{'═'*62}")
+    print("  SOLUTION VALIDATOR")
+    print(f"{'═'*62}")
+
+    for idx, i in enumerate(N_s):
+        print(f"\n{sep}")
+        print(f"  CUSTOMER {i}   clock={clock:.4f}h  SOC={soc:.2f}kWh  HOS={hos:.4f}h")
+        print(sep)
+
+        # ── SOC at customer from model ────────────────────────────────────────
+        y_model = V(model.y[i])
+        ev_soc  = check(abs(y_model - soc) < tol,
+                        f"SOC model={y_model:.4f} sim={soc:.4f} match",
+                        f"SOC MISMATCH model={y_model:.4f} sim={soc:.4f}")
+        print(f"  {ev_soc}")
+
+        # ── SOC bounds ───────────────────────────────────────────────────────
+        print(f"  {check(soc >= Ds*h - tol, f'SOC >= safety ({Ds*h:.2f} kWh)', f'SOC BELOW SAFETY: {soc:.4f} < {Ds*h:.4f}')}")
+        print(f"  {check(soc <= Ym + tol,   f'SOC <= Y_max ({Ym:.0f} kWh)',    f'SOC EXCEEDS Y_max: {soc:.4f}')}")
+
+        # ── HOS at customer from model ────────────────────────────────────────
+        tb_model   = V(model.t_b[i])
+        tb_sim     = W - hos
+        ev_hos = check(abs(tb_model - tb_sim) < tol,
+                       f"t_b model={tb_model:.4f} sim={tb_sim:.4f} match",
+                       f"t_b MISMATCH model={tb_model:.4f} sim(W-hos)={tb_sim:.4f}")
+        print(f"  {ev_hos}")
+
+        # ── HOS limit ────────────────────────────────────────────────────────
+        print(f"  {check(hos <= W + tol, f'Drive since break={hos:.4f}h <= {W}h limit', f'HOS VIOLATION: {hos:.4f}h > {W}h')}")
+
+        w_i = V(model.w[i]) > 0.5
+
+        # ── Break at this customer ────────────────────────────────────────────
+        if w_i:
+            print(f"  → Break taken ({B*60:.0f} min)")
+            clock += B
+            hos    = 0.0  # reset drive counter
+
+        # ── No more legs after last node ──────────────────────────────────────
+        if i not in successor:
+            events.append(dict(node=i, clock=clock, soc=soc, hos=hos))
+            break
+
+        ip1 = successor[i]
+
+        # ── Check route coverage ──────────────────────────────────────────────
+        x_i   = V(model.x[i]) > 0.5
+        z_if  = {f: V(model.z[i, f]) > 0.5
+                 for f in data["F"] if (i, f) in data["Z"]}
+        n_arcs = int(x_i) + sum(z_if.values())
+        print(f"  {check(n_arcs == 1, f'Route coverage: {n_arcs} arc chosen', f'Route coverage ERROR: {n_arcs} arcs active')}")
+
+        # ── Charger detour ────────────────────────────────────────────────────
+        if any(z_if.values()):
+            f = next(f for f, active in z_if.items() if active)
+            T_if  = data["T_travel"][(i, f)]
+            T_fi1 = data["T_travel"][(f, ip1)]
+            D_if  = data["D_dist"][(i, f)]
+            D_fi1 = data["D_dist"][(f, ip1)]
+
+            # Drive i → f
+            soc_before_f = soc - D_if * h
+            hos          = hos + T_if
+            clock        = clock + T_if
+
+            print(f"\n  [Drive to charger {f}: {T_if*60:.1f} min, {D_if:.0f} km]")
+            print(f"  {check(soc_before_f >= Ds*h - tol, f'SOC on arrival at {f}: {soc_before_f:.2f} >= {Ds*h:.2f}', f'SOC BELOW SAFETY at {f}: {soc_before_f:.4f}')}")
+            print(f"  {check(hos <= W + tol, f'HOS at {f}: {hos:.4f}h <= {W}h', f'HOS VIOLATION at {f}: {hos:.4f}h')}")
+
+            # Check model y_prime
+            yp_model = V(model.y_prime[(i, f)])
+            print(f"  {check(abs(yp_model - soc_before_f) < tol, f'y_prime model={yp_model:.4f} sim={soc_before_f:.4f}', f'y_prime MISMATCH model={yp_model:.4f} sim={soc_before_f:.4f}')}")
+
+            # Check model t_b_prime
+            tbf_model = V(model.t_b_prime[i])
+            tbf_sim   = W - hos
+            print(f"  {check(abs(tbf_model - tbf_sim) < tol, f't_b_prime model={tbf_model:.4f} sim={tbf_sim:.4f}', f't_b_prime MISMATCH model={tbf_model:.4f} sim={tbf_sim:.4f}')}")
+
+            # Charging
+            t2    = V(model.t_dbl_prime[(i, f)])
+            y2    = V(model.y_dbl_prime[(i, f)])
+            wp    = V(model.w_prime[i]) > 0.5
+
+            # Check break-and-charge logic
+            print(f"\n  [Charging at {f}: t''={t2*60:.1f} min, y''={y2:.2f} kWh, w'={int(wp)}]")
+            if wp:
+                print(f"  {check(t2 >= B - tol, f't'' >= B (break valid): {t2*60:.1f} >= {B*60:.0f} min', f't'' < B but w=1 (invalid break): {t2*60:.1f} min')}")
+            else:
+                print(f"  {check(t2 <= B + tol, f't'' <= B (no break): {t2*60:.1f} <= {B*60:.0f} min', f't'' > B but w=0 (missed break flag): {t2*60:.1f} min')}")
+
+            # Verify energy gain matches charging rate (piecewise linear)
+            soc_total_after = soc_before_f + y2
+            # Find active segment
+            seg_ok = False
+            for r in data["R"]:
+                a_r = V(model.a[(i, f, r)]) > 0.5
+                if a_r:
+                    K   = data["K"][(f, r)]
+                    Bi  = data["B_intercept"][(f, r)]
+                    t1  = V(model.t_prime[(i, f)])
+                    # y' + y'' = K*(t'+t'') + B_int
+                    expected = K * (t1 + t2) + Bi
+                    seg_ok = abs(soc_total_after - expected) < tol
+                    print(f"  {check(seg_ok, f'Charging energy correct (seg {r}): {soc_total_after:.4f} = {expected:.4f}', f'Charging energy ERROR (seg {r}): {soc_total_after:.4f} ≠ {expected:.4f}')}")
+                    break
+            if not seg_ok and not any(V(model.a[(i, f, r)]) > 0.5 for r in data["R"]):
+                print(f"  {fail(f'No active segment for charger {f}')}")
+
+            soc   = soc_total_after
+            if wp:
+                hos = 0.0  # break at charger resets HOS
+            clock = clock + t2
+
+            # Drive f → i+1
+            soc   = soc - D_fi1 * h
+            hos   = hos + T_fi1
+            clock = clock + T_fi1
+            print(f"\n  [Drive from {f} to customer {ip1}: {T_fi1*60:.1f} min, {D_fi1:.0f} km]")
+
+        else:
+            # Direct arc i → i+1
+            T_dir = data["T_travel"][(i, ip1)]
+            D_dir = data["D_dist"][(i, ip1)]
+            soc   = soc - D_dir * h
+            hos   = hos + T_dir
+            clock = clock + T_dir
+            print(f"\n  [Direct drive to {ip1}: {T_dir*60:.1f} min, {D_dir:.0f} km]")
+
+        events.append(dict(node=i, clock=clock, soc=soc, hos=hos))
+
+    print(f"\n{'═'*62}")
+    if failures:
+        print(f"  RESULT: {len(failures)} FAILURE(S)")
+        for f in failures:
+            print(f"    ✗ {f}")
+    else:
+        print("  RESULT: ALL CHECKS PASSED ✓")
+    print(f"{'═'*62}\n")
+
+    return {"passed": len(failures) == 0, "events": events, "failures": failures}
+
+
 
 if __name__ == "__main__":
+    import brockmann_graphs as gr
     data = make_example_data()
     model, successor = build_bet_tdsp_model(data)
 
-    # Fix initial energy level at the depot/start node
     N_sorted = sorted(data["N"])
     model.y[N_sorted[0]].fix(data["y0"])
 
@@ -719,5 +955,7 @@ if __name__ == "__main__":
     print(f"  Objectives : {model.nobjectives()}")
 
     # Uncomment to solve (requires Gurobi, CBC, or HiGHS):
-    results = solve_model(model, solver_name="gurobi")
+    results = solve_model(model, solver_name="highs")
     extract_results(model, successor)
+    validate_solution(model, successor, data)
+    gr.plot_all(model, successor, data)
