@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 import random
+import time
 
 # ============================================================
 # INSTANCES
@@ -38,6 +39,7 @@ def instance_tiny():
         Tbar={0:0.0, 1:0.8, 2:2.0},
         Wha={1:0}, Whf={1:5},
         label="tiny — 5 stops, basic SOC + timing check",
+        title="tiny"
     )
 
 def instance_break_forced():
@@ -61,6 +63,7 @@ def instance_break_forced():
         Tbar={0:0.0, 1:0.55, 2:1.10, 3:2.50},
         Wha={2:0, 7:0}, Whf={2:20, 7:20},
         label="break_forced — 10 stops, 4.5h driving limit binds",
+        title="break_forced"
     )
 
 def instance_charging_needed():
@@ -84,6 +87,7 @@ def instance_charging_needed():
         Tbar={0:0.0, 1:0.55, 2:1.10, 3:2.50},
         Wha={2:0, 6:0}, Whf={2:20, 6:20},
         label="charging_needed — 8 stops, high consumption forces charging",
+        title="charging_needed"
     )
 
 def instance_rest_forced():
@@ -108,6 +112,7 @@ def instance_rest_forced():
         Wha={3:0, 8:0, 12:0},
         Whf={3:30, 8:30, 12:30},
         label="rest_forced — 14 stops, 9h shift limit forces daily rest",
+        title="rest_forced"
     )
 
 def instance_3day():
@@ -148,6 +153,7 @@ def instance_3day():
         Wha={c: 0   for c in C},          # no hard lower bound
         Whf={c: 200 for c in C},          # generous hard upper bound
         label="3-day — 34 legs, 10 customers, 23 CS, 3 mandatory rests",
+        title="3day"
     )
 
 def instance_realistic(route_class="medium", clusters=3, customers_class="many", ):
@@ -244,10 +250,11 @@ def instance_realistic(route_class="medium", clusters=3, customers_class="many",
         Wha={c: 0   for c in C},          # no hard lower bound
         Whf={c: 20000000 for c in C},          # generous hard upper bound
         label="realistic — randomly generated route with realistic parameters",
+        title="realistic_" + route_class + "_" + customers_class + "_" + str(clusters)
     )
 
 def _make_data(I, C, K, D, E, S, E0, Ecap, Emin,
-               Ebar, Tbar, Wha, Whf, label):
+               Ebar, Tbar, Wha, Whf, label, title):
     N    = max(I)
     R    = sorted(Ebar.keys())
     Rseg = R[1:]      # segment indices 1..K_pwl (SOS2 selectors)
@@ -256,8 +263,9 @@ def _make_data(I, C, K, D, E, S, E0, Ecap, Emin,
     assert not (set(C) & set(K)), "C and K must be disjoint"
     return dict(
         label=label,
+        title=title,
         N=N, I=I, C=C, K=K, R=R, Rseg=Rseg,
-        Q={i: 0.10 for i in K},
+        Q={i: random.randint(5, 20)/60 for i in K},
         D=D, E=E, S=S,
         E0=E0, Ecap=Ecap, Emin=Emin,
         Ebar=Ebar, Tbar=Tbar,
@@ -351,7 +359,8 @@ def build_model(data):
     m.l2 = pyo.Var(m.I, domain=pyo.NonNegativeReals)  # rho_i * sd[i]
     m.l4 = pyo.Var(m.I, domain=pyo.NonNegativeReals)  # rho_i * sw[i]
 
-    m.u = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)  # charging time as work
+    m.u = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)  # charging time as work (no break/rest)
+    m.w = pyo.Var(m.Kset, domain=pyo.Binary)            # y_i * rho_i: charges AND rests
 
     # ---- objective ------------------------------------------
     m.obj = pyo.Objective(expr=m.ta[N], sense=pyo.minimize)
@@ -533,6 +542,8 @@ def build_model(data):
     # ------ shift working time (equality + McCormick) --------
     # Service counts as working; charging does NOT (EU Reg. 561/2006)
 
+    # u_i = tauc_i * nb_i  (charging as work when no break/rest declared)
+    # nb_i = 1 - x_b45 - x_b15 - x_b30 - rho1 - rho2
     m.u_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.u[i] <= TK * (1 - m.x_b45[i] - m.x_b15[i]
                             - m.x_b30[i] - m.rho1[i] - m.rho2[i]))
@@ -542,25 +553,43 @@ def build_model(data):
         m.u[i] >= m.tauc[i] - TK * (m.x_b45[i] + m.x_b15[i]
                                         + m.x_b30[i] + m.rho1[i] + m.rho2[i]))
 
+    # w_i = y_i * rho_i  (charges AND rests at stop i)
+    # Used to keep queue time Q_i*y_i in the OLD shift when a rest resets sw.
+    # Product of two binaries — three-constraint linearization (exact convex hull).
+    m.w_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.w[i] <= m.rho1[i] + m.rho2[i])
+    m.w_ub2 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.w[i] <= m.y[i])
+    m.w_lb  = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.w[i] >= m.y[i] + m.rho1[i] + m.rho2[i] - 1)
+
     # l4_i = rho_i * sw[i]
     m.l4u1 = pyo.Constraint(m.I, rule=lambda m,i: m.l4[i] <= M_sw*_rho(m,i))
     m.l4u2 = pyo.Constraint(m.I, rule=lambda m,i: m.l4[i] <= m.sw[i])
     m.l4lb = pyo.Constraint(m.I, rule=lambda m,i:
         m.l4[i] >= m.sw[i] - M_sw*(1-_rho(m,i)))
 
-    def _swC(m, i):
+    def _sw(m, i):
         if i >= N: return pyo.Constraint.Skip
-        return m.sw[i+1] == (m.sw[i] + m.D[i]
-                            + m.S[i]*(1 - m.rho1[i] - m.rho2[i])
-                            - m.l4[i])
+        if i in K:
+            # Queue always counts as work.
+            # u[i] = charging time as work (0 if break/rest declared).
+            # w[i] = y[i]*rho[i]: subtract queue from new shift after reset.
+            return m.sw[i+1] == (m.sw[i] + m.D[i]
+                                + m.Q[i]*m.y[i]
+                                + m.u[i]
+                                - m.l4[i]
+                                - m.Q[i]*m.w[i])
+        else:
+            # Origin (i=0), customers, or any non-CS stop.
+            # At origin: svc=0, rho=0 → sw[1] = sw[0] + D[0] = D[0]. Correct.
+            svc = data["S"].get(i, 0) if i in C else 0
+            return m.sw[i+1] == (m.sw[i] + m.D[i]
+                                + svc*(1 - m.rho1[i] - m.rho2[i])
+                                - m.l4[i])
 
-    def _swK(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return m.sw[i+1] == (m.sw[i] + m.D[i]
-                            + m.u[i]
-                            - m.l4[i])
-    m.sw_prop_C = pyo.Constraint(m.Cset, rule=_swC)
-    m.sw_prop_K = pyo.Constraint(m.Kset, rule=_swK)
+    m.sw_prop = pyo.Constraint(m.I, rule=_sw)
+
     m.sw_ub   = pyo.Constraint(m.I, rule=lambda m,i: m.sw[i] <= m.Twrk_sh)
 
     return m
@@ -600,6 +629,7 @@ def extract_solution(model, data):
             sd   = pyo.value(model.sd[i]),
             sw   = pyo.value(model.sw[i]),
             tauc = pyo.value(model.tauc[i]) if is_K else 0.0,
+            tauq = data["Q"].get(i, 0) * round(pyo.value(model.y[i])) if is_K else 0.0,
             taub = pyo.value(model.taub[i]),
             taur = pyo.value(model.taur[i]),
             y    = round(pyo.value(model.y[i]))     if is_K else 0,
@@ -621,6 +651,7 @@ def extract_solution(model, data):
 COL = dict(
     drive   = "#2C6FAC",
     service = "#27AE60",
+    queue   = "#C0392B",   # queue/setup time at CS (always work)
     charge  = "#E67E22",
     brk     = "#F1C40F",
     rest    = "#8E44AD",
@@ -640,373 +671,198 @@ def _bar(ax, start, dur, y, h, color, label=None, fontsize=7, text_color="white"
 
 
 def plot_solution(sol, data, title="solution"):
-
     N    = data["N"]
-
     tend = sol[-1]["ta"]          # arrival time at destination
-
-
-
     fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True,
-
                              gridspec_kw={"height_ratios": [3, 2, 2]})
-
     fig.suptitle(f"{title}  —  {data['label']}", fontsize=12, fontweight="bold")
 
-
-
     # ============ Panel 1: Gantt =============================
-
     ax = axes[0]
-
     ax.set_title("Activity timeline", fontsize=10)
-
     Y, H = 0.5, 0.38
-
-
-
     for s in sol:
-
         i = s["i"]
 
-
-
         # ---- driving leg ARRIVING at stop i ----
-
         if i > 0:
-
             drv_start = sol[i-1]["td"]
-
             drv_dur   = s["ta"] - drv_start
-
             _bar(ax, drv_start, drv_dur, Y, H, COL["drive"],
-
                  label=f"drv→{i}", fontsize=7)
-
-
 
         # ---- activities AT stop i ----
 
         t = s["ta"]
-
-
-
         # service (customers)
-
         if s["is_C"]:
-
             svc = data["S"].get(i, 0)
-
             _bar(ax, t, svc, Y, H, COL["service"],
-
                  label=f"C{i}", fontsize=7)
-
             t += svc
 
-
+        # queue/setup (CS stops where y=1) — always work, drawn before charging
+        if s["is_K"] and s["y"] and s["tauq"] > EPS:
+            _bar(ax, t, s["tauq"], Y, H, COL["queue"],
+                 label="Q", fontsize=7)
+            t += s["tauq"]
 
         # charging (CS stops where y=1)
-
         if s["is_K"] and s["y"] and s["tauc"] > EPS:
-
             _bar(ax, t, s["tauc"], Y, H, COL["charge"],
-
                  label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
-
             t += s["tauc"]
 
-
-
         # break
-
         if s["taub"] > EPS:
-
             lbl = ("B45" if s["b45"] else ("B15" if s["b15"] else "B30"))
-
             _bar(ax, t, s["taub"], Y, H, COL["brk"],
-
                  label=lbl, fontsize=7, text_color="#333")
-
             t += s["taub"]
 
-
-
         # rest
-
         if s["taur"] > EPS:
-
             lbl = "RST-r1" if s["rho1"] else "RST-r2"
-
             _bar(ax, t, s["taur"], Y, H, COL["rest"],
-
                  label=lbl, fontsize=7)
 
-
-
         # stop marker + label on top
-
         ax.axvline(s["ta"], color="gray", lw=0.6, ls="--", alpha=0.4)
-
         stop_type = ("●C" if s["is_C"] else
-
                      "▲K" if s["is_K"] else
-
                      "○"  if i not in (0, N) else
-
                      ("O" if i == 0 else "D"))
-
         ax.text(s["ta"], Y + H/2 + 0.06, f"{stop_type}{i}",
-
                 ha="left", va="bottom", fontsize=6.5, color="#444",
-
                 rotation=45, clip_on=True)
 
-
-
     ax.set_yticks([])
-
     ax.set_xlim(-0.2, tend * 1.02)
-
-
-
     patches = [mpatches.Patch(color=v, label=k.replace("_","").title())
-
                for k, v in COL.items()]
-
     ax.legend(handles=patches, loc="upper left", fontsize=8, ncol=5)
 
-
-
     # ============ Panel 2: SOC vs time =======================
-
     ax2 = axes[1]
-
     ax2.set_title("Battery state of charge", fontsize=10)
 
-
-
     # Build piecewise SOC curve.
-
-    # The ordering of activities within a stop is:
-
-    #   service (C) → charging (K) → break → rest
-
-    # So SOC rises at ta..ta+tauc, then stays flat through break+rest until td.
-
-    # We need three points per stop that has a dwell:
-
-    #   (ta,  ea)          — arrival
-
-    #   (ta + tauc, ed)    — charging complete (= ta if no charging)
-
-    #   (td,  ed)          — departure (flat during break/rest)
+    # Activity order at a CS stop: queue → charging → break/rest
+    # SOC is flat during queue, rises during charging, flat during break/rest.
+    # Points needed per stop with dwell:
+    #   (ta,           ea)   — arrival
+    #   (ta + tauq,    ea)   — end of queue (SOC unchanged, flat)
+    #   (ta + tauq + tauc, ed) — end of charging (SOC rose)
+    #   (td,           ed)   — departure (flat through break/rest)
 
     time_pts, soc_pts = [], []
-
     for s in sol:
-
         ta, td = s["ta"], s["td"]
-
         ea, ed = s["ea"], s["ed"]
-
+        tauq   = s["tauq"] if s["is_K"] else 0.0
         tauc   = s["tauc"] if s["is_K"] else 0.0
-
-
-
         time_pts.append(ta)
-
         soc_pts.append(ea)
 
-
-
         if td - ta > EPS:               # there is a dwell
-
-            t_chg_end = ta + tauc       # moment charging finishes
-
-            if t_chg_end - ta > EPS:    # charging actually happened
-
+            t_chg_start = ta + tauq         # charging begins after queue
+            t_chg_end   = t_chg_start + tauc  # charging ends here
+            if tauq > EPS:              # flat segment during queue
+                time_pts.append(t_chg_start)
+                soc_pts.append(ea)
+            if tauc > EPS:              # SOC rises during charging
                 time_pts.append(t_chg_end)
-
                 soc_pts.append(ed)
-
-            # flat segment through break/rest until departure
-
+            # flat through break/rest until departure
             time_pts.append(td)
-
             soc_pts.append(ed)
 
-
-
     ax2.plot(time_pts, soc_pts, color=COL["drive"], lw=2, label="SOC")
-
     ax2.fill_between(time_pts, soc_pts, alpha=0.10, color=COL["drive"])
 
-
-
     # Mark charging gain with an orange arrow + label
-
     for s in sol:
-
         if s["is_K"] and s["y"] and s["ed"] - s["ea"] > 0.5:
-
-            t_start = s["ta"]
-
-            t_end   = s["ta"] + s["tauc"]
-
+            t_start = s["ta"] + s["tauq"]   # arrow starts after queue
+            t_end   = t_start + s["tauc"]
             ax2.annotate(
-
                 "", xy=(t_end, s["ed"]), xytext=(t_start, s["ea"]),
-
                 arrowprops=dict(arrowstyle="->", color=COL["charge"], lw=1.5))
-
             ax2.text((t_start + t_end) / 2, (s["ea"] + s["ed"]) / 2,
-
                      f"+{s['ed']-s['ea']:.0f}", ha="center",
-
                      fontsize=7, color=COL["charge"])
 
-
-
     ax2.axhline(data["Emin"], color="red",  ls=":", lw=1.2,
-
                 label=f"E_min = {data['Emin']} kWh")
-
     ax2.axhline(data["Ecap"], color="gray", ls=":", lw=1.2,
-
                 label=f"E_cap = {data['Ecap']} kWh")
 
     ax2.set_ylabel("kWh")
-
     ax2.set_ylim(0, data["Ecap"] * 1.15)
-
     ax2.legend(fontsize=8, ncol=3, loc="upper right")
 
-
-
     # ============ Panel 3: HoS counters vs time ==============
-
     ax3 = axes[2]
-
     ax3.set_title("HoS accumulators (at arrival)", fontsize=10)
 
-
-
     # For each stop we add TWO time points:
-
     #   (ta[i],  counter at arrival)           — before any activity at stop i
-
     #   (td[i],  counter after reset if any)   — just before leaving stop i
-
     #
-
     # After a reset, the counter value at departure is 0.
-
     # This makes the vertical drop visible in the graph and removes the
-
     # misleading diagonal that would otherwise appear during the long dwell.
-
     cd_t, cd_v = [], []
-
     sd_t, sd_v = [], []
-
     sw_t, sw_v = [], []
 
-
-
     for s in sol:
-
         ta, td = s["ta"], s["td"]
-
         r_cd = s["b45"] or s["b30"] or s["rho1"] or s["rho2"]  # cd reset
-
         r_sd = s["rho1"] or s["rho2"]                           # sd reset
-
         r_sw = s["rho1"] or s["rho2"]                           # sw reset
 
-
-
         # point at arrival
-
         cd_t.append(ta); cd_v.append(s["cd"])
-
         sd_t.append(ta); sd_v.append(s["sd"])
-
         sw_t.append(ta); sw_v.append(s["sw"])
 
-
-
         # point at departure (only if there is a meaningful dwell)
-
         if td - ta > EPS:
-
             cd_t.append(td); cd_v.append(0.0 if r_cd else s["cd"])
-
             sd_t.append(td); sd_v.append(0.0 if r_sd else s["sd"])
-
             sw_t.append(td); sw_v.append(0.0 if r_sw else s["sw"])
 
-
-
     ax3.plot(cd_t, cd_v, "o-", color="#E74C3C", lw=1.5, ms=3,
-
              label="Consec. driving")
-
     ax3.plot(sd_t, sd_v, "s-", color="#3498DB", lw=1.5, ms=3,
-
              label="Shift driving")
-
     ax3.plot(sw_t, sw_v, "^-", color="#1ABC9C", lw=1.5, ms=3,
-
              label="Shift working")
 
-
-
     ax3.axhline(data["Tdrv_cons"], color="#E74C3C", ls=":", lw=1.2, alpha=0.7,
-
                 label=f"max consec. drv {data['Tdrv_cons']}h")
-
     ax3.axhline(data["Tdrv_sh1"],  color="#3498DB", ls=":", lw=1.2, alpha=0.7,
-
                 label=f"max shift drv {data['Tdrv_sh1']}h")
-
     ax3.axhline(data["Twrk_sh"],   color="#1ABC9C", ls=":", lw=1.2, alpha=0.7,
-
                 label=f"max shift wk {data['Twrk_sh']}h")
 
-
-
     for s in sol:
-
         if s["rho1"] or s["rho2"]:
-
             ax3.axvline(s["ta"], color="#8E44AD", lw=1.5, ls="--",
-
                         alpha=0.5, label="_rest")
-
         elif s["b45"] or s["b30"]:
-
             ax3.axvline(s["ta"], color="#E74C3C", lw=1.0, ls="--",
-
                         alpha=0.3, label="_brk")
 
-
-
     ax3.set_xlabel("Time (h)")
-
     ax3.set_ylabel("Hours")
-
     ax3.legend(fontsize=7, ncol=3, loc="upper left")
-
-
-
     plt.tight_layout()
 
-    fname = f"solution_{title}.png"
-
+    fname = f"solution_{title}_{time.time()}.png"
     plt.savefig(fname, dpi=150, bbox_inches="tight")
-
     print(f"  Plot saved: {fname}")
-
     plt.close()
 
 
@@ -1091,7 +947,7 @@ def run_instance(name, tee=False):
         sol = extract_solution(model, data)
         print_schedule(sol, data)
         check_solution(sol, data)
-        plot_solution(sol, data, title=name)
+        plot_solution(sol, data, title=data["title"])
     else:
         print(f"  No feasible solution (status={status}).")
 
