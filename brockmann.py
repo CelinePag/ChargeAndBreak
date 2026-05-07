@@ -171,6 +171,8 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     """
     m = ConcreteModel(name="BET_TDSP")
 
+    ORIGINAL = False # Set to True to match the original paper's constraints (that are wrong)
+
     # -------------------------------------------------------------------------
     # SETS
     # -------------------------------------------------------------------------
@@ -350,6 +352,17 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_energy_direct = Constraint(m.N, rule=c_energy_direct,
                                    doc="Eq.6: energy propagation on direct arc")
 
+    if not ORIGINAL:
+        def c_energy_direct_lb(mdl, i):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.y[ip1] >=
+                    mdl.y[i] - mdl.D_dist[i, ip1] * mdl.h - mdl.M * (1 - mdl.x[i]))
+
+        m.c_energy_direct_lb = Constraint(m.N, rule=c_energy_direct_lb,
+                                    doc="")
+
     # Eq. 7 – energy on arrival at charger f
     def c_energy_arrive_f(mdl, i, f):
         return (mdl.y_prime[i, f] <=
@@ -357,6 +370,14 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
 
     m.c_energy_arrive_f = Constraint(m.Z, rule=c_energy_arrive_f,
                                      doc="Eq.7: energy on arrival at charger f")
+
+    if not ORIGINAL:
+        def c_energy_arrive_f_lb(mdl, i, f):
+            return (mdl.y_prime[i, f] >=
+                    mdl.y[i] - mdl.D_dist[i, f] * mdl.h - mdl.M * (1 - mdl.z[i, f]))
+
+        m.c_energy_arrive_f_lb = Constraint(m.Z, rule=c_energy_arrive_f_lb,
+                                     doc="")
 
     # Eq. 8 – energy update after charging at f, travelling to i+1
     def c_energy_leave_f(mdl, i, f):
@@ -371,6 +392,19 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_energy_leave_f = Constraint(m.Z, rule=c_energy_leave_f,
                                     doc="Eq.8: energy propagation after charging")
 
+    if not ORIGINAL:
+        def c_energy_leave_f_lb(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.y[ip1] >=
+                    mdl.y_prime[i, f] + mdl.y_dbl_prime[i, f]
+                    - mdl.D_dist[f, ip1] * mdl.h
+                    - mdl.M * (1 - mdl.z[i, f]))
+
+        m.c_energy_leave_f_lb = Constraint(m.Z, rule=c_energy_leave_f_lb,
+                                    doc="")
+
     # Eq. 9 – safety reserve at every customer
     def c_safety_cust(mdl, i):
         return mdl.y[i] >= mdl.D_safety * mdl.h
@@ -378,12 +412,20 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_safety_cust = Constraint(m.N, rule=c_safety_cust,
                                  doc="Eq.9: minimum SOC at customer locations")
 
-    # Eq. 10 – safety reserve on arrival at charger
-    def c_safety_charger(mdl, i, f):
-        return mdl.y_prime[i, f] >= mdl.D_safety * mdl.h
+    if ORIGINAL:
+        # Eq. 10 – safety reserve on arrival at charger
+        def c_safety_charger(mdl, i, f):
+            return mdl.y_prime[i, f] >= mdl.D_safety * mdl.h
 
-    m.c_safety_charger = Constraint(m.Z, rule=c_safety_charger,
-                                    doc="Eq.10: minimum SOC on arrival at charger")
+        m.c_safety_charger = Constraint(m.Z, rule=c_safety_charger,
+                                        doc="Eq.10: minimum SOC on arrival at charger")
+    else:
+        # Eq. 10 – safety reserve on arrival at charger
+        def c_safety_charger(mdl, i, f):
+            return mdl.y_prime[i, f] >= mdl.D_safety * mdl.h - mdl.M * (1 - mdl.z[i, f])
+
+        m.c_safety_charger = Constraint(m.Z, rule=c_safety_charger,
+                                        doc="Eq.10: minimum SOC on arrival at charger")
 
     # Eq. 11 – battery capacity at customer
     def c_cap_cust(mdl, i):
@@ -392,12 +434,20 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_cap_cust = Constraint(m.N, rule=c_cap_cust,
                               doc="Eq.11: SOC cannot exceed battery capacity at customer")
 
-    # Eq. 12 – battery capacity after charging
-    def c_cap_charger(mdl, i, f):
-        return mdl.y_prime[i, f] + mdl.y_dbl_prime[i, f] <= mdl.Y_max
+    if ORIGINAL:
+        # Eq. 12 – battery capacity after charging
+        def c_cap_charger(mdl, i, f):
+            return mdl.y_prime[i, f] + mdl.y_dbl_prime[i, f] <= mdl.Y_max
 
-    m.c_cap_charger = Constraint(m.Z, rule=c_cap_charger,
-                                 doc="Eq.12: SOC after charging <= Y_max")
+        m.c_cap_charger = Constraint(m.Z, rule=c_cap_charger,
+                                    doc="Eq.12: SOC after charging <= Y_max")
+    else:
+        # Eq. 12 – battery capacity after charging
+        def c_cap_charger(mdl, i, f):
+            return mdl.y_prime[i, f] + mdl.y_dbl_prime[i, f] <= mdl.Y_max + mdl.M * (1 - mdl.z[i, f])
+
+        m.c_cap_charger = Constraint(m.Z, rule=c_cap_charger,
+                                    doc="Eq.12: SOC after charging <= Y_max if charger visited")
 
     # -------------------------------------------------------------------------
     # PIECEWISE-LINEAR CHARGING FUNCTION  (Eqs. 13–18)
@@ -415,16 +465,28 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_seg_lower = Constraint(m.Z, m.R, rule=c_seg_lower,
                                doc="Eq.13: SOC >= s_{f,r} when segment r active")
 
-    # Eq. 14 – upper bound of active segment: y'_{i,f} <= s_{f,r+1}
-    def c_seg_upper(mdl, i, f, r):
-        if r == R_max:
-            return Constraint.Skip   # last segment has no upper breakpoint
-        return (mdl.y_prime[i, f] <=
-                mdl.s_bp[f, r + 1] + mdl.M * (mdl.a[i, f, r] - 1)
-                - (1 - mdl.z[i, f]))
+    if ORIGINAL:
+        # Eq. 14 – upper bound of active segment: y'_{i,f} <= s_{f,r+1}
+        def c_seg_upper(mdl, i, f, r):
+            if r == R_max:
+                return Constraint.Skip   # last segment has no upper breakpoint
+            return (mdl.y_prime[i, f] <=
+                    mdl.s_bp[f, r + 1] + mdl.M * (mdl.a[i, f, r] - 1)
+                    - (1 - mdl.z[i, f]))
 
-    m.c_seg_upper = Constraint(m.Z, m.R, rule=c_seg_upper,
-                               doc="Eq.14: SOC <= s_{f,r+1} when segment r active")
+        m.c_seg_upper = Constraint(m.Z, m.R, rule=c_seg_upper,
+                                doc="Eq.14: SOC <= s_{f,r+1} when segment r active")
+    else:
+        # Eq. 14 – upper bound of active segment: y'_{i,f} <= s_{f,r+1}
+        def c_seg_upper(mdl, i, f, r):
+            if r == R_max:
+                return Constraint.Skip   # last segment has no upper breakpoint
+            return (mdl.y_prime[i, f] <=
+                    mdl.s_bp[f, r + 1] + mdl.M * (1 - mdl.a[i, f, r])
+                    + mdl.M *  (1 - mdl.z[i, f]))
+
+        m.c_seg_upper = Constraint(m.Z, m.R, rule=c_seg_upper,
+                                doc="Eq.14: SOC <= s_{f,r+1} when segment r active")
 
     # Eq. 15 – exactly one segment active per charging visit
     def c_seg_sum(mdl, i, f):
@@ -461,6 +523,15 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_charge_total = Constraint(m.Z, m.R, rule=c_charge_total,
                                   doc="Eq.18: charging time for total recharged energy")
 
+    if not ORIGINAL:
+        def c_charge_total_lb(mdl, i, f, r):
+            return ((mdl.y_prime[i, f] + mdl.y_dbl_prime[i, f]) >=
+                    mdl.K_grad[f, r] * (mdl.t_prime[i, f] + mdl.t_dbl_prime[i, f])
+                    + mdl.B_int[f, r]
+                    - mdl.M * (1 - mdl.a[i, f, r]))
+
+        m.c_charge_total_lb = Constraint(m.Z, m.R, rule=c_charge_total_lb,
+                                  doc="Eq.18: charging time for total recharged energy (lower bound)")
     # -------------------------------------------------------------------------
     # HOS BREAK CONSTRAINTS  (Eqs. 19–28)
     # The truck must take a break of >= B hours every W_break driving hours.
@@ -477,12 +548,20 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_bac_lb = Constraint(m.Z, rule=c_bac_lb,
                             doc="Eq.19: charging stop may serve as break")
 
-    def c_bac_ub(mdl, i, f):
-        return (mdl.t_dbl_prime[i, f] - mdl.W_break * mdl.w[i]
-                + mdl.M * (1 - mdl.z[i, f]) <= mdl.B_break - mdl.W_break)
+    if ORIGINAL:
+        def c_bac_ub(mdl, i, f):
+            return (mdl.t_dbl_prime[i, f] - mdl.W_break * mdl.w[i]
+                    + mdl.M * (1 - mdl.z[i, f]) <= mdl.B_break - mdl.W_break)
 
-    m.c_bac_ub = Constraint(m.Z, rule=c_bac_ub,
-                            doc="Eq.20: break-and-charge lower bound")
+        m.c_bac_ub = Constraint(m.Z, rule=c_bac_ub,
+                                doc="Eq.20: break-and-charge lower bound")
+    else:
+        def c_bac_ub(mdl, i, f):
+            return (mdl.t_dbl_prime[i, f] - mdl.W_break * mdl.w[i]
+                    + mdl.M * (1 - mdl.z[i, f]) >= mdl.B_break - mdl.W_break)
+
+        m.c_bac_ub = Constraint(m.Z, rule=c_bac_ub,
+                                doc="Eq.20: break-and-charge lower bound")
 
     # Eqs. 21–22: remaining drive time before required break at customer i+1
     # t^b_{i+1} tracks how close the driver is to the 4.5-h break limit.
@@ -494,25 +573,90 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
         return (mdl.t_b[ip1] <=
                 mdl.t_b[i] - mdl.T_travel[i, ip1]
                 + mdl.W_break * (1 - mdl.x[i] + mdl.w[i]
-                                 + sum(mdl.z[i, f] for f in mdl.F
-                                       if (i, f) in mdl.Z)))
+                                + sum(mdl.z[i, f] for f in mdl.F
+                                    if (i, f) in mdl.Z)))
 
     m.c_tb_direct_ub = Constraint(m.N, rule=c_tb_direct_ub,
-                                  doc="Eq.21: t_b update on direct arc (upper)")
+                                doc="Eq.21: t_b update on direct arc (upper)")
 
-    def c_tb_direct_lb(mdl, i):
-        """Lower bound: t^b at i+1 via direct arc."""
-        if i not in successor:
-            return Constraint.Skip
-        ip1 = successor[i]
-        return (mdl.t_b[ip1] <=
-                (mdl.W_break - mdl.T_travel[i, ip1]) * (1 - mdl.x[i] + mdl.w[i])
-                + mdl.W_break * (1 - mdl.x[i] + mdl.w[i]
-                                 + sum(mdl.z[i, f] for f in mdl.F
-                                       if (i, f) in mdl.Z)))
+    if ORIGINAL:
+        def c_tb_direct_lb(mdl, i):
+            """Lower bound: t^b at i+1 via direct arc."""
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    (mdl.W_break - mdl.T_travel[i, ip1]) * (1 - mdl.x[i] + mdl.w[i])
+                    + mdl.W_break * (1 - mdl.x[i] + mdl.w[i]
+                                    + sum(mdl.z[i, f] for f in mdl.F
+                                        if (i, f) in mdl.Z)))
 
-    m.c_tb_direct_lb = Constraint(m.N, rule=c_tb_direct_lb,
-                                  doc="Eq.22: t_b update on direct arc (lower)")
+        m.c_tb_direct_lb = Constraint(m.N, rule=c_tb_direct_lb,
+                                    doc="Eq.22: t_b update on direct arc (lower)")
+    else:
+        def c_tb_direct_ub0(mdl, i):
+            """Upper bound on t^b at i+1 via direct arc (resets if break taken)."""
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    mdl.t_b[i] - mdl.T_travel[i, ip1]
+                    + mdl.W_break * mdl.w[i] + mdl.M * (1 - mdl.x[i])
+                                + mdl.M *
+                                    sum(mdl.z[i, f] for f in mdl.F
+                                        if (i, f) in mdl.Z))
+
+        m.c_tb_direct_ub0 = Constraint(m.N, rule=c_tb_direct_ub0,
+                                    doc="Eq.21: t_b update on direct arc (upper)")
+
+
+        def c_tb_direct_lb(mdl, i):
+            """Lower bound: t^b at i+1 via direct arc."""
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] >=
+                    mdl.t_b[i] - mdl.T_travel[i, ip1]
+                    + mdl.W_break * mdl.w[i] - mdl.M * (1 - mdl.x[i])
+                                - mdl.M *
+                                    sum(mdl.z[i, f] for f in mdl.F
+                                        if (i, f) in mdl.Z))
+
+        m.c_tb_direct_lb = Constraint(m.N, rule=c_tb_direct_lb,
+                                    doc="Eq.22: t_b update on direct arc (lower)")
+
+        def c_tb_direct_ub2(mdl, i):
+            """Upper bound on t^b at i+1 via direct arc (resets if break taken)."""
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    mdl.W_break - mdl.T_travel[i, ip1]
+                    + mdl.M * (1 - mdl.w[i]) + mdl.M * (1 - mdl.x[i])
+                                + mdl.M *
+                                    sum(mdl.z[i, f] for f in mdl.F
+                                        if (i, f) in mdl.Z))
+
+        m.c_tb_direct_ub2 = Constraint(m.N, rule=c_tb_direct_ub2,
+                                    doc="Eq.21: t_b update on direct arc (upper)")
+
+
+        def c_tb_direct_lb2(mdl, i):
+            """Lower bound: t^b at i+1 via direct arc."""
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] >=
+                    mdl.W_break - mdl.T_travel[i, ip1]
+                    - mdl.M * (1 - mdl.w[i]) - mdl.M * (1 - mdl.x[i])
+                                - mdl.M *
+                                    sum(mdl.z[i, f] for f in mdl.F
+                                        if (i, f) in mdl.Z))
+
+        m.c_tb_direct_lb2 = Constraint(m.N, rule=c_tb_direct_lb2,
+                                    doc="Eq.22: t_b update on direct arc (lower)")
+
+
 
     # Eqs 23: domain of t_b
     def c_tb_domain(mdl, i):
@@ -521,7 +665,6 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
     m.c_tb_domain = Constraint(m.N, rule=c_tb_domain,
                                doc="Eq.23: t_b in [0, W_break]")
 
-
     # Eqs. 24-25: t^b at charger after customer i (upper & lower)
     def c_tb_f_ub(mdl, i, f):
         return (mdl.t_b_prime[i] <=
@@ -529,15 +672,46 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
                 + mdl.W_break * (1 - mdl.z[i, f] + mdl.w[i]))
 
     m.c_tb_f_ub = Constraint(m.Z, rule=c_tb_f_ub,
-                             doc="Eq.24: t_b on arrival at charger f (upper)")
+                            doc="Eq.24: t_b on arrival at charger f (upper)")
 
-    def c_tb_f_lb(mdl, i, f):
-        return (mdl.t_b_prime[i] <=
-                (mdl.W_break - mdl.T_travel[i, f]) * (1 - mdl.z[i, f] + mdl.w[i]) + mdl.M * (1 - mdl.z[i, f]))
+    if ORIGINAL:
+        def c_tb_f_lb(mdl, i, f):
+            return (mdl.t_b_prime[i] <=
+                    (mdl.W_break - mdl.T_travel[i, f]) * (1 - mdl.z[i, f] + mdl.w[i]) + mdl.M * (1 - mdl.z[i, f]))
 
-    m.c_tb_f_lb = Constraint(m.Z, rule=c_tb_f_lb,
-                             doc="Eq.25: t_b on arrival at charger f (lower)")
+        m.c_tb_f_lb = Constraint(m.Z, rule=c_tb_f_lb,
+                                doc="Eq.25: t_b on arrival at charger f (lower)")
+    else:
+        def c_tb_f_ub0(mdl, i, f):
+            return (mdl.t_b_prime[i] <=
+                    mdl.t_b[i] - mdl.T_travel[i, f] + mdl.M * mdl.w[i]
+                    + mdl.M * (1 - mdl.z[i, f] + mdl.w[i]))
 
+        m.c_tb_f_ub0 = Constraint(m.Z, rule=c_tb_f_ub0,
+                                doc="Eq.24: t_b on arrival at charger f (upper)")
+
+        def c_tb_f_lb(mdl, i, f):
+            return (mdl.t_b_prime[i] >=
+                    mdl.t_b[i] - mdl.T_travel[i, f] - mdl.M * mdl.w[i]
+                    - mdl.M * (1 - mdl.z[i, f] + mdl.w[i]))
+
+        m.c_tb_f_lb = Constraint(m.Z, rule=c_tb_f_lb,
+                                doc="Eq.25: t_b on arrival at charger f (lower)")
+
+        def c_tb_f_ub2(mdl, i, f):
+            return (mdl.t_b_prime[i] <=
+                    mdl.W_break - mdl.T_travel[i, f] + mdl.M * (1 - mdl.w[i])
+                    + mdl.M * (1 - mdl.z[i, f] + mdl.w[i]))
+
+        m.c_tb_f_ub2 = Constraint(m.Z, rule=c_tb_f_ub2,
+                                doc="Eq.24: t_b on arrival at charger f (upper)")
+
+        def c_tb_f_lb2(mdl, i, f):
+            return (mdl.t_b_prime[i] >=
+                    mdl.W_break - mdl.T_travel[i, f] - mdl.M * (1 - mdl.w[i])
+                    - mdl.M * (1 - mdl.z[i, f] + mdl.w[i]))
+        m.c_tb_f_lb2 = Constraint(m.Z, rule=c_tb_f_lb2,
+                                doc="Eq.25: t_b on arrival at charger f (lower)")
 
     # Eqs 26: domain of t_b_prime
     def c_tb_prime_domain(mdl, i):
@@ -545,6 +719,7 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
 
     m.c_tb_prime_domain = Constraint(m.N, rule=c_tb_prime_domain,
                                      doc="Eq.26: t_b' in [0, W_break]")
+
 
     # Eqs. 27-28: t^b at i+1
     def c_tb_via_f_ub(mdl, i, f):
@@ -555,20 +730,59 @@ def build_bet_tdsp_model(data: dict) -> ConcreteModel:
                 mdl.t_b[i] - (mdl.T_travel[i, f] + mdl.T_travel[f, ip1]) + mdl.W_break * (1 - mdl.z[i, f] + mdl.w_prime[i]))
 
     m.c_tb_via_f_ub = Constraint(m.Z, rule=c_tb_via_f_ub,
-                                 doc="Eq.27: t_b at i+1 via charger (upper)")
+                                doc="Eq.27: t_b at i+1 via charger (upper)")
+    if ORIGINAL:
+        def c_tb_via_f_lb(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    (mdl.W_break - mdl.T_travel[f, ip1])
+                    * (1 - mdl.z[i, f] + mdl.w_prime[i])
+                    + mdl.M * (1 - mdl.z[i, f]))
 
-    def c_tb_via_f_lb(mdl, i, f):
-        if i not in successor:
-            return Constraint.Skip
-        ip1 = successor[i]
-        return (mdl.t_b[ip1] <=
-                (mdl.W_break - mdl.T_travel[f, ip1])
-                * (1 - mdl.z[i, f] + mdl.w_prime[i])
-                + mdl.M * (1 - mdl.z[i, f]))
+        m.c_tb_via_f_lb = Constraint(m.Z, rule=c_tb_via_f_lb,
+                                    doc="Eq.26: t_b at i+1 via charger (lower)")
+    else:
+        def c_tb_via_f_ub0(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    mdl.t_b[i] - mdl.T_travel[f, ip1] + mdl.M * mdl.w_prime[i] + mdl.M * (1 - mdl.z[i, f]))
 
-    m.c_tb_via_f_lb = Constraint(m.Z, rule=c_tb_via_f_lb,
-                                 doc="Eq.26: t_b at i+1 via charger (lower)")
+        m.c_tb_via_f_ub0 = Constraint(m.Z, rule=c_tb_via_f_ub0,
+                                    doc="Eq.27: t_b at i+1 via charger (upper)")
 
+        def c_tb_via_f_lb(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] >=
+                    mdl.t_b[i] - mdl.T_travel[f, ip1] - mdl.M * mdl.w_prime[i] - mdl.M * (1 - mdl.z[i, f]))
+
+        m.c_tb_via_f_lb = Constraint(m.Z, rule=c_tb_via_f_lb,
+                                    doc="Eq.26: t_b at i+1 via charger (lower)")
+
+        def c_tb_via_f_ub2(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] <=
+                    mdl.W_break - mdl.T_travel[f, ip1] + mdl.M * (1 - mdl.w_prime[i]) + mdl.M * (1 - mdl.z[i, f]))
+
+        m.c_tb_via_f_ub2 = Constraint(m.Z, rule=c_tb_via_f_ub2,
+                                    doc="Eq.27: t_b at i+1 via charger (upper)")
+
+        def c_tb_via_f_lb2(mdl, i, f):
+            if i not in successor:
+                return Constraint.Skip
+            ip1 = successor[i]
+            return (mdl.t_b[ip1] >=
+                    mdl.W_break - mdl.T_travel[f, ip1] - mdl.M * (1 - mdl.w_prime[i]) - mdl.M * (1 - mdl.z[i, f]))
+
+        m.c_tb_via_f_lb2 = Constraint(m.Z, rule=c_tb_via_f_lb2,
+                                    doc="Eq.26: t_b at i+1 via charger (lower)")
 
     return m, successor
 
