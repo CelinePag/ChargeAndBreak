@@ -14,6 +14,17 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 import random
+import json
+import os
+import time as _time_mod
+
+# Output folders — created on first use
+FIGURES_DIR   = "figures"
+SOLUTIONS_DIR = "solutions"
+
+def _ensure_dirs():
+    os.makedirs(FIGURES_DIR,   exist_ok=True)
+    os.makedirs(SOLUTIONS_DIR, exist_ok=True)
 import time
 
 # ============================================================
@@ -266,6 +277,7 @@ def _make_data(I, C, K, D, E, S, E0, Ecap, Emin,
         title=title,
         N=N, I=I, C=C, K=K, R=R, Rseg=Rseg,
         Q={i: random.randint(5, 20)/60 for i in K},
+        M= {i: 5/60 for i in K},
         D=D, E=E, S=S,
         E0=E0, Ecap=Ecap, Emin=Emin,
         Ebar=Ebar, Tbar=Tbar,
@@ -311,6 +323,7 @@ def build_model(data):
     m.D    = pyo.Param(m.Legs,  initialize=data["D"])
     m.E    = pyo.Param(m.Legs,  initialize=data["E"])
     m.Q =    pyo.Param(m.Kset, initialize=data["Q"], default=0)
+    m.M =    pyo.Param(m.Kset, initialize=data["M"], default=0)
     m.S    = pyo.Param(m.Cset, initialize=data["S"], default=0)
     m.E0   = pyo.Param(initialize=data["E0"])
     m.Ecap = pyo.Param(initialize=data["Ecap"])
@@ -399,7 +412,7 @@ def build_model(data):
 
     # CS: charging + break + rest + Queue
     m.td_K = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.td[i] == m.ta[i] + m.Q[i]*m.y[i] + m.tauc[i] + m.taub[i] + m.taur[i])
+        m.td[i] == m.ta[i] + m.Q[i]*m.y[i] + m.tauc[i] + m.taub[i] + m.taur[i] + m.M[i]*(m.x_b45[i]+m.x_b15[i]+m.x_b30[i]+m.rho1[i]+m.rho2[i]))
 
     # ------ hard time windows --------------------------------
     m.tw_hard = pyo.Constraint(m.Cset, rule=lambda m, i:
@@ -579,7 +592,8 @@ def build_model(data):
                                 + m.Q[i]*m.y[i]
                                 + m.u[i]
                                 - m.l4[i]
-                                - m.Q[i]*m.w[i])
+                                - m.Q[i]*m.w[i]
+                                + m.M[i]*(m.x_b45[i]+m.x_b15[i]+m.x_b30[i]+m.rho1[i]+m.rho2[i]))
         else:
             # Origin (i=0), customers, or any non-CS stop.
             # At origin: svc=0, rho=0 → sw[1] = sw[0] + D[0] = D[0]. Correct.
@@ -645,6 +659,77 @@ def extract_solution(model, data):
 
 
 # ============================================================
+# SAVE / LOAD SOLUTION
+# ============================================================
+
+def solution_path(name):
+    """Canonical path for a named solution file."""
+    _ensure_dirs()
+    return os.path.join(SOLUTIONS_DIR, f"{name}.json")
+
+
+def save_solution(sol, data, name):
+    """
+    Persist sol (list of dicts) and the instance data needed for
+    plotting/checking to a JSON file in solutions/.
+    """
+    _ensure_dirs()
+    payload = {
+        "name": name,
+        "data": {
+            "label":      data["label"],
+            "N":          data["N"],
+            "I":          data["I"],
+            "C":          data["C"],
+            "K":          data["K"],
+            "Emin":       data["Emin"],
+            "Ecap":       data["Ecap"],
+            "Tdrv_cons":  data["Tdrv_cons"],
+            "Tdrv_sh1":   data["Tdrv_sh1"],
+            "Twrk_sh":    data["Twrk_sh"],
+            # leg-indexed dicts — JSON requires string keys
+            "D": {str(k): v for k, v in data["D"].items()},
+            "E": {str(k): v for k, v in data["E"].items()},
+            "S": {str(k): v for k, v in data["S"].items()},
+            "Q": {str(k): v for k, v in data["Q"].items()},
+        },
+        "sol": sol,
+    }
+    fpath = solution_path(name)
+    with open(fpath, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"  Solution saved : {fpath}")
+
+
+def load_solution(name):
+    """
+    Load a previously saved solution.
+    Returns (sol, data) ready for plot_solution / check_solution.
+    """
+    fpath = solution_path(name)
+    if not os.path.exists(fpath):
+        raise FileNotFoundError(
+            f"No saved solution at '{fpath}'. "
+            "Solve first or check the instance name."
+        )
+    with open(fpath, "r") as f:
+        payload = json.load(f)
+
+    data = payload["data"]
+    for field in ("D", "E", "S", "Q"):          # restore int keys
+        data[field] = {int(k): v for k, v in data[field].items()}
+    for field in ("I", "C", "K"):               # restore int lists
+        data[field] = [int(x) for x in data[field]]
+
+    sol = payload["sol"]
+    for s in sol:                                # restore int stop index
+        s["i"] = int(s["i"])
+
+    print(f"  Solution loaded: {fpath}")
+    return sol, data
+
+
+# ============================================================
 # VISUALISATION  (all x-axes in hours, shared across panels)
 # ============================================================
 
@@ -672,88 +757,122 @@ def _bar(ax, start, dur, y, h, color, label=None, fontsize=7, text_color="white"
 
 def plot_solution(sol, data, title="solution"):
     N    = data["N"]
-    tend = sol[-1]["ta"]          # arrival time at destination
+    tend = sol[-1]["ta"]
     fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True,
                              gridspec_kw={"height_ratios": [3, 2, 2]})
     fig.suptitle(f"{title}  —  {data['label']}", fontsize=12, fontweight="bold")
+
+    # ------------------------------------------------------------------
+    # Pre-compute all activity-boundary times per stop so we can draw
+    # consistent vertical lines across all three panels.
+    #
+    # For each stop we collect: (time, line_style, line_color, alpha)
+    # line_style encodes the type of boundary:
+    #   "stop"   — arrival at a new stop (gray dashed, lightest)
+    #   "brk"    — break starts (yellow, medium)
+    #   "rest"   — rest starts (purple, strongest)
+    # ------------------------------------------------------------------
+    vlines = []   # list of (t, color, lw, alpha, ls)
+
+    for s in sol:
+        ta = s["ta"]
+        t  = ta
+
+        # arrival marker (always)
+        vlines.append((ta, "gray", 0.6, 0.35, "--"))
+
+        # advance t through each activity, adding a line at each transition
+        if s["is_C"]:
+            t += data["S"].get(s["i"], 0)
+
+        if s["is_K"] and s["y"]:
+            if s["tauq"] > EPS:
+                t += s["tauq"]
+                vlines.append((t, COL["queue"],  0.6, 0.30, ":"))
+            if s["tauc"] > EPS:
+                t += s["tauc"]
+                vlines.append((t, COL["charge"], 0.7, 0.35, ":"))
+
+        if s["taub"] > EPS:
+            vlines.append((t, COL["brk"],  0.8, 0.50, "--"))
+            t += s["taub"]
+
+        if s["taur"] > EPS:
+            vlines.append((t, COL["rest"], 1.0, 0.55, "--"))
+
+    # ------------------------------------------------------------------
+    # Helper: draw all vlines on a given axis
+    # ------------------------------------------------------------------
+    def _draw_vlines(ax, top_panel=False):
+        seen = set()
+        for (t, col, lw, alpha, ls) in vlines:
+            key = round(t, 4)
+            if key in seen:
+                continue
+            seen.add(key)
+            ax.axvline(t, color=col, lw=lw, alpha=alpha, ls=ls, zorder=0)
 
     # ============ Panel 1: Gantt =============================
     ax = axes[0]
     ax.set_title("Activity timeline", fontsize=10)
     Y, H = 0.5, 0.38
+
     for s in sol:
         i = s["i"]
 
-        # ---- driving leg ARRIVING at stop i ----
+        # driving leg arriving at stop i
         if i > 0:
             drv_start = sol[i-1]["td"]
             drv_dur   = s["ta"] - drv_start
             _bar(ax, drv_start, drv_dur, Y, H, COL["drive"],
                  label=f"drv→{i}", fontsize=7)
 
-        # ---- activities AT stop i ----
-
         t = s["ta"]
-        # service (customers)
+
         if s["is_C"]:
             svc = data["S"].get(i, 0)
             _bar(ax, t, svc, Y, H, COL["service"],
                  label=f"C{i}", fontsize=7)
             t += svc
 
-        # queue/setup (CS stops where y=1) — always work, drawn before charging
         if s["is_K"] and s["y"] and s["tauq"] > EPS:
             _bar(ax, t, s["tauq"], Y, H, COL["queue"],
                  label="Q", fontsize=7)
             t += s["tauq"]
 
-        # charging (CS stops where y=1)
         if s["is_K"] and s["y"] and s["tauc"] > EPS:
             _bar(ax, t, s["tauc"], Y, H, COL["charge"],
                  label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
             t += s["tauc"]
 
-        # break
         if s["taub"] > EPS:
             lbl = ("B45" if s["b45"] else ("B15" if s["b15"] else "B30"))
             _bar(ax, t, s["taub"], Y, H, COL["brk"],
                  label=lbl, fontsize=7, text_color="#333")
             t += s["taub"]
 
-        # rest
         if s["taur"] > EPS:
             lbl = "RST-r1" if s["rho1"] else "RST-r2"
             _bar(ax, t, s["taur"], Y, H, COL["rest"],
                  label=lbl, fontsize=7)
 
-        # stop marker + label on top
-        ax.axvline(s["ta"], color="gray", lw=0.6, ls="--", alpha=0.4)
         stop_type = ("●C" if s["is_C"] else
                      "▲K" if s["is_K"] else
-                     "○"  if i not in (0, N) else
                      ("O" if i == 0 else "D"))
         ax.text(s["ta"], Y + H/2 + 0.06, f"{stop_type}{i}",
                 ha="left", va="bottom", fontsize=6.5, color="#444",
                 rotation=45, clip_on=True)
 
+    _draw_vlines(ax)
     ax.set_yticks([])
     ax.set_xlim(-0.2, tend * 1.02)
     patches = [mpatches.Patch(color=v, label=k.replace("_","").title())
                for k, v in COL.items()]
-    ax.legend(handles=patches, loc="upper left", fontsize=8, ncol=5)
+    ax.legend(handles=patches, loc="upper left", fontsize=8, ncol=6)
 
     # ============ Panel 2: SOC vs time =======================
     ax2 = axes[1]
     ax2.set_title("Battery state of charge", fontsize=10)
-
-    # Build piecewise SOC curve.
-    # Activity order at a CS stop: queue → charging → break/rest
-    # SOC is flat during queue, rises during charging, flat during break/rest.
-    # Points needed per stop with dwell:
-    #   (ta,           ea)   — arrival
-    #   (ta + tauq,    ea)   — end of queue (SOC unchanged, flat)
-    #   (ta + tauq + tauc, ed) — end of charging (SOC rose)
-    #   (td,           ed)   — departure (flat through break/rest)
 
     time_pts, soc_pts = [], []
     for s in sol:
@@ -763,40 +882,48 @@ def plot_solution(sol, data, title="solution"):
         tauc   = s["tauc"] if s["is_K"] else 0.0
         time_pts.append(ta)
         soc_pts.append(ea)
-
-        if td - ta > EPS:               # there is a dwell
-            t_chg_start = ta + tauq         # charging begins after queue
-            t_chg_end   = t_chg_start + tauc  # charging ends here
-            if tauq > EPS:              # flat segment during queue
+        if td - ta > EPS:
+            t_chg_start = ta + tauq
+            t_chg_end   = t_chg_start + tauc
+            if tauq > EPS:
                 time_pts.append(t_chg_start)
                 soc_pts.append(ea)
-            if tauc > EPS:              # SOC rises during charging
+            if tauc > EPS:
                 time_pts.append(t_chg_end)
                 soc_pts.append(ed)
-            # flat through break/rest until departure
             time_pts.append(td)
             soc_pts.append(ed)
 
-    ax2.plot(time_pts, soc_pts, color=COL["drive"], lw=2, label="SOC")
+    ax2.plot(time_pts, soc_pts, color=COL["drive"], lw=2, label="SOC", zorder=2)
     ax2.fill_between(time_pts, soc_pts, alpha=0.10, color=COL["drive"])
 
-    # Mark charging gain with an orange arrow + label
+    # Charging arrows
     for s in sol:
         if s["is_K"] and s["y"] and s["ed"] - s["ea"] > 0.5:
-            t_start = s["ta"] + s["tauq"]   # arrow starts after queue
+            t_start = s["ta"] + s["tauq"]
             t_end   = t_start + s["tauc"]
-            ax2.annotate(
-                "", xy=(t_end, s["ed"]), xytext=(t_start, s["ea"]),
-                arrowprops=dict(arrowstyle="->", color=COL["charge"], lw=1.5))
+            ax2.annotate("", xy=(t_end, s["ed"]), xytext=(t_start, s["ea"]),
+                arrowprops=dict(arrowstyle="->", color=COL["charge"], lw=1.5),
+                zorder=3)
             ax2.text((t_start + t_end) / 2, (s["ea"] + s["ed"]) / 2,
                      f"+{s['ed']-s['ea']:.0f}", ha="center",
                      fontsize=7, color=COL["charge"])
+
+    # Annotate SOC panel: label why charging was triggered
+    for s in sol:
+        if s["is_K"] and s["y"] and s["ea"] - data["Emin"] < 0.15 * data["Ecap"]:
+            ax2.text(s["ta"], s["ea"] + data["Ecap"] * 0.03,
+                     "SOC\nnear\nmin", ha="center", va="bottom",
+                     fontsize=6, color="red",
+                     bbox=dict(boxstyle="round,pad=0.2", fc="white",
+                               ec="red", alpha=0.7))
 
     ax2.axhline(data["Emin"], color="red",  ls=":", lw=1.2,
                 label=f"E_min = {data['Emin']} kWh")
     ax2.axhline(data["Ecap"], color="gray", ls=":", lw=1.2,
                 label=f"E_cap = {data['Ecap']} kWh")
 
+    _draw_vlines(ax2)
     ax2.set_ylabel("kWh")
     ax2.set_ylim(0, data["Ecap"] * 1.15)
     ax2.legend(fontsize=8, ncol=3, loc="upper right")
@@ -805,40 +932,31 @@ def plot_solution(sol, data, title="solution"):
     ax3 = axes[2]
     ax3.set_title("HoS accumulators (at arrival)", fontsize=10)
 
-    # For each stop we add TWO time points:
-    #   (ta[i],  counter at arrival)           — before any activity at stop i
-    #   (td[i],  counter after reset if any)   — just before leaving stop i
-    #
-    # After a reset, the counter value at departure is 0.
-    # This makes the vertical drop visible in the graph and removes the
-    # misleading diagonal that would otherwise appear during the long dwell.
     cd_t, cd_v = [], []
     sd_t, sd_v = [], []
     sw_t, sw_v = [], []
 
     for s in sol:
         ta, td = s["ta"], s["td"]
-        r_cd = s["b45"] or s["b30"] or s["rho1"] or s["rho2"]  # cd reset
-        r_sd = s["rho1"] or s["rho2"]                           # sd reset
-        r_sw = s["rho1"] or s["rho2"]                           # sw reset
+        r_cd = s["b45"] or s["b30"] or s["rho1"] or s["rho2"]
+        r_sd = s["rho1"] or s["rho2"]
+        r_sw = s["rho1"] or s["rho2"]
 
-        # point at arrival
         cd_t.append(ta); cd_v.append(s["cd"])
         sd_t.append(ta); sd_v.append(s["sd"])
         sw_t.append(ta); sw_v.append(s["sw"])
 
-        # point at departure (only if there is a meaningful dwell)
         if td - ta > EPS:
             cd_t.append(td); cd_v.append(0.0 if r_cd else s["cd"])
             sd_t.append(td); sd_v.append(0.0 if r_sd else s["sd"])
             sw_t.append(td); sw_v.append(0.0 if r_sw else s["sw"])
 
     ax3.plot(cd_t, cd_v, "o-", color="#E74C3C", lw=1.5, ms=3,
-             label="Consec. driving")
+             label="Consec. driving", zorder=2)
     ax3.plot(sd_t, sd_v, "s-", color="#3498DB", lw=1.5, ms=3,
-             label="Shift driving")
+             label="Shift driving", zorder=2)
     ax3.plot(sw_t, sw_v, "^-", color="#1ABC9C", lw=1.5, ms=3,
-             label="Shift working")
+             label="Shift working", zorder=2)
 
     ax3.axhline(data["Tdrv_cons"], color="#E74C3C", ls=":", lw=1.2, alpha=0.7,
                 label=f"max consec. drv {data['Tdrv_cons']}h")
@@ -847,14 +965,61 @@ def plot_solution(sol, data, title="solution"):
     ax3.axhline(data["Twrk_sh"],   color="#1ABC9C", ls=":", lw=1.2, alpha=0.7,
                 label=f"max shift wk {data['Twrk_sh']}h")
 
-    for s in sol:
-        if s["rho1"] or s["rho2"]:
-            ax3.axvline(s["ta"], color="#8E44AD", lw=1.5, ls="--",
-                        alpha=0.5, label="_rest")
-        elif s["b45"] or s["b30"]:
-            ax3.axvline(s["ta"], color="#E74C3C", lw=1.0, ls="--",
-                        alpha=0.3, label="_brk")
+    # ------------------------------------------------------------------
+    # Annotate what caused each break or rest.
+    # Rule: at the stop where a break/rest is taken, find which
+    # accumulator was closest to (or at) its limit as a fraction of the
+    # limit. That is the binding constraint.  Draw a small labelled arrow
+    # from the relevant counter value up toward the limit line.
+    # ------------------------------------------------------------------
+    _annotated = set()   # avoid duplicate labels at the same time
 
+    for s in sol:
+        has_brk  = s["b45"] or s["b30"] or s["b15"]
+        has_rest = s["rho1"] or s["rho2"]
+        if not (has_brk or has_rest):
+            continue
+
+        ta = s["ta"]
+        if round(ta, 3) in _annotated:
+            continue
+        _annotated.add(round(ta, 3))
+
+        # fractions of limit reached
+        frac_cd = s["cd"] / data["Tdrv_cons"] if data["Tdrv_cons"] > 0 else 0
+        frac_sd = s["sd"] / data["Tdrv_sh1"]  if data["Tdrv_sh1"]  > 0 else 0
+        frac_sw = s["sw"] / data["Twrk_sh"]   if data["Twrk_sh"]   > 0 else 0
+
+        # map to (fraction, counter_value, limit_value, label, color)
+        candidates = [
+            (frac_cd, s["cd"], data["Tdrv_cons"], "cd→limit", "#E74C3C"),
+            (frac_sd, s["sd"], data["Tdrv_sh1"],  "sd→limit", "#3498DB"),
+            (frac_sw, s["sw"], data["Twrk_sh"],   "sw→limit", "#1ABC9C"),
+        ]
+        # only annotate if the counter is actually close (>70% of limit)
+        binding = [(f, val, lim, lbl, col)
+                   for (f, val, lim, lbl, col) in candidates if f > 0.70]
+        if not binding:
+            continue
+
+        # pick the most binding
+        f, val, lim, lbl, col = max(binding, key=lambda x: x[0])
+
+        # draw a small upward arrow from the counter value toward the limit
+        ax3.annotate(
+            lbl,
+            xy=(ta, lim),           # arrowhead at the limit line
+            xytext=(ta, val * 0.85 if val > 0.5 else val + 0.3),  # label below
+            fontsize=6.5,
+            color=col,
+            ha="center",
+            va="top",
+            arrowprops=dict(arrowstyle="-|>", color=col, lw=1.0),
+            bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=col, alpha=0.85),
+            zorder=4,
+        )
+
+    _draw_vlines(ax3)
     ax3.set_xlabel("Time (h)")
     ax3.set_ylabel("Hours")
     ax3.legend(fontsize=7, ncol=3, loc="upper left")
@@ -864,6 +1029,7 @@ def plot_solution(sol, data, title="solution"):
     plt.savefig(fname, dpi=150, bbox_inches="tight")
     print(f"  Plot saved: {fname}")
     plt.close()
+
 
 
 
@@ -933,11 +1099,18 @@ INSTANCES = {
 }
 
 
-def run_instance(name, tee=False):
+def run_instance(name, tee=False, run=True):
     print(f"\n{'='*65}")
     data = INSTANCES[name]()
     print(f"  {data['label']}")
     print(f"  C={data['C']}   K={data['K']}")
+
+    if not run:
+        sol, _ = load_solution("realistic_medium_many_3")
+        print_schedule(sol, data)
+        check_solution(sol, data)
+        plot_solution(sol, data, title=data["title"])
+        return
 
     model = build_model(data)
     _, status = solve_model(model, tee=tee)
@@ -947,6 +1120,7 @@ def run_instance(name, tee=False):
         sol = extract_solution(model, data)
         print_schedule(sol, data)
         check_solution(sol, data)
+        save_solution(sol, data, data["title"])
         plot_solution(sol, data, title=data["title"])
     else:
         print(f"  No feasible solution (status={status}).")
@@ -957,10 +1131,14 @@ if __name__ == "__main__":
     random.seed(10)
     name = sys.argv[1] if len(sys.argv) > 1 else "realistic"
     tee  = "--tee" in sys.argv
+    run  = True # "--run" in sys.argv
+
+    # run_instance(name, run=False)
+
     if name == "all":
         for n in INSTANCES:
-            run_instance(n, tee=tee)
+            run_instance(n, tee=tee, run=run)
     elif name in INSTANCES:
-        run_instance(name, tee=tee)
+        run_instance(name, tee=tee, run=run)
     else:
         print(f"Unknown instance '{name}'. Choose: {list(INSTANCES)}")
