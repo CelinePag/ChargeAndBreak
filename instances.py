@@ -102,7 +102,7 @@ def instance_3day():
         title="3day")
 
 
-def instance_realistic(route_class="short", clusters=3, customers_class="few"):
+def instance_realistic(route_class="short", clusters=3, customers_class="medium"):
     """
     Randomly generated long-haul route.
 

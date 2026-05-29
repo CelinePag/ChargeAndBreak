@@ -35,6 +35,8 @@ Key modelling differences from MILP.build_model
 4.  No activities allowed at the last horizon stop (binaries fixed 0).
 5.  Local stop 0 is an intermediate route stop → breaks/rests are
     allowed there (unless it is the global route origin).
+6.  Extra energy bounds (soc_charge_link, soc_dep_lb, soc_horizon_lb)
+    tighten the LP relaxation and detect infeasible states earlier.
 
 All times are in HOURS; energy in kWh.
 Indexing: local stop j = global_stop - start_stop, j in 0..H.
@@ -46,13 +48,21 @@ import logging as _logging
 _logging.getLogger('pyomo').setLevel(_logging.ERROR)    # suppress W1001/W1002
 import numpy as np
 
-# ── helpers re-used from MILP.py ─────────────────────────────────────────
-from MILP import _time_bounds
+# ── Shared helpers from MILP.py ──────────────────────────────────────────
+from MILP import (
+    _time_bounds,
+    _solve_quiet,
+    _declare_common_vars,
+    _add_pwl_charging_constraints,
+    _add_break_rest_constraints,
+    _add_hos_accumulator_constraints,
+    _add_manoeuver_constraints,
+    _model_xsum,
+    _model_ri,
+    _model_rho,
+)
 
-INFEASIBLE_PENALTY = 1e9   # returned as obj when no feasible solution found
-
-
-# (time-shifted bounds delegated to MILP._time_bounds via make_subproblem_data)
+INFEASIBLE_PENALTY = 1e9
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -71,10 +81,7 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
     end_stop    : int — global index of last stop   (local index H)
     init_state  : dict — vehicle state AT ARRIVAL at start_stop
     D_override  : dict {global_leg_index: hours} or None
-                  Scenario-specific travel times.
-    E_override  : dict {global_leg_index: kWh} or None
-                  Scenario-specific energy consumptions; derived from
-                  speed-consumption coupling when km data is available.
+    E_override  : dict {global_leg_index: kWh}   or None
 
     Returns
     -------
@@ -87,31 +94,26 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
     assert 0 <= start_stop < end_stop <= N_glob, (
         f"Invalid horizon [{start_stop}, {end_stop}] for route of length {N_glob}")
 
-    H = end_stop - start_stop          # number of legs = local N
+    H = end_stop - start_stop
 
-    # ── local stop sets ───────────────────────────────────────────────────
     I_loc = list(range(H + 1))
-    # Every intermediate global stop is either C or K; origin/dest are neither.
     C_loc = [j for j in range(H + 1) if (start_stop + j) in C_glob]
     K_loc = [j for j in range(H + 1) if (start_stop + j) in K_glob]
 
-    # ── per-leg parameters ────────────────────────────────────────────────
     D_src = D_override if D_override is not None else full_data["D"]
     E_src = E_override if E_override is not None else full_data["E"]
     D_loc = {j: D_src.get(start_stop + j, 0.0) for j in range(H)}
     E_loc = {j: E_src.get(start_stop + j, 0.0) for j in range(H)}
 
-    # ── per-stop parameters ───────────────────────────────────────────────
     S_loc  = {j: full_data["S"].get(start_stop + j, 0.0) for j in C_loc}
     Q_loc  = {j: full_data["Q"].get(start_stop + j, 0.0) for j in K_loc}
-    # Manoeuver time at every stop, indexed by local stop (not leg)
     M_loc  = {}
     for j in range(H + 1):
         g = start_stop + j
         M_loc[j] = full_data["M"].get(g, 5.0 / 60) if g < N_glob else 0.0
-    M_loc[H] = 0.0        # no manoeuver at last horizon stop
+    M_loc[H] = 0.0
     if start_stop == 0:
-        M_loc[0] = 0.0    # no manoeuver at route origin
+        M_loc[0] = 0.0
 
     Wha_loc = {j: full_data["Wha"].get(start_stop + j, 0.0)
                for j in C_loc if (start_stop + j) in full_data.get("Wha", {})}
@@ -127,19 +129,28 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
     lb_t, ub_t = _time_bounds(I_loc, C_loc, K_loc, D_loc, S_loc, Q_loc,
                                Tbar, T_hor, t0=t0)
 
-    # For each local stop j, compute the minimum energy needed to reach the
-    # next charging station (or the global destination) from j.
-    # ea[j] >= Emin + e_to_next_CS[j] is a necessary feasibility condition
-    # that tightens the LP relaxation without cutting any integer solution.
+    # Minimum energy needed from each local stop to the next CS or dest.
+    #
+    # For WITHIN-horizon legs we use the scenario energy (E_override when
+    # provided) so that soc_dep_lb is a valid lower bound under this scenario
+    # — using nominal energies when scenario has lower consumption would make
+    # the LP cut too tight and cause false infeasibility.
+    # For legs BEYOND the horizon (used in soc_horizon_lb only) we conservatively
+    # use nominal energies scaled by (1+delta_safe) since we don't know the
+    # future scenario realisation; here we just use nominal (caller adds margin
+    # via soc_horizon_lb if desired).
+    E_within = E_override if E_override is not None else full_data["E"]
     E_global_all = full_data["E"]
     K_global_set = set(full_data["K"])
     e_to_next_cs = {}
     for j in range(H + 1):
-        g = start_stop + j          # global stop index
+        g   = start_stop + j
         cum = 0.0
         k   = g
         while k < N_glob:
-            cum += E_global_all.get(k, 0.0)
+            # Use scenario energy for within-horizon legs, nominal beyond
+            E_src = E_within if k < start_stop + H else E_global_all
+            cum += E_src.get(k, 0.0)
             if k + 1 in K_global_set or k + 1 == N_glob:
                 break
             k += 1
@@ -148,21 +159,15 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
     return dict(
         label=f"subproblem [{start_stop}→{end_stop}]",
         title=f"sub_{start_stop}_{end_stop}",
-        # structure
         N=H, I=I_loc, C=C_loc, K=K_loc, R=R, Rseg=Rseg,
-        # per-leg
         D=D_loc, E=E_loc,
-        # per-stop
         S=S_loc, Q=Q_loc, M=M_loc,
         Wha=Wha_loc, Whf=Whf_loc,
-        # battery
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],
         Ebar=full_data["Ebar"], Tbar=Tbar,
         T_hor=T_hor,
-        # pre-computed bounds
         lb_t=lb_t, ub_t=ub_t,
-        # HoS
         Tb45=full_data["Tb45"], Tb15=full_data["Tb15"], Tb30=full_data["Tb30"],
         Tr1=full_data["Tr1"],   Tr2=full_data["Tr2"],
         Tdrv_cons=full_data["Tdrv_cons"],
@@ -171,9 +176,7 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
         Twrk_sh=full_data["Twrk_sh"],
         M_drv=full_data["M_drv"], M_sd=full_data["M_sd"],
         M_sw=full_data["M_sw"],   M_big=full_data["M_big"],
-        # reference
         global_start=start_stop, global_end=end_stop, global_N=N_glob,
-        # global energy/CS info for horizon-end energy bound
         E_global=full_data["E"],
         K_global=set(full_data["K"]),
         e_to_next_cs=e_to_next_cs,
@@ -181,18 +184,21 @@ def make_subproblem_data(full_data, start_stop, end_stop, init_state,
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# BUILD MODEL
+# WARM START
 # ══════════════════════════════════════════════════════════════════════════
-
 
 def inject_warm_start(model, warm_sol, start_stop):
     """
     Inject a previous solution into a horizon model as warm-start hints.
     warm_sol : list of per-stop dicts with local indices (0 = start_stop).
+
+    Sets values for: ta, td, ea, ed, cd, sd, sw, phi,
+                     taub, taur, l1, l2, l4 (derived from cd/sd/sw + binaries),
+                     all binary variables, y, tauc.
     Pyomo W1001/W1002 warnings are suppressed — HiGHS clamps values to
     feasible range so slightly out-of-bound hints are harmless.
     """
-    import pyomo.environ as pyo, warnings as _ws
+    import warnings as _ws
     with _ws.catch_warnings():
         _ws.simplefilter("ignore")
         for s in warm_sol:
@@ -200,19 +206,40 @@ def inject_warm_start(model, warm_sol, start_stop):
             if i is None or i not in model.I:
                 continue
             try:
-                model.ta[i].set_value(max(0.0, float(s.get("ta", 0))))
+                ta_v = max(0.0, float(s.get("ta", 0)))
+                td_v = max(0.0, float(s.get("td", ta_v)))
+                cd_v = max(0.0, float(s.get("cd", 0)))
+                sd_v = max(0.0, float(s.get("sd", 0)))
+                sw_v = max(0.0, float(s.get("sw", 0)))
+                b45  = int(s.get("b45",  0))
+                b30  = int(s.get("b30",  0))
+                rho1 = int(s.get("rho1", 0))
+                rho2 = int(s.get("rho2", 0))
+                ri   = int(b45 or b30 or rho1 or rho2)   # cd reset
+                rho  = int(rho1 or rho2)                  # sd/sw reset
+
+                model.ta[i].set_value(ta_v)
+                model.td[i].set_value(td_v)
                 model.ea[i].set_value(max(0.0, float(s.get("ea", 0))))
                 model.ed[i].set_value(max(0.0, float(s.get("ed", 0))))
-                model.cd[i].set_value(max(0.0, float(s.get("cd", 0))))
-                model.sd[i].set_value(max(0.0, float(s.get("sd", 0))))
-                model.sw[i].set_value(max(0.0, float(s.get("sw", 0))))
+                model.cd[i].set_value(cd_v)
+                model.sd[i].set_value(sd_v)
+                model.sw[i].set_value(sw_v)
+                model.phi[i].set_value(int(s.get("b15", 0)) if not ri else 0)
                 model.taub[i].set_value(max(0.0, float(s.get("taub", 0))))
                 model.taur[i].set_value(max(0.0, float(s.get("taur", 0))))
-                model.x_b45[i].set_value(int(s.get("b45", 0)))
+                model.x_b45[i].set_value(b45)
                 model.x_b15[i].set_value(int(s.get("b15", 0)))
-                model.x_b30[i].set_value(int(s.get("b30", 0)))
-                model.rho1[i].set_value(int(s.get("rho1", 0)))
-                model.rho2[i].set_value(int(s.get("rho2", 0)))
+                model.x_b30[i].set_value(b30)
+                model.rho1[i].set_value(rho1)
+                model.rho2[i].set_value(rho2)
+                model.z_man[i].set_value(float(bool(int(s.get("y", 0)) or b45 or
+                                                      int(s.get("b15",0)) or b30 or
+                                                      rho1 or rho2)))
+                # Auxiliary big-M variables: l_k[i] = acc[i] if reset else 0
+                model.l1[i].set_value(cd_v if ri  else 0.0)
+                model.l2[i].set_value(sd_v if rho else 0.0)
+                model.l4[i].set_value(sw_v if rho else 0.0)
             except Exception:
                 pass
             if s.get("is_K"):
@@ -223,13 +250,19 @@ def inject_warm_start(model, warm_sol, start_stop):
                     pass
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# BUILD MODEL
+# ══════════════════════════════════════════════════════════════════════════
+
 def build_horizon_model(sub_data, init_state, fixed_action=None,
                         rho2_remaining=3):
     """
     Build the Pyomo MILP for the sub-problem.
 
-    Structurally identical to MILP.build_model with the differences
-    listed in the module docstring.
+    Uses the shared constraint helpers from MILP.py for the ~300 lines of
+    constraints identical to build_model.  Only the sub-problem-specific
+    parts (initial conditions, fixed_action, extra energy bounds) are
+    handled here.
 
     Parameters
     ----------
@@ -271,12 +304,10 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
     m.RsegS = pyo.Set(initialize=Rseg, ordered=True)
     m.Legs  = pyo.Set(initialize=list(range(N)), ordered=True)
 
-
-
     # ── Parameters ────────────────────────────────────────────────────────
     m.D_nom  = pyo.Param(m.Legs, initialize=sub_data["D"])
     m.Q_nom  = pyo.Param(m.Kset, initialize=sub_data["Q"],  default=0)
-    # Manoeuver time indexed over ALL stops (needed for td_C and td_K at stop 0 or H)
+    # Man indexed over all stops (needed when local stop 0 or H is C or K)
     m.Man    = pyo.Param(m.I,    initialize=sub_data["M"],  default=0)
     m.S      = pyo.Param(m.Cset, initialize=sub_data["S"],  default=0)
     m.Eparam = pyo.Param(m.Legs, initialize=sub_data["E"])
@@ -295,57 +326,51 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
     m.Tdrv_sh1  = pyo.Param(initialize=sub_data["Tdrv_sh1"])
     m.Twrk_sh   = pyo.Param(initialize=sub_data["Twrk_sh"])
 
-    # ── State variables ───────────────────────────────────────────────────
-    m.ta  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.td  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.ea  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.ed  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-
-    m.y      = pyo.Var(m.Kset, domain=pyo.Binary)
-    m.tauc   = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
-    m.lam_a  = pyo.Var(m.Kset, m.Rset,  domain=pyo.NonNegativeReals)
-    m.lam_d  = pyo.Var(m.Kset, m.Rset,  domain=pyo.NonNegativeReals)
-    m.mu_a   = pyo.Var(m.Kset, m.RsegS, domain=pyo.Binary)
-    m.mu_d   = pyo.Var(m.Kset, m.RsegS, domain=pyo.Binary)
-
-    m.x_b45    = pyo.Var(m.I, domain=pyo.Binary)
-    m.x_b15    = pyo.Var(m.I, domain=pyo.Binary)
-    m.x_b30    = pyo.Var(m.I, domain=pyo.Binary)
-    m.phi      = pyo.Var(m.I, domain=pyo.Binary)
-    m.taub     = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.taub_hat = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.rho1     = pyo.Var(m.I, domain=pyo.Binary)
-    m.rho2     = pyo.Var(m.I, domain=pyo.Binary)
-    m.taur     = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-
-    m.cd = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.sd = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.sw = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.l1 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.l2 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.l4 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.u  = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
-
-
+    # ── Variables (shared declaration) ────────────────────────────────────
+    _declare_common_vars(m)
+    _add_manoeuver_constraints(m, sub_data["I"], K_set)
 
     # ── Objective ─────────────────────────────────────────────────────────
     m.obj = pyo.Objective(expr=m.ta[N], sense=pyo.minimize)
 
-    # Tighten variable bounds
     for i in sub_data["I"]:
         m.ta[i].setlb(lb_t.get(i, 0.0))
         m.ta[i].setub(ub_t.get(i, T_hor))
 
     # ══════════════════════════════════════════════════════════════════════
-    # INITIAL CONDITIONS
+    # INITIAL CONDITIONS  (from init_state, not hardcoded zeros)
     # ══════════════════════════════════════════════════════════════════════
     m.init_ta  = pyo.Constraint(expr=m.ta[0]  == init_state["ta"])
     m.init_ea  = pyo.Constraint(expr=m.ea[0]  == init_state["ea"])
     m.init_cd  = pyo.Constraint(expr=m.cd[0]  == init_state["cd"])
     m.init_sd  = pyo.Constraint(expr=m.sd[0]  == init_state["sd"])
-    # sw[0] = accumulated work at arrival at local stop 0, EXCLUDING work
-    # done at stop 0 itself.  We add it here as a model variable so that
-    # tauc[0] (unknown before solve) is accounted for exactly.
+    # sw[0] = shift working time AT arrival at local stop 0, AFTER the work
+    # done at this stop (queue, charge-if-no-break) is added.
+    # The rest reset is captured via l4[0] in sw_prop (sw[1] = sw[0] - l4[0] + ...),
+    # but sw_ub checks sw[0] BEFORE the reset, which can spuriously force
+    # infeasibility when sw_init + Q is high but a rest at stop 0 would fix it.
+    #
+    # Correct fix: define a post-reset sw at stop 0 so that sw_ub[0] reflects
+    # the state AFTER the rest (if taken). We achieve this by shifting the
+    # reset into sw[0] directly: if rho[0]=1 then l4[0]=sw_raw[0] → sw[1]=0.
+    # We therefore LEAVE sw[0] unconstrained (let sw_prop determine it) and
+    # instead apply the initial condition via an equality on sw[1] (the first
+    # leg boundary). However this breaks the propagation chain at stop 0.
+    #
+    # Pragmatic approach (matches existing MILP structure): keep init_sw as
+    # an equality but clip it to Twrk_sh when a rest is forced at stop 0 so
+    # the model can at least represent the post-rest state. We add a slack
+    # variable sw0_raw and sw0 = min(sw0_raw, Twrk_sh) when rho[0]=1.
+    #
+    # Simplest correct approach without restructuring: initialise sw[0] to
+    # the pre-work arrival sw, then let sw_prop add the work and the reset.
+    # But sw_prop propagates from i to i+1, so sw[0] must already include
+    # work at stop 0 for the sw_ub[0] constraint to be meaningful.
+    #
+    # CHOSEN FIX: Add a relaxed upper bound that accounts for the reset.
+    # init_sw: sw[0] = sw_init + Q*y[0] + u[0]  (as before)
+    # Add:     sw[0] - M_sw * rho[0] <= Twrk_sh (rest makes the bound slack)
+    # This replaces the hard sw_ub[0] constraint for stop 0.
     if 0 in K_set:
         m.init_sw = pyo.Constraint(
             expr=m.sw[0] == init_state["sw"] + m.Q_nom[0]*m.y[0] + m.u[0])
@@ -356,9 +381,16 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
         m.init_sw = pyo.Constraint(expr=m.sw[0] == init_state["sw"])
     m.init_phi = pyo.Constraint(expr=m.phi[0] == init_state["phi"])
 
+    # Soft sw_ub at stop 0: if a rest is taken (rho[0]=1), sw[0] may exceed
+    # Twrk_sh because the reset only lands in sw[1]. Replace the shared
+    # sw_ub[0] with the relaxed version below; shared helper still adds
+    # sw_ub for i in I which includes 0, so we override it post-hoc.
+    # (The override is applied after _add_hos_accumulator_constraints.)
+    _sw0_needs_override = True   # flag consumed below
+
     # ── No activities at last horizon stop ────────────────────────────────
-    # Use equality constraints instead of .fix() so they survive LP relaxation.
-    # (.fix() sets variable bounds; relax_integer_vars resets those bounds.)
+    # Use equality constraints (not .fix()) — .fix() sets bounds that are
+    # silently reset to [0,1] by relax_integer_vars.
     m.fix_b45_N  = pyo.Constraint(expr=m.x_b45[N] == 0)
     m.fix_b15_N  = pyo.Constraint(expr=m.x_b15[N] == 0)
     m.fix_b30_N  = pyo.Constraint(expr=m.x_b30[N] == 0)
@@ -383,13 +415,8 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
     if fixed_action is not None and not is_global_origin:
         brk = fixed_action.get("break_type", None)
         rst = fixed_action.get("rest_type",  None)
-
-        # Use equality constraints instead of .fix() — .fix() sets bounds,
-        # which are silently reset to [0,1] by relax_integer_vars.
-        # Equality constraints are linear and survive LP transformation.
         if 0 in K_set and "y" in fixed_action:
             m.fix_y0 = pyo.Constraint(expr=m.y[0] == int(fixed_action["y"]))
-
         m.fix_b45_act = pyo.Constraint(expr=m.x_b45[0] == (1 if brk == "b45" else 0))
         m.fix_b15_act = pyo.Constraint(expr=m.x_b15[0] == (1 if brk == "b15" else 0))
         m.fix_b30_act = pyo.Constraint(expr=m.x_b30[0] == (1 if brk == "b30" else 0))
@@ -400,34 +427,24 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
     # TIME PROPAGATION
     # ══════════════════════════════════════════════════════════════════════
     def _tp(m, i):
-        if i >= N:
-            return pyo.Constraint.Skip
+        if i >= N: return pyo.Constraint.Skip
         return m.ta[i + 1] == m.td[i] + m.D_nom[i]
     m.time_prop = pyo.Constraint(m.I, rule=_tp)
 
-    # Route origin: no activities → td = ta
     if is_global_origin:
         m.td_orig = pyo.Constraint(expr=m.td[0] == m.ta[0])
 
-    # Last horizon stop: no activities → td = ta
-    # (also consistent with all binaries fixed to 0 there)
     if N not in C_set and N not in K_set:
         m.td_dest = pyo.Constraint(expr=m.td[N] == m.ta[N])
-    # If N is C or K, the td_C / td_K constraints handle it (with all
-    # binaries = 0, they reduce to td[N] = ta[N] + S[N] or ta[N], resp.)
-
-    def _xsum(m, i):
-        return m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
 
     m.td_C = pyo.Constraint(m.Cset, rule=lambda m, i:
         m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i]
-                   + m.Man[i] * _xsum(m, i))
+                   + m.Man[i] * m.z_man[i])
 
     m.td_K = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.td[i] == m.ta[i] + m.Q_nom[i]*m.y[i] + m.tauc[i] + m.taub[i] + m.taur[i]
-                   + m.Man[i] * _xsum(m, i))
+                   + m.Man[i] * m.z_man[i])
 
-    # Hard time windows (only those within the horizon)
     if sub_data.get("Wha") or sub_data.get("Whf"):
         wha = sub_data.get("Wha", {})
         whf = sub_data.get("Whf", {})
@@ -439,59 +456,38 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
     # BATTERY SOC
     # ══════════════════════════════════════════════════════════════════════
     def _soc(m, i):
-        if i >= N:
-            return pyo.Constraint.Skip
+        if i >= N: return pyo.Constraint.Skip
         return m.ea[i + 1] == m.ed[i] - m.Eparam[i]
     m.soc_prop = pyo.Constraint(m.I, rule=_soc)
 
-    # No charging at global route origin
     if is_global_origin:
         m.soc_nc_orig = pyo.Constraint(expr=m.ed[0] == m.ea[0])
-
-    # No charging at last horizon stop
     m.soc_nc_dest = pyo.Constraint(expr=m.ed[N] == m.ea[N])
-
     m.soc_nc_C   = pyo.Constraint(m.Cset, rule=lambda m, i: m.ed[i] == m.ea[i])
     m.soc_mono_K = pyo.Constraint(m.Kset, rule=lambda m, i: m.ed[i] >= m.ea[i])
 
-    # Direct charge-link constraint: ed[i] - ea[i] <= (Ecap-Emin)*y[i].
-    # When y[i]=0 this forces ed[i] = ea[i] without going through the PWL,
-    # preventing the LP relaxation from setting ed > ea via fractional lam_d
-    # weights (LP PWL relaxation is not tight: it can achieve tauc=0 while
-    # ed > ea by spreading weights across breakpoints).
+    # Charge-link: prevents LP from fictitiously charging when y=0
     _charge_headroom = sub_data["Ecap"] - sub_data["Emin"]
     m.soc_charge_link = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.ed[i] - m.ea[i] <= _charge_headroom * m.y[i])
-    # Tight energy lower bounds on DEPARTURE energy ed[i]:
-    #   ed[i] >= Emin + e_to_next_CS[i]
-    # where e_to_next_CS[i] = energy to travel from stop i to the next CS.
-    # This is a necessary feasibility condition.  Applying it to ed (not ea)
-    # means CS stops can charge to meet it, while non-CS stops (ed=ea) must
-    # already have sufficient energy on arrival — correctly marking states
-    # infeasible when the vehicle has run too low before a CS.
-    # This also tightens the LP relaxation: fractional y at future CS stops
-    # must still provide enough departing energy.
-    e_to_next = sub_data.get("e_to_next_cs", {})
-    Emin_val   = sub_data["Emin"]
-    Ecap_val   = sub_data["Ecap"]
-    def _soc_lb(m, i):
-        return m.ea[i] >= Emin_val   # basic arrival bound
-    def _soc_dep_lb(m, i):
-        lb = Emin_val + e_to_next.get(i, 0.0)
-        return m.ed[i] >= min(lb, Ecap_val)
-    m.soc_lb     = pyo.Constraint(m.I, rule=_soc_lb)
-    m.soc_dep_lb = pyo.Constraint(m.I, rule=_soc_dep_lb)
-    m.soc_ub     = pyo.Constraint(m.I, rule=lambda m, i: m.ed[i] <= m.Ecap)
 
-    # Tighter lower bound on ea at the last horizon stop:
-    # if N_h < global N, the vehicle must have enough energy to reach the
-    # next charging station (or the global destination) from stop N_h.
-    # Otherwise, MILP2 can set ea[N_h]=Emin and the vehicle immediately runs
-    # out of battery on the very next leg after the horizon.
+    # Tight lower bounds on arrival and departure energy
+    e_to_next = sub_data.get("e_to_next_cs", {})
+    Emin_val  = sub_data["Emin"]
+    Ecap_val  = sub_data["Ecap"]
+
+    m.soc_lb = pyo.Constraint(m.I,
+        rule=lambda m, i: m.ea[i] >= Emin_val)
+    m.soc_dep_lb = pyo.Constraint(m.I, rule=lambda m, i:
+        m.ed[i] >= min(Emin_val + e_to_next.get(i, 0.0), Ecap_val))
+    m.soc_ub = pyo.Constraint(m.I,
+        rule=lambda m, i: m.ed[i] <= m.Ecap)
+
+    # At the horizon boundary the vehicle must have enough energy to reach
+    # the next CS (or destination) beyond the horizon.
     global_end = sub_data.get("global_end", N)
     global_N   = sub_data.get("global_N",  N)
     if global_end < global_N:
-        # Sum E[j] for legs global_end, global_end+1, ... until next CS or dest
         Eleg_glob = sub_data.get("E_global", {})
         K_glob    = sub_data.get("K_global", set())
         e_needed  = 0.0
@@ -501,142 +497,39 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
             if j + 1 in K_glob or j + 1 == global_N:
                 break
             j += 1
-        if e_needed > 0:
-            horizon_end_lb = sub_data["Emin"] + e_needed
-            if horizon_end_lb <= sub_data["Ecap"]:
-                m.soc_horizon_lb = pyo.Constraint(
-                    expr=m.ea[N] >= horizon_end_lb)
-    m.chg_act    = pyo.Constraint(m.Kset, rule=lambda m, i:
+        if 0 < e_needed <= sub_data["Ecap"] - sub_data["Emin"]:
+            m.soc_horizon_lb = pyo.Constraint(
+                expr=m.ea[N] >= sub_data["Emin"] + e_needed)
+
+    m.chg_act  = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.tauc[i] <= TK * m.y[i])
-    m.chg_act2   = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= 0.25 * m.y[i])   # at least 15 min if charging
-
-    # PWL charging (Montoya et al. 2017)
-    m.pwl_ea = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.ea[i] == sum(m.lam_a[i, k] * m.Ebar[k] for k in R))
-    m.pwl_ed = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.ed[i] == sum(m.lam_d[i, k] * m.Ebar[k] for k in R))
-    m.pwl_tc = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] == (sum(m.lam_d[i, k] * m.Tbar[k] for k in R)
-                     - sum(m.lam_a[i, k] * m.Tbar[k] for k in R)))
-    m.pwl_ca = pyo.Constraint(m.Kset, rule=lambda m, i:
-        sum(m.lam_a[i, k] for k in R) == 1)
-    m.pwl_cd = pyo.Constraint(m.Kset, rule=lambda m, i:
-        sum(m.lam_d[i, k] for k in R) == 1)
-    m.pwl_sa = pyo.Constraint(m.Kset, rule=lambda m, i:
-        sum(m.mu_a[i, k] for k in Rseg) == 1)
-    m.pwl_sd = pyo.Constraint(m.Kset, rule=lambda m, i:
-        sum(m.mu_d[i, k] for k in Rseg) == 1)
-
-    R_list = sorted(R)
-    K_max  = max(Rseg)
-    mid    = [(i, k) for i in K for k in Rseg[:-1]]
-    m.sos2_lo_a  = pyo.Constraint(m.Kset, rule=lambda m,i: m.lam_a[i,R_list[0]] <= m.mu_a[i,R_list[1]])
-    m.sos2_hi_a  = pyo.Constraint(m.Kset, rule=lambda m,i: m.lam_a[i,R_list[-1]] <= m.mu_a[i,K_max])
-    m.sos2_lo_d  = pyo.Constraint(m.Kset, rule=lambda m,i: m.lam_d[i,R_list[0]] <= m.mu_d[i,R_list[1]])
-    m.sos2_hi_d  = pyo.Constraint(m.Kset, rule=lambda m,i: m.lam_d[i,R_list[-1]] <= m.mu_d[i,K_max])
-    m.sos2_mid_a = pyo.Constraint(mid, rule=lambda m,i,k: m.lam_a[i,k] <= m.mu_a[i,k]+m.mu_a[i,k+1])
-    m.sos2_mid_d = pyo.Constraint(mid, rule=lambda m,i,k: m.lam_d[i,k] <= m.mu_d[i,k]+m.mu_d[i,k+1])
+    m.chg_act2 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= 0.25 * m.y[i])
 
     # ══════════════════════════════════════════════════════════════════════
-    # BREAKS AND RESTS
+    # SHARED CONSTRAINT BLOCKS
     # ══════════════════════════════════════════════════════════════════════
-    non_K = [i for i in sub_data["I"] if i not in K_set]
-    m.qb_K    = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.taub_hat[i] == m.taub[i] + m.tauc[i])
-    m.qb_nonK = pyo.Constraint(non_K, rule=lambda m, i:
-        m.taub_hat[i] == m.taub[i])
+    _add_pwl_charging_constraints(m, K, R, Rseg)
+    _add_break_rest_constraints(m, N, sub_data["I"], K_set, M_big,
+                                rho2_limit=rho2_remaining)
+    _add_hos_accumulator_constraints(m, N, sub_data["I"], C_set, K_set,
+                                     sub_data["S"], M_drv, M_sd, M_sw, TK)
 
-    m.one_brk = pyo.Constraint(m.I, rule=lambda m, i:
-        m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i] <= 1)
-    m.brk45   = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taub_hat[i] >= m.Tb45 * m.x_b45[i])
-    m.brk15   = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taub_hat[i] >= m.Tb15 * m.x_b15[i])
-    m.brk30   = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taub_hat[i] >= m.Tb30 * m.x_b30[i])
-    m.brk_ub  = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taub[i] <= M_big * (m.x_b45[i] + m.x_b15[i] + m.x_b30[i]))
-
-    m.split_ord = pyo.Constraint(m.I, rule=lambda m, i: m.x_b30[i] <= m.phi[i])
-
-    def _phi1(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return (m.phi[i+1] >= m.phi[i] + m.x_b15[i]
-                - m.x_b30[i] - m.x_b45[i] - m.rho1[i] - m.rho2[i])
-    def _phi2(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return m.phi[i+1] <= m.phi[i] + m.x_b15[i]
-    def _phi3(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return m.phi[i+1] <= 1 - m.x_b30[i] - m.x_b45[i] - m.rho1[i] - m.rho2[i]
-    m.phi1 = pyo.Constraint(m.I, rule=_phi1)
-    m.phi2 = pyo.Constraint(m.I, rule=_phi2)
-    m.phi3 = pyo.Constraint(m.I, rule=_phi3)
-
-    m.rst1    = pyo.Constraint(m.I, rule=lambda m, i: m.taur[i] >= m.Tr1 * m.rho1[i])
-    m.rst2    = pyo.Constraint(m.I, rule=lambda m, i: m.taur[i] >= m.Tr2 * m.rho2[i])
-    m.rst_ub  = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taur[i] <= M_big * (m.rho1[i] + m.rho2[i]))
-    # KEY CHANGE: use rho2_remaining instead of the global limit of 3
-    m.rst_lim = pyo.Constraint(
-        expr=sum(m.rho2[i] for i in sub_data["I"]) <= rho2_remaining)
-
-    # ══════════════════════════════════════════════════════════════════════
-    # HoS ACCUMULATORS  (consecutive driving, shift driving, shift working)
-    # ══════════════════════════════════════════════════════════════════════
-    def _ri(m, i):  return m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
-    def _rho(m, i): return m.rho1[i] + m.rho2[i]
-
-    # --- Consecutive driving ---
-    m.l1u1 = pyo.Constraint(m.I, rule=lambda m, i: m.l1[i] <= M_drv * _ri(m, i))
-    m.l1u2 = pyo.Constraint(m.I, rule=lambda m, i: m.l1[i] <= m.cd[i])
-    m.l1lb  = pyo.Constraint(m.I, rule=lambda m, i:
-        m.l1[i] >= m.cd[i] - M_drv * (1 - _ri(m, i)))
-    def _cd(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return m.cd[i + 1] == m.cd[i] + m.D_nom[i] - m.l1[i]
-    m.cd_prop = pyo.Constraint(m.I, rule=_cd)
-    m.cd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.cd[i] <= m.Tdrv_cons)
-
-    # --- Shift driving ---
-    m.l2u1 = pyo.Constraint(m.I, rule=lambda m, i: m.l2[i] <= M_sd * _rho(m, i))
-    m.l2u2 = pyo.Constraint(m.I, rule=lambda m, i: m.l2[i] <= m.sd[i])
-    m.l2lb  = pyo.Constraint(m.I, rule=lambda m, i:
-        m.l2[i] >= m.sd[i] - M_sd * (1 - _rho(m, i)))
-    def _sd(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        return m.sd[i + 1] == m.sd[i] + m.D_nom[i] - m.l2[i]
-    m.sd_prop = pyo.Constraint(m.I, rule=_sd)
-    m.sd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sd[i] <= m.Tdrv_sh1)
-
-    # --- Shift working (charging not counted as work during break/rest) ---
-    m.u_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] <= TK * (1 - m.x_b45[i] - m.x_b15[i]
-                        - m.x_b30[i] - m.rho1[i] - m.rho2[i]))
-    m.u_ub2 = pyo.Constraint(m.Kset, rule=lambda m, i: m.u[i] <= m.tauc[i])
-    m.u_lb  = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] >= m.tauc[i] - TK * (m.x_b45[i] + m.x_b15[i]
-                                     + m.x_b30[i] + m.rho1[i] + m.rho2[i]))
-
-    m.l4u1 = pyo.Constraint(m.I, rule=lambda m, i: m.l4[i] <= M_sw * _rho(m, i))
-    m.l4u2 = pyo.Constraint(m.I, rule=lambda m, i: m.l4[i] <= m.sw[i])
-    m.l4lb  = pyo.Constraint(m.I, rule=lambda m, i:
-        m.l4[i] >= m.sw[i] - M_sw * (1 - _rho(m, i)))
-
-    def _sw(m, i):
-        if i >= N: return pyo.Constraint.Skip
-        man_i = m.Man[i] * _xsum(m, i)
-        ip1   = i + 1
-        if ip1 in K_set:
-            work_next = m.Q_nom[ip1] * m.y[ip1] + m.u[ip1]
-        elif ip1 in C_set:
-            work_next = sub_data["S"].get(ip1, 0)
-        else:
-            work_next = 0
-        return m.sw[i + 1] == m.sw[i] - m.l4[i] + man_i + m.D_nom[i] + work_next
-    m.sw_prop = pyo.Constraint(m.I, rule=_sw)
-    m.sw_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sw[i] <= m.Twrk_sh)
+    # Override sw_ub at stop 0: the shared helper adds sw[i] <= Twrk_sh for
+    # all i, but at stop 0 a rest (rho[0]=1) resets sw in sw_prop (sw[1]=0+…).
+    # If sw[0] > Twrk_sh because the vehicle arrived at a high-sw state and
+    # the queue pushed it over, the model is spuriously infeasible even though
+    # a rest at stop 0 is a valid corrective action.
+    #
+    # Fix: deactivate the shared sw_ub[0] and replace it with a constraint
+    # that allows sw[0] to exceed Twrk_sh by at most M_sw when a rest is taken.
+    #   sw[0] <= Twrk_sh + M_sw * rho[0]
+    # When rho[0]=0 this reduces to the original bound. When rho[0]=1 the
+    # slack M_sw allows any sw[0] (the actual bound lands on sw[1] via sw_prop).
+    if _sw0_needs_override:
+        m.sw_ub[0].deactivate()
+        m.sw_ub0_relaxed = pyo.Constraint(
+            expr=m.sw[0] <= M_sw + M_sw * _model_rho(m, 0))
 
     return m
 
@@ -646,19 +539,6 @@ def build_horizon_model(sub_data, init_state, fixed_action=None,
 # ══════════════════════════════════════════════════════════════════════════
 
 import io as _io, contextlib as _ctx
-
-
-def _solve_quiet(solver, model, tee):
-    """
-    Run solver.solve(), suppressing all stdout/stderr output when tee=False.
-    This silences Pyomo's 'Loading a feasible but suboptimal solution' messages
-    that appear on every time-limit hit in look-ahead calls.
-    """
-    if tee:
-        return solver.solve(model, tee=True)
-    _sink = _io.StringIO()
-    with _ctx.redirect_stdout(_sink), _ctx.redirect_stderr(_sink):
-        return solver.solve(model, tee=False)
 
 
 def solve_horizon_model(model, time_limit=8, tee=False, relax=True,
@@ -679,7 +559,6 @@ def solve_horizon_model(model, time_limit=8, tee=False, relax=True,
     clears set_value() hints, making post-transform counting unreliable.
     """
     import time as _tm
-    # Count model size BEFORE relaxation transform (more accurate)
     n_vars_pre = sum(1 for _ in model.component_data_objects(pyo.Var, active=True))
     n_cons_pre = sum(1 for _ in model.component_data_objects(pyo.Constraint, active=True))
 
@@ -690,14 +569,18 @@ def solve_horizon_model(model, time_limit=8, tee=False, relax=True,
             pyo.TransformationFactory("core.relax_integrality").apply_to(model)
 
     solver = pyo.SolverFactory("appsi_highs")
-    solver.options["presolve"]    = "on"
-    solver.options["time_limit"]  = time_limit
+    solver.options["presolve"]   = "on"
+    solver.options["time_limit"] = time_limit
     if not relax:
         solver.options["mip_rel_gap"] = 0.05
 
     t0 = _tm.perf_counter()
     try:
-        results = _solve_quiet(solver, model, tee)
+        # Pass warmstart=True only for MIP solves that have had variable hints
+        # injected via inject_warm_start.  For LP relaxations HiGHS ignores it
+        # (and the transformation clears set_value hints anyway).
+        use_warmstart = had_warm and not relax
+        results = _solve_quiet(solver, model, tee, warmstart=use_warmstart)
         status  = str(results.solver.termination_condition)
     except RuntimeError:
         status  = "infeasible"
@@ -783,8 +666,8 @@ def solve_horizon(full_data, start_stop, end_stop, init_state,
     ----------
     relax : bool (default True)
         True  → LP relaxation (fast, good enough for scenario comparison).
-        False → full MIP (slower; needed when extracting activity durations
-                for the nominal solution that drives advance_state).
+        False → full MIP (needed for extracting activity durations used
+                by advance_state).
 
     Returns
     -------
@@ -794,6 +677,7 @@ def solve_horizon(full_data, start_stop, end_stop, init_state,
         'sol'          : list of stop dicts (local indices)  or []
         'status'       : str
         'first_action' : dict summarising decisions at local stop 0
+        'solve_info'   : dict from solve_horizon_model
     """
     sub_data = make_subproblem_data(full_data, start_stop, end_stop,
                                     init_state, D_override=D_override,

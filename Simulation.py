@@ -71,11 +71,12 @@ def _solve_one_scenario(args):
     args tuple
     ----------
     (full_data, start_stop, end_stop, init_state,
-     action, scenario, rho2_rem, time_limit, relax)
+     action, scenario, rho2_rem, time_limit, solve_mode)
 
+    solve_mode : "lp" | "mip"  — never "both" (that is handled upstream).
     scenario is a dict with keys 'D' and 'E' (from generate_scenarios).
     """
-    full_data, start_stop, end_stop, init_state, action, scenario, rho2_rem, time_limit, relax = args
+    full_data, start_stop, end_stop, init_state, action, scenario, rho2_rem, time_limit, solve_mode = args
     return solve_horizon(
         full_data      = full_data,
         start_stop     = start_stop,
@@ -87,8 +88,8 @@ def _solve_one_scenario(args):
         rho2_remaining = rho2_rem,
         tee            = False,
         time_limit     = time_limit,
-        relax          = relax,
-        warm_start     = scenario.get("warm_start"),   # injected per scenario
+        relax          = (solve_mode != "mip"),
+        warm_start     = scenario.get("warm_start"),
     )
 
 
@@ -130,8 +131,7 @@ class VehicleState:
 # HORIZON END-STOP
 # ══════════════════════════════════════════════════════════════════════════
 
-def find_horizon_end_stop(full_data, start_stop, t_now, horizon_hours,
-                          state=None):
+def find_horizon_end_stop(full_data, start_stop, horizon_hours, state=None):
     """
     Return the last stop reachable within `horizon_hours` of wall-clock
     time from `start_stop`, correctly accounting for mandatory HoS rests.
@@ -160,7 +160,6 @@ def find_horizon_end_stop(full_data, start_stop, t_now, horizon_hours,
     ----------
     full_data      : dict from MILP._make_data
     start_stop     : int
-    t_now          : float — current absolute time (unused; kept for API compat)
     horizon_hours  : float — wall-clock look-ahead window (hours)
     state          : VehicleState or None — carries current sd, sw, rho2_used.
                      If None, accumulators start from 0.
@@ -241,16 +240,19 @@ _ECR_C =   7.2e-5  # kWh·h²/km³
 
 
 def _ecr(v_kmh):
-    """Energy Consumption Rate (kWh/km) at speed v (km/h)."""
-    v = max(float(v_kmh), 5.0)
+    """Energy Consumption Rate (kWh/km) at speed v (km/h).
+    Clamped to [5, 120] km/h — extrapolation beyond 120 km/h is physically
+    unrealistic for a BET truck and can give spuriously large energies in
+    extreme fast scenarios.
+    """
+    v = max(5.0, min(float(v_kmh), 120.0))
     return _ECR_A / v + _ECR_B + _ECR_C * v**2
 
 
 def generate_scenarios(full_data, start_stop, end_stop,
                        n_scenarios, delta=0.20, seed=None,
                        correlation=0.0, zone_size=8,
-                       include_best=False, include_worst=False,
-                       c_base_frac=0.3):   # kept for API compat, unused
+                       include_best=False, include_worst=False):
     """
     Generate stochastic travel-time + energy-consumption scenarios.
 
@@ -290,7 +292,6 @@ def generate_scenarios(full_data, start_stop, end_stop,
     zone_size    : int — number of consecutive legs per correlation zone
     include_best : bool — prepend best-case (all minimum travel times)
     include_worst: bool — append  worst-case (all maximum travel times)
-    c_base_frac  : float — share of nominal consumption that is speed-independent
 
     Returns
     -------
@@ -308,7 +309,16 @@ def generate_scenarios(full_data, start_stop, end_stop,
 
     # Zone assignment for correlation model
     n_zones = max((l - start_stop) // zone_size for l in legs) + 1
-    sigma   = np.log(1 + delta) / 3.0   # log-normal σ: exp(3σ) ≈ 1+δ
+    # Log-normal noise: D_scen = D_nom * exp(lm) where lm ~ N(0, sigma²).
+    # We want exp(±3σ) ≈ 1±δ in a symmetric sense in log-space.
+    # Setting σ = ln(1+δ)/3 gives exp(+3σ) = 1+δ exactly but
+    # exp(-3σ) = 1/(1+δ) ≠ 1-δ (asymmetric tails).
+    #
+    # Symmetric choice: set σ so that ±3σ corresponds to ±δ in log-scale,
+    # i.e. σ = δ/3.  Then the distribution has median 1 (unbiased) and
+    # the 3σ tail sits at exp(±δ) ≈ 1±δ for small δ.
+    # For δ=0.20: exp(0.20)=1.221 vs 1+δ=1.200 — close enough.
+    sigma = delta / 3.0
 
     # Speed-energy coupling: calibrate c_base and c_aero
     km_dict  = full_data.get("km", None)
@@ -439,78 +449,64 @@ def enumerate_actions(stop_global, state: VehicleState, full_data,
 
 def evaluate_action(full_data, start_stop, end_stop, state: VehicleState,
                     action, scenarios, time_limit=20, tee=False,
-                    n_workers=1, relax=True, criterion="mean"):
+                    n_workers=1, solve_mode="lp", criterion="mean"):
     """
     Solve MILP2 for each scenario with `action` fixed at `start_stop`.
+    Returns scoring statistics only — does NOT solve a nominal MIP.
+
+    The single nominal MIP re-solve (for extracting tauc/taub/taur to give
+    to advance_state) is done ONCE in select_best_action after the winner
+    is chosen, using nominal travel times. Doing it here for every action
+    wasted (n_actions - 1) MIP solves per stop.
 
     Parameters
     ----------
-    scenarios  : list of scenario dicts from generate_scenarios,
-                 each with keys "D", "E", "is_best", "is_worst".
-    criterion  : str — how to score an action across scenarios:
-        "mean"  : expected arrival time (default) — minimise E[obj]
-        "worst" : minimax — minimise max(obj) — robust/conservative
-        "best"  : optimistic — minimise min(feasible obj)
+    solve_mode : "lp" | "mip"
+        "lp"  — LP relaxation (fast, used for scoring in look-ahead).
+        "mip" — full integer MIP (slower, more accurate objective values).
+        "both" is handled upstream; this function only ever sees "lp" or "mip".
+    criterion  : "mean" | "worst" | "best"
 
     Returns
     -------
-    score     : float  — criterion value (mean / worst / best)
-    std_obj   : float  — std dev of feasible scenario objectives
-    n_feasible: int
-    first_sol : dict or None — MIP solution for the best-D scenario
-    objs      : list[float] — raw per-scenario objectives
+    score      : float  — criterion value across scenarios
+    std_obj    : float  — std dev of feasible scenario objectives
+    n_feasible : int
+    first_feas : dict or None — first feasible solve result (for feasibility
+                 signalling only — tauc/taub/taur here are NOT used for
+                 execution; the nominal MIP re-solve in select_best_action
+                 does that for the winner)
+    objs       : list[float] — raw per-scenario objectives
     """
     rho2_rem = 3 - state.rho2_used
     init_st  = state.as_init_state()
 
-    # Build one argument tuple per scenario (all picklable plain types)
-    arg_list = [
-        (full_data, start_stop, end_stop, init_st,
-         action, scenario, rho2_rem, time_limit, relax)
-        for scenario in scenarios
-    ]
+    def _run_batch(mode):
+        """Run all scenario sub-problems for this action under `mode`."""
+        arg_list = [
+            (full_data, start_stop, end_stop, init_st,
+             action, scenario, rho2_rem, time_limit, mode)
+            for scenario in scenarios
+        ]
+        if n_workers > 1:
+            results_ordered = [None] * len(arg_list)
+            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                futures = {pool.submit(_solve_one_scenario, a): idx
+                           for idx, a in enumerate(arg_list)}
+                for fut in as_completed(futures):
+                    idx = futures[fut]
+                    try:
+                        results_ordered[idx] = fut.result()
+                    except Exception:
+                        results_ordered[idx] = {"feasible": False,
+                                                "obj": INFEASIBLE_PENALTY}
+            return results_ordered
+        else:
+            return [_solve_one_scenario(a) for a in arg_list]
 
-    if n_workers > 1:
-        # Submit all scenarios to the process pool; collect in submission order
-        results_ordered = [None] * len(arg_list)
-        with ProcessPoolExecutor(max_workers=n_workers) as pool:
-            futures = {pool.submit(_solve_one_scenario, a): idx
-                       for idx, a in enumerate(arg_list)}
-            for fut in as_completed(futures):
-                idx = futures[fut]
-                try:
-                    results_ordered[idx] = fut.result()
-                except Exception as exc:
-                    # Worker crashed: treat as infeasible
-                    results_ordered[idx] = {"feasible": False,
-                                            "obj": INFEASIBLE_PENALTY}
-        res_list = results_ordered
-    else:
-        res_list = [_solve_one_scenario(a) for a in arg_list]
-
-    objs = [r["obj"] for r in res_list]
-
-    # Nominal MIP re-solve on the first feasible scenario
-    first_lp  = next((r for r in res_list if r.get("feasible")), None)
-    nom_scen  = next((scenarios[i] for i, r in enumerate(res_list)
-                      if r.get("feasible")), None)
-    if relax and first_lp is not None and nom_scen is not None:
-        first_sol = solve_horizon(
-            full_data      = full_data,
-            start_stop     = start_stop,
-            end_stop       = end_stop,
-            init_state     = init_st,
-            fixed_action   = action,
-            D_override     = nom_scen["D"],
-            E_override     = nom_scen.get("E"),
-            rho2_remaining = rho2_rem,
-            tee            = False,
-            time_limit     = time_limit * 4,
-            relax          = False,
-            warm_start     = nom_scen.get("warm_start"),  # free-horizon solution
-        )
-    else:
-        first_sol = first_lp
+    res_list   = _run_batch(solve_mode)
+    objs       = [r["obj"] for r in res_list]
+    first_feas = next((r for r in res_list if r.get("feasible")), None)
 
     n_feasible = sum(1 for o in objs if o < INFEASIBLE_PENALTY / 2)
     if n_feasible == 0:
@@ -519,24 +515,14 @@ def evaluate_action(full_data, start_stop, end_stop, state: VehicleState,
     feasible_objs = [o for o in objs if o < INFEASIBLE_PENALTY / 2]
     std_obj = float(np.std(feasible_objs)) if n_feasible > 0 else 0.0
 
-    # Criterion scoring
-    # All three use ALL objs (infeasible = PENALTY) except "best"
-    # which ignores infeasible scenarios (optimistic view).
     if criterion == "worst":
-        # Minimax: prefer the action that minimises the worst-case outcome.
-        # Infeasible scenarios contribute INFEASIBLE_PENALTY → an action
-        # with any infeasible scenario will have worst-case = PENALTY.
         score = float(max(objs))
     elif criterion == "best":
-        # Optimistic: use the best feasible scenario only.
         score = float(min(feasible_objs))
     else:
-        # mean (default): expected value across all scenarios.
-        # Infeasible scenarios are included as PENALTY so partially-feasible
-        # actions are penalised correctly.
         score = float(np.mean(objs))
 
-    return score, std_obj, n_feasible, first_sol, objs
+    return score, std_obj, n_feasible, first_feas, objs
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -570,7 +556,7 @@ def _prune_actions(actions, stop_global, state, full_data, delta):
     C_set = set(full_data["C"])
 
     if stop_global >= N - 1:
-        return actions   # last stop — no pruning needed
+        return actions, 0   # last stop — no pruning needed
 
     # Worst-case next leg travel time
     D_next_wc = full_data["D"].get(stop_global, 0.0) * (1.0 + delta)
@@ -609,12 +595,25 @@ def _prune_actions(actions, stop_global, state, full_data, delta):
         rst = a.get("rest_type")
 
         skip = False
-        if must_charge and y == 0 and stop_global in K_set:
+
+        # Hard structural cuts (always correct, zero solver cost)
+        # b15 when phi=1: phi tracker forces phi[i+1] >= 2 → always infeasible
+        if brk == "b15" and state.phi == 1:
             skip = True
-        if must_reset_cd and brk is None and rst is None:
+        # Battery essentially full: charging adds time with negligible gain.
+        # Exception: if a break/rest is being taken anyway, keep y=1 (free).
+        if (y == 1 and stop_global in K_set
+                and state.e_arr > full_data["Ecap"] - 1.0
+                and brk is None and rst is None):
             skip = True
-        if must_rest and rst is None:
-            skip = True
+
+        if not skip:
+            if must_charge and y == 0 and stop_global in K_set:
+                skip = True
+            if must_reset_cd and brk is None and rst is None:
+                skip = True
+            if must_rest and rst is None:
+                skip = True
 
         if skip:
             n_pruned += 1
@@ -623,18 +622,17 @@ def _prune_actions(actions, stop_global, state, full_data, delta):
 
     # Safety: always keep at least one action
     if not pruned:
-        return actions
+        return actions, 0   # all actions are needed; pruning was over-aggressive
     return pruned, n_pruned
 
 
 def select_best_action(full_data, stop_global, state: VehicleState,
                        n_scenarios=10, horizon_hours=12, delta=0.20,
                        scenario_seed=None, time_limit=20, tee=False,
-                       verbose=True, n_workers=1, relax=True,
+                       verbose=True, n_workers=1, solve_mode="lp",
                        charge_only=False, criterion="mean",
                        correlation=0.0, zone_size=8,
                        include_best=False, include_worst=False,
-                       c_base_frac=0.3,
                        prev_nom_sol=None,
                        log_fh=None):
     """
@@ -642,21 +640,32 @@ def select_best_action(full_data, stop_global, state: VehicleState,
 
     Parameters
     ----------
+    solve_mode    : "lp" | "mip" | "both"
+        "lp"   — LP relaxation for all scenario sub-problems (fast).
+        "mip"  — full MIP for all scenario sub-problems (accurate, slow).
+        "both" — run LP pass first, then MIP pass; log whether the two
+                 methods agree on the chosen action; execute MIP decision.
     charge_only   : only fix y; break/rest free for MILP2.
     criterion     : "mean" | "worst" | "best".
     prev_nom_sol  : nominal MIP sol from previous stop (warm-start seed).
     log_fh        : open file handle for log output.
+
+    Returns
+    -------
+    best_action  : dict
+    scores       : list of (action, score, std, n_feas, raw_objs) — for plotting
+    nominal_sol  : dict — MIP solution for the chosen action (for advance_state)
     """
+    # ── Stop-level wall-clock timer ───────────────────────────────────────
+    t_stop_start = time.perf_counter()
+
     def _p(msg):
-        """Print to stdout (if verbose) and to log file."""
         if verbose: print(msg)
         if log_fh:
-            try:
-                print(msg, file=log_fh)
-            except Exception:
-                pass   # never crash on logging
+            try: print(msg, file=log_fh)
+            except Exception: pass
 
-    # ── Enumerate + prune actions ─────────────────────────────────────
+    # ── Enumerate + prune ─────────────────────────────────────────────────
     raw_actions = enumerate_actions(stop_global, state, full_data,
                                     charge_only=charge_only)
     prune_result = _prune_actions(raw_actions, stop_global, state,
@@ -667,15 +676,14 @@ def select_best_action(full_data, stop_global, state: VehicleState,
         actions, n_pruned = prune_result, 0
 
     end_stop, n_rests = find_horizon_end_stop(full_data, stop_global,
-                                              state.t_arr, horizon_hours,
-                                              state=state)
+                                              horizon_hours, state=state)
 
     stop_type  = ("CS"   if stop_global in set(full_data["K"])
                   else "CUST" if stop_global in set(full_data["C"])
                   else "ORIG")
     worker_str = f"  {n_workers}w" if n_workers > 1 else ""
     rest_str   = f" +{n_rests}rest" if n_rests else ""
-    mode_str   = f"[{criterion}"
+    mode_str   = f"[{criterion},{solve_mode}"
     if charge_only: mode_str += ",co"
     mode_str  += "]"
     nom_travel = sum(full_data["D"].get(j, 0) for j in range(stop_global, end_stop))
@@ -696,10 +704,9 @@ def select_best_action(full_data, stop_global, state: VehicleState,
         full_data, stop_global, end_stop,
         n_scenarios=n_scenarios, delta=delta, seed=scenario_seed,
         correlation=correlation, zone_size=zone_size,
-        include_best=include_best, include_worst=include_worst,
-        c_base_frac=c_base_frac)
+        include_best=include_best, include_worst=include_worst)
 
-    # ── Warm-start (A): tail of previous nominal solution ─────────────
+    # ── Warm-start A: tail of previous nominal solution ───────────────────
     tail_warm = None
     if prev_nom_sol and len(prev_nom_sol) > 1:
         tail_warm = []
@@ -708,7 +715,15 @@ def select_best_action(full_data, stop_global, state: VehicleState,
             if s2["i"] >= 0:
                 tail_warm.append(s2)
 
-    # ── Warm-start (B): free-horizon solve (no action fixed) ──────────
+    # ── Warm-start B: FREE solve on nominal travel times ─────────────────
+    # Relax matches the scenario batch mode:
+    #   LP   → FREE as LP  (fast; fractional solution is fine for LP scenarios)
+    #   MIP  → FREE as MIP (integer decisions; HiGHS can use it directly as a
+    #          feasible incumbent for each scenario MIP without repair,
+    #          typically cutting 30-50% off each sub-problem's B&B)
+    #   both → FREE as MIP (to warm-start the MIP pass)
+    free_relax = (solve_mode == "lp")
+
     free_sol = None
     if prev_nom_sol is not None:
         _t0_free = time.perf_counter()
@@ -721,68 +736,179 @@ def select_best_action(full_data, stop_global, state: VehicleState,
             rho2_remaining = 3 - state.rho2_used,
             tee            = False,
             time_limit     = max(time_limit, 15),
-            relax          = relax,
+            relax          = free_relax,
             warm_start     = tail_warm,
         )
         _t_free = time.perf_counter() - _t0_free
         si = _free.get("solve_info", {})
         _ws_flag = "ws=yes" if si.get("had_warm") else "ws=no"
+        mode_tag = "LP" if free_relax else "MIP"
         if _free["feasible"]:
             free_sol = _free["sol"]
-            _p(f"     [FREE] obj={_free['obj']:.3f}h"
+            _p(f"     [FREE-{mode_tag}] obj={_free['obj']:.3f}h"
                f"  {_free['status']}"
-               f"  {_t_free:.1f}s"
-               f"  {_ws_flag}"
+               f"  {_t_free:.1f}s  {_ws_flag}"
                f"  {si.get('n_vars','?')}v/{si.get('n_cons','?')}c")
         else:
-            _p(f"     [FREE] infeasible  {_t_free:.1f}s  {_ws_flag}")
+            _p(f"     [FREE-{mode_tag}] infeasible  {_t_free:.1f}s  {_ws_flag}")
 
-    # Attach free solution as warm-start to every scenario
     if free_sol is not None:
         for scen in scenarios:
             scen["warm_start"] = free_sol
 
-    scores      = []
-    best_score  = math.inf
-    best_action = actions[0]
-    nominal_sol = None
+    # ── Score all actions ─────────────────────────────────────────────────
+    # scores_detail: (action, score, std, n_feas, raw_objs, first_sol)
+    def _score_all_actions(mode, header=""):
+        """Run evaluate_action for every action under `mode`; return detail list."""
+        detail = []
+        for action in actions:
+            t0 = time.perf_counter()
+            score, std_obj, n_feas, first_feas, raw_objs = evaluate_action(
+                full_data, stop_global, end_stop, state,
+                action, scenarios, time_limit=time_limit, tee=tee,
+                n_workers=n_workers, solve_mode=mode, criterion=criterion)
+            elapsed = time.perf_counter() - t0
 
-    for action in actions:
-        t0 = time.perf_counter()
-        score, std_obj, n_feas, first_sol, raw_objs = evaluate_action(
-            full_data, stop_global, end_stop, state,
-            action, scenarios, time_limit=time_limit, tee=tee,
-            n_workers=n_workers, relax=relax, criterion=criterion)
-        elapsed = time.perf_counter() - t0
+            detail.append((action, score, std_obj, n_feas, first_feas, raw_objs))
 
-        scores.append((action, score, std_obj, n_feas, raw_objs))
+            brk = action.get("break_type") or "-"
+            rst = action.get("rest_type")  or "-"
+            y   = action.get("y", "-")
+            _p(f"  {header}  y={y}  brk={brk:3}  rst={rst:2}"
+               f"  {criterion}={score:.3f}h  std={std_obj:.3f}h"
+               f"  ok={n_feas}/{len(scenarios)}"
+               f"  ({elapsed:.1f}s)")
+        return detail
 
-        brk = action.get("break_type") or "-"
-        rst = action.get("rest_type")  or "-"
-        y   = action.get("y", "-")
-        # warm-start status from first feasible solve
-        ws_tag = ""
-        if first_sol and first_sol.get("solve_info"):
-            si = first_sol["solve_info"]
-            ws_tag = f"  ws={'Y' if si.get('had_warm') else 'N'}  {si.get('wall_s',0):.1f}s"
-        _p(f"     y={y}  brk={brk:3}  rst={rst:2}"
-           f"  {criterion}={score:.3f}h  std={std_obj:.3f}h"
-           f"  ok={n_feas}/{len(scenarios)}"
-           f"{ws_tag}  ({elapsed:.1f}s)")
+    if solve_mode == "both":
+        _p(f"     --- LP pass ---")
+        lp_detail = _score_all_actions("lp", header="[LP] ")
+        _p(f"     --- MIP pass ---")
+        mip_detail = _score_all_actions("mip", header="[MIP]")
+        # Decision is based on MIP scores
+        scored_detail = mip_detail
+    else:
+        scored_detail = _score_all_actions(solve_mode)
 
-        if score < best_score:
-            best_score  = score
-            best_action = action
-            nominal_sol = first_sol
+    # ── Tie-breaking: prefer charging when it costs negligibly more ───────
+    #
+    # INTENT: if the optimal action already involves a stop (break or rest),
+    # and the y=1 version of that SAME stop type costs less than TIEBREAK_ABS
+    # extra, prefer charging — the vehicle is docked anyway.
+    #
+    # WRONG approaches avoided here:
+    #   • Relative threshold (e.g. 1% of 60h = 36 min): too loose on long trips.
+    #   • Cross-type comparison (y=0-pass vs y=1-pass): the vehicle is NOT
+    #     stopping anyway; charging adds pure dwell time with no other benefit.
+    #
+    # We therefore:
+    #   1. Use an ABSOLUTE threshold (5 min = 0.083h).
+    #   2. Only compare y=0 vs y=1 within the SAME (break_type, rest_type) pair.
+    TIEBREAK_ABS = 5.0 / 60.0   # 5 minutes in hours
 
-    scores.sort(key=lambda x: x[1])
+    best_raw_score = min(s[1] for s in scored_detail)
+    winner         = min(scored_detail, key=lambda s: s[1])
+    tiebreak_applied = False
 
+    # Check if a y=1 version of the winner's (break, rest) pair costs
+    # less than TIEBREAK_ABS more than the winner's score.
+    w_brk = winner[0].get("break_type")
+    w_rst = winner[0].get("rest_type")
+    w_y   = winner[0].get("y", 0)
+
+    if w_y == 0:
+        # Look for the y=1 version of the same stop type
+        matching_charge = [
+            s for s in scored_detail
+            if s[0].get("y", 0) == 1
+            and s[0].get("break_type") == w_brk
+            and s[0].get("rest_type")  == w_rst
+            and s[1] < INFEASIBLE_PENALTY / 2
+        ]
+        if matching_charge:
+            best_charge = min(matching_charge, key=lambda s: s[1])
+            if best_charge[1] <= best_raw_score + TIEBREAK_ABS:
+                winner           = best_charge
+                tiebreak_applied = True
+
+    best_action  = winner[0]
+    best_score   = winner[1]
+
+    # ── Single nominal MIP re-solve for the CHOSEN action only ───────────
+    # The scenario batch above (LP or MIP) was used for decision-making.
+    # advance_state needs actual integer-valued tauc/taub/taur.  We get
+    # those by solving one MIP with:
+    #   • the chosen action fixed at local stop 0
+    #   • NOMINAL travel times (full_data["D"], no D_override) — they
+    #     represent the expected case, are deterministic and reproducible,
+    #     and are independent of whichever scenario happened to be first
+    #     feasible in the batch.
+    # In MIP mode the batch already produced integer solutions, so we
+    # reuse the first feasible result from the winner's batch directly.
+    _t0_nom = time.perf_counter()
+    if solve_mode in ("lp",):
+        nominal_sol = solve_horizon(
+            full_data      = full_data,
+            start_stop     = stop_global,
+            end_stop       = end_stop,
+            init_state     = state.as_init_state(),
+            fixed_action   = best_action,
+            D_override     = None,          # nominal travel times
+            E_override     = None,
+            rho2_remaining = 3 - state.rho2_used,
+            tee            = False,
+            time_limit     = time_limit * 4,
+            relax          = False,
+            warm_start     = free_sol,      # best available warm-start
+        )
+    else:
+        # MIP / both: winner[4] is first_feas from the MIP batch
+        # (already integer-valued tauc/taub/taur)
+        nominal_sol = winner[4] if winner[4] else None
+    _t_nom = time.perf_counter() - _t0_nom
+    nom_feas = nominal_sol is not None and nominal_sol.get("feasible", False)
+    _p(f"     [NOM-MIP] y={best_action.get('y',0)}"
+       f"  brk={best_action.get('break_type') or '-'}"
+       f"  rst={best_action.get('rest_type') or '-'}"
+       f"  nominal-D  {'ok' if nom_feas else 'INFEASIBLE'}"
+       f"  {_t_nom:.1f}s")
+
+    # ── "both" comparison log ─────────────────────────────────────────────
+    if solve_mode == "both":
+        lp_winner_idx  = min(range(len(lp_detail)),  key=lambda i: lp_detail[i][1])
+        mip_winner_idx = min(range(len(mip_detail)), key=lambda i: mip_detail[i][1])
+        lp_ba  = lp_detail[lp_winner_idx][0]
+        mip_ba = mip_detail[mip_winner_idx][0]
+
+        def _act_str(a):
+            return (f"y={a.get('y',0)}"
+                    f"  brk={a.get('break_type') or '-'}"
+                    f"  rst={a.get('rest_type')  or '-'}")
+
+        if (lp_ba.get("y")          == mip_ba.get("y") and
+            lp_ba.get("break_type") == mip_ba.get("break_type") and
+            lp_ba.get("rest_type")  == mip_ba.get("rest_type")):
+            _p(f"     [CMP] LP and MIP agree ✓  →  {_act_str(mip_ba)}")
+        else:
+            _p(f"     [CMP] LP chose  {_act_str(lp_ba)}")
+            _p(f"     [CMP] MIP chose {_act_str(mip_ba)}  ← executed")
+            _p(f"     [CMP] ✗ DIFFER")
+
+    # ── Final selection log ───────────────────────────────────────────────
     ba = best_action
+    t_stop_total = time.perf_counter() - t_stop_start
+    tb_str = "  [charge-tiebreak]" if tiebreak_applied else ""
     _p(f"  -> CHOSEN y={ba.get('y','-')}"
        f"  brk={ba.get('break_type') or '-'}"
        f"  rst={ba.get('rest_type') or '-'}"
-       f"  ({criterion}={best_score:.3f}h)")
+       f"  ({criterion}={best_score:.3f}h)"
+       f"{tb_str}"
+       f"  stop_wall={t_stop_total:.1f}s")
 
+    # Trim to 5-tuple for scores_log (plot-compatible format):
+    # (action, score, std, n_feas, raw_objs)
+    scores = [(s[0], s[1], s[2], s[3], s[5]) for s in scored_detail]
+    scores.sort(key=lambda x: x[1])
     return best_action, scores, nominal_sol
 
 
@@ -921,7 +1047,10 @@ def advance_state(full_data, state: VehicleState, action,
     is_CS   = (stop in K_set)
     is_cust = (stop in C_set)
     S_stop  = full_data["S"].get(stop, 0.0)
-    man_time = full_data["M"].get(stop, 5.0 / 60) if (brk or rst) else 0.0
+    # Manoeuver time: 5 min applies whenever z_man = 1 in the MILP.
+    # z_man[i] >= y[i] at CS stops AND z_man[i] >= xsum (breaks/rests).
+    # So man_time applies when: (charging at CS) OR (any break/rest anywhere).
+    man_time = full_data["M"].get(stop, 5.0 / 60) if ((is_CS and y) or brk or rst) else 0.0
 
     if is_CS:
         td = state.t_arr + tauq_exec + tauc_exec + taub_exec + taur_exec + man_time
@@ -953,8 +1082,17 @@ def advance_state(full_data, state: VehicleState, action,
         e_dep_new = _energy_after_charging(state.e_arr, tauc_exec, full_data)
     else:
         e_dep_new = state.e_arr
-    E_leg     = full_data["E"].get(stop, 0.0)
-    e_arr_new = max(e_dep_new - E_leg, full_data["Emin"])
+    E_leg         = full_data["E"].get(stop, 0.0)
+    e_arr_new_raw = e_dep_new - E_leg
+    if e_arr_new_raw < full_data["Emin"] - 1e-3:
+        warnings.warn(
+            f"[advance_state] Energy violation leg {stop}→{stop+1}: "
+            f"ed={e_dep_new:.2f} − E={E_leg:.2f} = {e_arr_new_raw:.2f} kWh "
+            f"< Emin={full_data['Emin']:.2f} kWh. "
+            f"Clipping to Emin — check scenario feasibility.",
+            stacklevel=2,
+        )
+    e_arr_new = max(e_arr_new_raw, full_data["Emin"])
 
     # ── HoS accumulators ─────────────────────────────────────────────────
     ri  = (brk in ("b45", "b30")) or (rst in ("r1", "r2"))   # cd reset
@@ -1052,28 +1190,14 @@ def run_simulation(full_data,
                    tee           = False,
                    verbose       = True,
                    n_workers     = None,
-                   relax         = True,
+                   solve_mode    = "lp",
                    charge_only   = False,
                    criterion     = "mean",
                    correlation   = 0.0,
                    zone_size     = 8,
                    include_best  = False,
                    include_worst = False,
-                   c_base_frac   = 0.3,
                    run_id        = None):
-    """
-    n_workers    : parallel processes. None → auto (min(cpu_count, n_scenarios)).
-    charge_only  : only fix charge decision; breaks/rests free for MILP2.
-    criterion    : "mean" | "worst" | "best" — action selection criterion.
-    correlation  : spatial correlation between nearby legs [0,1].
-    zone_size    : legs per correlation zone.
-    include_best : add best-case scenario to each stop's scenario set.
-    include_worst: add worst-case scenario to each stop's scenario set.
-    c_base_frac  : speed-independent fraction for energy-speed coupling.
-    run_id       : str or None — base name for output files (auto-generated when None).
-    """
-    if n_workers is None:
-        n_workers = min(_os.cpu_count() or 1, n_scenarios)
     """
     Run the full look-ahead simulation from stop 0 to stop N.
 
@@ -1087,6 +1211,18 @@ def run_simulation(full_data,
     time_limit    : float — solver time limit per MILP2 call (seconds)
     tee           : bool  — print solver output
     verbose       : bool  — print simulation log
+    n_workers     : parallel processes. None → auto (min(cpu_count, n_scenarios)).
+    solve_mode    : "lp" | "mip" | "both"
+        "lp"   — LP relaxation for scenario scoring (fast, default).
+        "mip"  — full MIP for scenario scoring (slower, more accurate).
+        "both" — run both passes per stop; log LP vs MIP agreement; execute MIP.
+    charge_only   : only fix charge decision; breaks/rests free for MILP2.
+    criterion     : "mean" | "worst" | "best" — action selection criterion.
+    correlation   : spatial correlation between nearby legs [0,1].
+    zone_size     : legs per correlation zone.
+    include_best  : add best-case scenario to each stop's scenario set.
+    include_worst : add worst-case scenario to each stop's scenario set.
+    run_id        : str or None — base name for output files (auto-generated when None).
 
     Returns
     -------
@@ -1097,6 +1233,8 @@ def run_simulation(full_data,
         'total_time'   : float — simulated arrival time at destination (h)
         'wall_clock'   : float — real computation time (s)
     """
+    if n_workers is None:
+        n_workers = min(_os.cpu_count() or 1, n_scenarios)
     import datetime as _dt, json as _json, os as _os2
     master_rng   = np.random.default_rng(seed)
     N            = full_data["N"]
@@ -1144,7 +1282,7 @@ def run_simulation(full_data,
     durations_list = []        # per-stop activity durations dict
     wall_start   = time.perf_counter()
 
-    relax_str = "LP-relax" if relax else "MIP"
+    relax_str = {"lp": "LP-relax", "mip": "MIP", "both": "LP+MIP"}.get(solve_mode, solve_mode)
     crit_str  = f"  [{criterion}"
     if charge_only: crit_str += ", charge-only"
     if correlation > 0: crit_str += f", rho={correlation:.2f}"
@@ -1180,14 +1318,13 @@ def run_simulation(full_data,
                 tee           = tee,
                 verbose       = verbose,
                 n_workers     = n_workers,
-                relax         = relax,
+                solve_mode    = solve_mode,
                 charge_only   = charge_only,
                 criterion     = criterion,
                 correlation   = correlation,
                 zone_size     = zone_size,
                 include_best  = include_best,
                 include_worst = include_worst,
-                c_base_frac   = c_base_frac,
                 prev_nom_sol  = prev_nom_sol,
                 log_fh        = _log,
             )
@@ -1220,8 +1357,7 @@ def run_simulation(full_data,
                       f"{reason}")
             # Solve a quick MIP to get actual durations (especially tauc) for
             # the forced action so advance_state uses the correct charge amount.
-            end_fr, _ = find_horizon_end_stop(full_data, stop, state.t_arr,
-                                              2.0, state=state)
+            end_fr, _ = find_horizon_end_stop(full_data, stop, 2.0, state=state)
             forced_sol = solve_horizon(
                 full_data      = full_data,
                 start_stop     = stop,
@@ -1293,6 +1429,7 @@ def run_simulation(full_data,
     oracle = oracle_solve(full_data, D_actual_list,
                           sim_results=dict(states=states, actions=actions,
                                            durations_list=durations_list,
+                                           td_list=td_list,
                                            total_time=states[-1].t_arr),
                           verbose=verbose,
                           tee=True,
@@ -1425,32 +1562,51 @@ def check_simulation_feasibility(results, full_data, tol=1e-3):
 
 def _warmstart_oracle(model, full_data, sim_results):
     """
-    Set variable values on the oracle model using the simulation trajectory
-    as a warm-start hint.  HiGHS will use these as an initial incumbent,
-    tightening the MIP bound immediately and often cutting search time
-    significantly.
+    Inject the simulation trajectory as a complete MIP warm-start incumbent.
 
-    The simulation gives us exact values for:
-      - Binary decisions: y[i], x_b45/b15/b30[i], rho1/rho2[i]
-      - Times: ta[i], td[i]
-      - Energy: ea[i], ed[i]
-      - HoS accumulators: cd[i], sd[i], sw[i]
-      - Durations: tauc[i], taub[i], taur[i]
+    HiGHS requires EVERY variable to have a consistent value before it
+    accepts a user solution (Src "X" in the B&B log).  A partial
+    assignment is silently discarded — HiGHS tests the solution against all
+    constraints and rejects it if any are violated.
 
-    We set these as variable initial values (not constraints), so the solver
-    is free to improve upon them.
+    Variables initialised
+    ---------------------
+    Continuous : ta, td, ea, ed, tauc, taub, taur, taub_hat, u, z_man,
+                 cd, sd, sw, l1, l2, l4, lam_a, lam_d
+    Binary     : y, x_b45/b15/b30, rho1/rho2, mu_a/mu_d, phi
     """
-    import pyomo.environ as pyo
+    import warnings as _ws
 
     states    = sim_results["states"]
     actions   = sim_results["actions"]
     durs      = sim_results.get("durations_list", [])
+    td_list   = sim_results.get("td_list", [])
     K_set     = set(full_data["K"])
     C_set     = set(full_data["C"])
-    N         = full_data["N"]
+    Ebar      = full_data["Ebar"]
+    Tbar      = full_data["Tbar"]
+    R         = full_data["R"]
+    Emin      = full_data["Emin"]
 
-    # Build per-stop lookup from simulation
+    def _pwl_weights(e_kWh):
+        """Convex PWL weights for energy value e_kWh on the charging curve."""
+        e = max(Ebar[R[0]], min(float(e_kWh), Ebar[R[-1]]))
+        lam = {r: 0.0 for r in R}
+        for j in range(len(R) - 1):
+            r_lo, r_hi = R[j], R[j + 1]
+            e_lo, e_hi = Ebar[r_lo], Ebar[r_hi]
+            if e_lo <= e <= e_hi + 1e-9:
+                span    = max(e_hi - e_lo, 1e-9)
+                lam[r_hi] = (e - e_lo) / span
+                lam[r_lo] = 1.0 - lam[r_hi]
+                return lam, r_hi   # mu[r_hi] = 1 activates this segment
+        lam[R[-1]] = 1.0
+        return lam, R[-1]
+
+    # Build per-stop lookup
     sim_by_stop = {}
+    phi_track   = 0   # phi[i] tracks split-break state through sequence
+
     for idx, state in enumerate(states):
         s   = state.stop
         act = actions[idx] if idx < len(actions) else {}
@@ -1465,59 +1621,110 @@ def _warmstart_oracle(model, full_data, sim_results):
         taur = dur.get("taur", 0.0)
         tauq = dur.get("tauq", 0.0)
 
-        # Approximate departure energy from PWL
+        b45  = int(brk == "b45");  b15 = int(brk == "b15");  b30 = int(brk == "b30")
+        rho1 = int(rst == "r1");   rho2 = int(rst == "r2")
+        xsum = b45 + b15 + b30 + rho1 + rho2
+        ri   = b45 + b30 + rho1 + rho2   # consecutive-driving reset
+        rho  = rho1 + rho2                # shift reset
+
+        z_man_val  = float(bool(y or xsum))
+        taub_hat_v = taub + tauc if is_CS else taub
+        u_val      = tauc if (is_CS and y and not xsum) else 0.0
+
+        # phi at this stop = phi carried from previous stop
+        phi_now = phi_track
+        if ri or b45:   phi_track = 0
+        elif b15:       phi_track = 1
+        # else unchanged
+
+        # departure energy
         if is_CS and y and tauc > 0:
             ed_val = _energy_after_charging(state.e_arr, tauc, full_data)
         else:
             ed_val = state.e_arr
 
+        # departure time
+        if idx < len(td_list):
+            td_val = float(td_list[idx])
+        elif s == 0:
+            td_val = state.t_arr
+        elif is_CS:
+            td_val = (state.t_arr + tauq * y + tauc + taub + taur
+                      + full_data["M"].get(s, 0.0) * z_man_val)
+        elif s in C_set:
+            td_val = (state.t_arr + full_data["S"].get(s, 0.0) + taub + taur
+                      + full_data["M"].get(s, 0.0) * z_man_val)
+        else:
+            td_val = state.t_arr
+
+        lam_a_vals, mu_a_seg = _pwl_weights(state.e_arr)
+        lam_d_vals, mu_d_seg = _pwl_weights(ed_val)
+
+        l1_val = float(state.cd) if ri  else 0.0
+        l2_val = float(state.sd) if rho else 0.0
+        l4_val = float(state.sw) if rho else 0.0
+
         sim_by_stop[s] = dict(
-            ta=state.t_arr, ea=state.e_arr, ed=ed_val,
-            cd=state.cd, sd=state.sd, sw=state.sw,
-            y=y, b45=int(brk=="b45"), b15=int(brk=="b15"),
-            b30=int(brk=="b30"), rho1=int(rst=="r1"), rho2=int(rst=="r2"),
-            tauc=tauc, taub=taub, taur=taur,
+            ta=state.t_arr, td=td_val,
+            ea=state.e_arr, ed=ed_val,
+            cd=state.cd, sd=state.sd, sw=state.sw, phi=phi_now,
+            y=y, b45=b45, b15=b15, b30=b30, rho1=rho1, rho2=rho2,
+            tauc=tauc, taub=taub, taur=taur, taub_hat=taub_hat_v,
+            u=u_val, z_man=z_man_val, l1=l1_val, l2=l2_val, l4=l4_val,
+            lam_a=lam_a_vals, mu_a_seg=mu_a_seg,
+            lam_d=lam_d_vals, mu_d_seg=mu_d_seg,
         )
 
-    # Inject into model variables — Pyomo uses .set_value() for warm-start hints
-    for i in model.I:
-        if i not in sim_by_stop:
-            continue
-        s = sim_by_stop[i]
-        try:
-            model.ta[i].set_value(s["ta"])
-            model.ea[i].set_value(max(s["ea"], full_data["Emin"]))
-            model.ed[i].set_value(max(s["ed"], full_data["Emin"]))
-            model.cd[i].set_value(s["cd"])
-            model.sd[i].set_value(s["sd"])
-            model.sw[i].set_value(s["sw"])
-            model.x_b45[i].set_value(s["b45"])
-            model.x_b15[i].set_value(s["b15"])
-            model.x_b30[i].set_value(s["b30"])
-            model.rho1[i].set_value(s["rho1"])
-            model.rho2[i].set_value(s["rho2"])
-        except Exception:
-            pass  # skip stops that are outside the model's index set
+    # ── Inject ───────────────────────────────────────────────────────────
+    with _ws.catch_warnings():
+        _ws.simplefilter("ignore")   # suppress Pyomo W1001/W1002
 
-    for i in model.Kset:
-        if i not in sim_by_stop:
-            continue
-        s = sim_by_stop[i]
-        try:
-            model.y[i].set_value(s["y"])
-            model.tauc[i].set_value(s["tauc"])
-        except Exception:
-            pass
+        for i in model.I:
+            sv = sim_by_stop.get(i)
+            if sv is None:
+                continue
+            try:
+                model.ta[i].set_value(sv["ta"])
+                model.td[i].set_value(sv["td"])
+                model.ea[i].set_value(max(sv["ea"], Emin))
+                model.ed[i].set_value(max(sv["ed"], Emin))
+                model.cd[i].set_value(sv["cd"])
+                model.sd[i].set_value(sv["sd"])
+                model.sw[i].set_value(sv["sw"])
+                model.phi[i].set_value(sv["phi"])
+                model.taub[i].set_value(sv["taub"])
+                model.taur[i].set_value(sv["taur"])
+                model.taub_hat[i].set_value(sv["taub_hat"])
+                model.x_b45[i].set_value(sv["b45"])
+                model.x_b15[i].set_value(sv["b15"])
+                model.x_b30[i].set_value(sv["b30"])
+                model.rho1[i].set_value(sv["rho1"])
+                model.rho2[i].set_value(sv["rho2"])
+                model.z_man[i].set_value(sv["z_man"])
+                model.l1[i].set_value(sv["l1"])
+                model.l2[i].set_value(sv["l2"])
+                model.l4[i].set_value(sv["l4"])
+            except Exception:
+                pass
 
-    for i in model.I:
-        if i not in sim_by_stop:
-            continue
-        s = sim_by_stop[i]
-        try:
-            model.taub[i].set_value(s["taub"])
-            model.taur[i].set_value(s["taur"])
-        except Exception:
-            pass
+        for i in model.Kset:
+            sv = sim_by_stop.get(i)
+            if sv is None:
+                continue
+            try:
+                model.y[i].set_value(sv["y"])
+                model.tauc[i].set_value(sv["tauc"])
+                model.u[i].set_value(sv["u"])
+                for r in model.Rset:
+                    model.lam_a[i, r].set_value(sv["lam_a"].get(r, 0.0))
+                    model.lam_d[i, r].set_value(sv["lam_d"].get(r, 0.0))
+                mu_a_seg = sv["mu_a_seg"]
+                mu_d_seg = sv["mu_d_seg"]
+                for r in model.RsegS:
+                    model.mu_a[i, r].set_value(1 if r == mu_a_seg else 0)
+                    model.mu_d[i, r].set_value(1 if r == mu_d_seg else 0)
+            except Exception:
+                pass
 
 
 def oracle_solve(full_data, D_actual_list, sim_results=None,
@@ -1604,13 +1811,14 @@ def oracle_solve(full_data, D_actual_list, sim_results=None,
         _buf = _sio.StringIO()
         with _cl.redirect_stdout(_buf):
             try:
-                res    = solver.solve(model, tee=True, load_solution=False)
+                res    = solver.solve(model, tee=True, warmstart=True,
+                                      load_solution=False)
                 status = str(res.solver.termination_condition)
                 if status not in ("infeasible",):
                     model.solutions.load_from(res)
             except Exception:
                 try:
-                    res    = solver.solve(model, tee=True)
+                    res    = solver.solve(model, tee=True, warmstart=True)
                     status = str(res.solver.termination_condition)
                 except RuntimeError:
                     status = "infeasible"; res = None
@@ -1620,8 +1828,11 @@ def oracle_solve(full_data, D_actual_list, sim_results=None,
             print("\n[ORACLE SOLVER OUTPUT]", file=log_fh)
             print(_out, file=log_fh)
     else:
+        import io as _sio2, contextlib as _cl2
+        _sink = _sio2.StringIO()
         try:
-            res    = _solve_quiet(solver, model, False)
+            with _cl2.redirect_stdout(_sink), _cl2.redirect_stderr(_sink):
+                res = solver.solve(model, tee=False, warmstart=True)
             status = str(res.solver.termination_condition)
         except RuntimeError:
             status = "infeasible"; res = None
@@ -1683,7 +1894,8 @@ def print_simulation_log(results, full_data):
     hdr = (f"  {'stop':>4}  {'type':>5}  {'t_arr':>7}  {'soc':>6}  "
            f"{'cd':>5}  {'sd':>5}  {'sw':>5}  "
            f"{'y':>2}  {'brk':>4}  {'rst':>4}  action")
-    print(f"\n{hdr}\n  {'─'*95}")
+    print(f"\n  === SIMULATION TRAJECTORY ===")
+    print(f"{hdr}\n  {'─'*95}")
 
     for i, (state, action) in enumerate(
             zip(results["states"], results["actions"])):
@@ -1706,443 +1918,56 @@ def print_simulation_log(results, full_data):
               f"{', '.join(acts) or '—'}")
 
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# VISUALISATION
-# ══════════════════════════════════════════════════════════════════════════
-
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-
-_COL = dict(
-    drive   = "#2C6FAC",
-    service = "#27AE60",
-    queue   = "#C0392B",
-    charge  = "#E67E22",
-    brk     = "#F1C40F",
-    rest    = "#8E44AD",
-)
-_EPS = 1e-3
-
-
-def _bar(ax, start, dur, y, h, color, label=None, fsize=7, tc="white"):
-    if dur < _EPS:
+def print_oracle_log(oracle, full_data):
+    """Pretty-print the oracle (hindsight-optimal) solution schedule."""
+    if not oracle.get("feasible") or not oracle.get("sol"):
+        print("  Oracle: no feasible solution available.")
         return
-    ax.barh(y, dur, left=start, height=h, color=color,
-            edgecolor="white", linewidth=0.3)
-    if dur > 0.1 and label:
-        ax.text(start + dur / 2, y, label, ha="center", va="center",
-                fontsize=fsize, color=tc, fontweight="bold", clip_on=True)
-
-
-def _shade_bands(ax, t0, t1):
-    """Alternate night/day/evening shading over the timeline."""
-    bands = [(0, 6, "#D6EAF8"), (6, 20, "#FEF9E7"), (20, 24, "#E8DAEF")]
-    t = 0
-    while t < t1:
-        day = int(t) // 24
-        for h0, h1, col in bands:
-            s = max(day * 24 + h0, t0)
-            e = min(day * 24 + h1, t1)
-            if e > s:
-                ax.axvspan(s, e, color=col, alpha=0.25, zorder=0, lw=0)
-        t += 24
-
-
-def plot_simulation_results(results, full_data, title="simulation", save=True):
-    """
-    Three-panel plot of the simulation run:
-      1. Gantt — activity timeline (drive, service, queue, charge, break, rest)
-      2. SOC   — battery state of charge
-      3. HoS   — consecutive-driving, shift-driving, shift-working accumulators
-
-    Parameters
-    ----------
-    results  : dict returned by run_simulation
-    full_data: dict from MILP._make_data
-    title    : string used in suptitle and filename
-    save     : if True, saves PNG to current directory
-    """
-    import os, time as _t
-
-    states        = results["states"]
-    actions       = results["actions"]
-    td_list       = results["td_list"]          # departure from stop i
-    D_actual_list = results["D_actual_list"]    # actual leg i travel time
-    durations_list= results["durations_list"]   # taub/taur/tauc/tauq at stop i
 
     N     = full_data["N"]
     C_set = set(full_data["C"])
     K_set = set(full_data["K"])
+    sol   = oracle["sol"]
 
-    # Convenience: index by stop number
-    # states[i] = arrival at stop i  (len = N+1)
-    # actions[i], td_list[i], durations_list[i] correspond to stop i  (len = N)
+    opt_str = " (optimal)" if oracle.get("optimal") else (
+              f" (gap ≈ {oracle['gap']:.1%})"
+              if not (oracle.get("gap") != oracle.get("gap"))   # not NaN
+              else " (feasible)")
 
-    tend = states[-1].t_arr
+    hdr = (f"  {'stop':>4}  {'type':>5}  {'t_arr':>7}  {'soc':>6}  "
+           f"{'cd':>5}  {'sd':>5}  {'sw':>5}  "
+           f"{'y':>2}  {'brk':>4}  {'rst':>4}  action")
+    print(f"\n  === ORACLE SCHEDULE  (arrival {oracle['obj']:.3f}h{opt_str}) ===")
+    print(f"{hdr}\n  {'─'*95}")
 
-    oracle      = results.get("oracle", {})
-    oracle_sol  = oracle.get("sol", [])
-    oracle_obj  = oracle.get("obj", None)
-    oracle_feas = oracle.get("feasible", False)
+    for s in sol:
+        stop = s["i"]
+        typ  = ("ORIG" if stop == 0 else
+                "DEST" if stop == N else
+                "CUST" if stop in C_set else "CS")
+        brk  = ("b45" if s["b45"] else
+                "b15" if s["b15"] else
+                "b30" if s["b30"] else "—")
+        rst  = ("r1" if s["rho1"] else
+                "r2" if s["rho2"] else "—")
+        y    = s.get("y", 0)
+        acts = []
+        if y:           acts.append("CHARGE")
+        if brk != "—":  acts.append(f"BRK-{brk.upper()}")
+        if rst != "—":  acts.append(f"REST-{rst.upper()}")
 
-    # x-axis extent: longest of simulation and oracle timelines
-    tend_all = tend
-    if oracle_feas and oracle_obj:
-        tend_all = max(tend, oracle_obj)
+        print(f"  {stop:>4}  {typ:>5}  "
+              f"{s['ta']:>7.3f}  {s['ea']:>6.1f}  "
+              f"{s['cd']:>5.2f}  {s['sd']:>5.2f}  {s['sw']:>5.2f}  "
+              f"{y:>2}  {brk:>4}  {rst:>4}  "
+              f"{', '.join(acts) or '—'}")
 
-    fig, axes = plt.subplots(5, 1, figsize=(16, 17), sharex=True,
-                             gridspec_kw={"height_ratios": [2.5, 2.5, 2, 2, 2.5]})
 
-    gap_str = ""
-    if oracle_feas and oracle_obj:
-        gap = tend - oracle_obj
-        gap_str = f"  |  oracle {oracle_obj:.2f}h  |  gap {gap:+.2f}h ({100*gap/oracle_obj:.1f}%)"
-    fig.suptitle(f"Simulation — {title}  (arrival {tend:.2f}h){gap_str}",
-                 fontsize=11, fontweight="bold")
 
-    # ── Panel 1: Gantt ────────────────────────────────────────────────────
-    ax1 = axes[0]
-    ax1.set_title("Simulation — actual realization", fontsize=10)
-    _shade_bands(ax1, 0, tend)
-    Y, H = 0.5, 0.40
-
-    for i in range(N):
-        st   = states[i]
-        ta_i = st.t_arr
-        act  = actions[i]
-        dur  = durations_list[i] if i < len(durations_list) else {}
-        td_i = td_list[i]        if i < len(td_list)        else ta_i
-
-        is_K = (i in K_set)
-        is_C = (i in C_set)
-        y_val = int(act.get("y", 0))
-
-        brk = act.get("break_type")
-        rst = act.get("rest_type")
-
-        t = ta_i
-
-        # Service (customers)
-        if is_C:
-            svc = full_data["S"].get(i, 0.0)
-            _bar(ax1, t, svc, Y, H, _COL["service"], f"C{i}", fsize=7); t += svc
-
-        # Queue (CS, charged only)
-        if is_K and y_val:
-            tauq = dur.get("tauq", 0.0)
-            _bar(ax1, t, tauq, Y, H, _COL["queue"], "Q", fsize=7); t += tauq
-
-        # Charge
-        if is_K and y_val:
-            tauc = dur.get("tauc", 0.0)
-            ea_v = st.e_arr
-            ed_v = states[i + 1].e_arr + full_data["E"].get(i, 0.0)  # approx
-            _bar(ax1, t, tauc, Y, H, _COL["charge"],
-                 f"CHG\n{ea_v:.0f}→{ed_v:.0f}", fsize=6); t += tauc
-
-        # Break
-        taub = dur.get("taub", 0.0)
-        if brk and taub > _EPS:
-            lbl = {"b45": "B45", "b15": "B15", "b30": "B30"}.get(brk, brk)
-            _bar(ax1, t, taub, Y, H, _COL["brk"], lbl, fsize=7, tc="#333")
-            t += taub
-
-        # Rest
-        taur = dur.get("taur", 0.0)
-        if rst and taur > _EPS:
-            lbl = "RST-r1" if rst == "r1" else "RST-r2"
-            _bar(ax1, t, taur, Y, H, _COL["rest"], lbl, fsize=7); t += taur
-
-        # Driving to next stop
-        if i < N and i < len(D_actual_list):
-            D_act = D_actual_list[i]
-            _bar(ax1, td_i, D_act, Y, H, _COL["drive"],
-                 f"→{i+1}", fsize=6)
-
-        # Stop label
-        typ = "●" if is_C else ("▲" if is_K else "O")
-        ax1.text(ta_i, Y + H / 2 + 0.06, f"{typ}{i}",
-                 ha="left", va="bottom", fontsize=6,
-                 color="#444", rotation=45, clip_on=True)
-
-    # Shade look-ahead windows: from decision stop to its mean horizon end
-    LA_PENALTY = 1e9 / 2
-    for stp, sc_list in enumerate(results["scores_log"]):
-        if stp == 0 or not sc_list:
-            continue
-        best_entry = sc_list[0]          # best = lowest mean_obj, already sorted
-        mean_horizon = best_entry[1]
-        if mean_horizon < LA_PENALTY:
-            t_la_start = states[stp].t_arr
-            ax1.axvspan(t_la_start, mean_horizon, alpha=0.055,
-                        color="navy", zorder=0, lw=0)
-
-    ax1.set_yticks([])
-    ax1.set_xlim(-0.1, tend_all * 1.04)
-    patches = [mpatches.Patch(color=v, label=k.replace("_", " ").title())
-               for k, v in _COL.items()]
-    patches += [mpatches.Patch(color="#D6EAF8", alpha=0.6, label="night 0–6h"),
-                mpatches.Patch(color="#FEF9E7", alpha=0.6, label="day 6–20h"),
-                mpatches.Patch(color="#E8DAEF", alpha=0.6, label="eve 20–24h")]
-    ax1.legend(handles=patches, loc="upper left", fontsize=7, ncol=5)
-
-    # ── Panel 2: Oracle Gantt ────────────────────────────────────────────
-    ax_or = axes[1]
-    ax_or.set_title("Oracle — hindsight-optimal schedule (same realised travel times)",
-                    fontsize=10)
-    _shade_bands(ax_or, 0, tend_all)
-    Yo, Ho = 0.5, 0.40
-
-    if oracle_feas and oracle_sol:
-        orsol = {s["i"]: s for s in oracle_sol}
-        for i in range(N):
-            s_or = orsol.get(i, {})
-            if not s_or:
-                continue
-            ta_or = s_or.get("ta", 0.0)
-            td_or = s_or.get("td", ta_or)
-            t     = ta_or
-            is_K  = i in K_set
-            is_C  = i in C_set
-            y_or  = s_or.get("y", 0)
-
-            if is_C:
-                svc = full_data["S"].get(i, 0.0)
-                _bar(ax_or, t, svc, Yo, Ho, _COL["service"], f"C{i}", fsize=7)
-                t += svc
-            if is_K and y_or:
-                tauq_or = s_or.get("tauq", 0.0)
-                _bar(ax_or, t, tauq_or, Yo, Ho, _COL["queue"], "Q", fsize=7)
-                t += tauq_or
-                tauc_or = s_or.get("tauc", 0.0)
-                ea_or = s_or.get("ea", 0.0); ed_or = s_or.get("ed", 0.0)
-                _bar(ax_or, t, tauc_or, Yo, Ho, _COL["charge"],
-                     f"CHG\n{ea_or:.0f}→{ed_or:.0f}", fsize=6)
-                t += tauc_or
-            if s_or.get("b45"):
-                _bar(ax_or, t, s_or.get("taub", 0), Yo, Ho, _COL["brk"], "B45", fsize=7, tc="#333")
-                t += s_or.get("taub", 0)
-            elif s_or.get("b15"):
-                _bar(ax_or, t, s_or.get("taub", 0), Yo, Ho, _COL["brk"], "B15", fsize=7, tc="#333")
-                t += s_or.get("taub", 0)
-            elif s_or.get("b30"):
-                _bar(ax_or, t, s_or.get("taub", 0), Yo, Ho, _COL["brk"], "B30", fsize=7, tc="#333")
-                t += s_or.get("taub", 0)
-            if s_or.get("rho1") or s_or.get("rho2"):
-                lbl = "RST-r1" if s_or.get("rho1") else "RST-r2"
-                _bar(ax_or, t, s_or.get("taur", 0), Yo, Ho, _COL["rest"], lbl, fsize=7)
-                t += s_or.get("taur", 0)
-
-            # Driving bar: use actual realised D (same as simulation)
-            if i < len(D_actual_list):
-                _bar(ax_or, td_or, D_actual_list[i], Yo, Ho, _COL["drive"],
-                     f"→{i+1}", fsize=6)
-
-            typ = "●" if is_C else ("▲" if is_K else "O")
-            ax_or.text(ta_or, Yo + Ho/2 + 0.06, f"{typ}{i}",
-                       ha="left", va="bottom", fontsize=6,
-                       color="#444", rotation=45, clip_on=True)
-
-        # Highlight arrival difference
-        ax_or.axvline(oracle_obj, color="green",  lw=2, ls="-",  alpha=0.9,
-                      label=f"oracle arrival {oracle_obj:.2f}h")
-        ax_or.axvline(tend,       color="crimson", lw=2, ls="--", alpha=0.9,
-                      label=f"simulation arrival {tend:.2f}h")
-    else:
-        ax_or.text(0.5, 0.5, "Oracle infeasible or not run",
-                   ha="center", va="center", transform=ax_or.transAxes,
-                   fontsize=12, color="grey")
-
-    ax_or.set_yticks([])
-    ax_or.legend(fontsize=8, loc="upper right")
-
-    # ── Panel 3: SOC ─────────────────────────────────────────────────────
-    ax2 = axes[2]
-    ax2.set_title("Battery state of charge (at arrival)", fontsize=10)
-    _shade_bands(ax2, 0, tend)
-
-    t_pts = [s.t_arr for s in states]
-    e_pts = [s.e_arr for s in states]
-
-    # Insert charge-event jumps for smoother SOC curve
-    t_full, e_full = [], []
-    for i, (t, e) in enumerate(zip(t_pts, e_pts)):
-        t_full.append(t); e_full.append(e)
-        if i < N and int(actions[i].get("y", 0)):
-            dur = durations_list[i] if i < len(durations_list) else {}
-            td_i = td_list[i] if i < len(td_list) else t
-            tauq = dur.get("tauq", 0.0)
-            tauc = dur.get("tauc", 0.0)
-            t_cs = t + tauq
-            t_ce = t_cs + tauc
-            e_dep = e_pts[i + 1] + full_data["E"].get(i, 0.0)  # before driving
-            t_full.append(t_cs); e_full.append(e)
-            t_full.append(t_ce); e_full.append(e_dep)
-            t_full.append(td_i); e_full.append(e_dep)
-
-    ax2.plot(t_full, e_full, color=_COL["drive"], lw=2, label="SOC", zorder=2)
-    ax2.fill_between(t_full, e_full, alpha=0.10, color=_COL["drive"])
-    ax2.axhline(full_data["Emin"], color="red", ls=":", lw=1.2,
-                label=f"E_min={full_data['Emin']} kWh")
-    ax2.axhline(full_data["Ecap"], color="gray", ls=":", lw=1.2,
-                label=f"E_cap={full_data['Ecap']} kWh")
-    ax2.set_ylabel("kWh")
-    ax2.set_ylim(0, full_data["Ecap"] * 1.15)
-    ax2.legend(fontsize=8, loc="upper right")
-
-    # ── Panel 3: HoS counters ─────────────────────────────────────────────
-    ax3 = axes[3]
-    ax3.set_title("HoS accumulators at arrival", fontsize=10)
-    _shade_bands(ax3, 0, tend)
-
-    cd_vals = [s.cd for s in states]
-    sd_vals = [s.sd for s in states]
-    sw_vals = [s.sw for s in states]
-    ta_vals = [s.t_arr for s in states]
-
-    ax3.plot(ta_vals, cd_vals, "o-", color="#E74C3C", lw=1.5, ms=4,
-             label="Consec. driving")
-    ax3.plot(ta_vals, sd_vals, "s-", color="#3498DB", lw=1.5, ms=4,
-             label="Shift driving")
-    ax3.plot(ta_vals, sw_vals, "^-", color="#1ABC9C", lw=1.5, ms=4,
-             label="Shift working")
-
-    ax3.axhline(full_data["Tdrv_cons"], color="#E74C3C", ls=":", lw=1.2,
-                alpha=0.7, label=f"max consec {full_data['Tdrv_cons']}h")
-    ax3.axhline(full_data["Tdrv_sh1"], color="#3498DB", ls=":", lw=1.2,
-                alpha=0.7, label=f"max shift drv {full_data['Tdrv_sh1']}h")
-    ax3.axhline(full_data["Twrk_sh"], color="#1ABC9C", ls=":", lw=1.2,
-                alpha=0.7, label=f"max shift wk {full_data['Twrk_sh']}h")
-
-    # Mark break / rest events
-    for i, act in enumerate(actions):
-        brk = act.get("break_type")
-        rst = act.get("rest_type")
-        if brk or rst:
-            t_ev = states[i].t_arr
-            color = _COL["rest"] if rst else _COL["brk"]
-            ax3.axvline(t_ev, color=color, lw=1.2, alpha=0.55, ls="--")
-
-    ax3.set_xlabel("Time (h)")
-    ax3.set_ylabel("Hours")
-    ax3.legend(fontsize=7, ncol=3, loc="upper left")
-
-    # ── Panel 4: Look-ahead decision quality ────────────────────────────────
-    ax4 = axes[4]
-    ax4.set_title("Look-ahead: scenario objectives by decision stop  "
-                  "(●=chosen ±σ,  ×=2nd-best,  dots=raw scenarios)", fontsize=10)
-
-    PENALTY = INFEASIBLE_PENALTY / 2
-
-    def _action_label(act):
-        rst = act.get("rest_type")
-        brk = act.get("break_type")
-        y   = int(act.get("y", 0))
-        if rst:  return f"REST-{rst}"
-        if brk:  return f"BRK-{brk}"
-        if y:    return "CHARGE"
-        return "pass"
-
-    def _action_color(act):
-        rst = act.get("rest_type")
-        brk = act.get("break_type")
-        y   = int(act.get("y", 0))
-        if rst == "r1":  return "#8E44AD"
-        if rst == "r2":  return "#6C3483"
-        if brk == "b45": return "#E67E22"
-        if brk == "b30": return "#D68910"
-        if brk == "b15": return "#F1C40F"
-        if y:            return "#E74C3C"
-        return "#2C6FAC"
-
-    rng_jit = np.random.default_rng(0)
-    _shade_bands(ax4, 0, tend)
-
-    # Collect lines to connect chosen-action means
-    line_x, line_y = [], []
-
-    for stp, sc_list in enumerate(results["scores_log"]):
-        if stp == 0 or not sc_list:
-            continue
-
-        t_x     = states[stp].t_arr
-        best    = sc_list[0]              # (action, mean, std, n_feas, raw_objs)
-        b_act, b_mean, b_std, b_feas, b_raw = best
-        b_col   = _action_color(b_act)
-
-        # Raw feasible scenario dots for chosen action
-        feas_raw = [o for o in b_raw if o < PENALTY]
-        if feas_raw:
-            n   = len(feas_raw)
-            jit = rng_jit.uniform(-0.12, 0.12, n)
-            ax4.scatter(t_x + jit, feas_raw,
-                        color=b_col, alpha=0.30, s=18, zorder=3, lw=0)
-
-        # Chosen action mean ± std
-        if b_mean < PENALTY:
-            ax4.errorbar(t_x, b_mean, yerr=b_std,
-                         fmt="o", color=b_col, ms=9,
-                         elinewidth=1.8, capsize=5, zorder=6,
-                         label=_action_label(b_act) if stp == 1 else "")
-            line_x.append(t_x)
-            line_y.append(b_mean)
-
-        # Second-best reference (×)
-        if len(sc_list) > 1:
-            _, s_mean, _, _, _ = sc_list[1]
-            if s_mean < PENALTY:
-                ax4.scatter(t_x, s_mean, color="grey", marker="x",
-                            s=55, lw=2, zorder=5, alpha=0.65)
-
-    # Confidence band: fill between min and max scenario objective across stops
-    if line_x:
-        ax4.plot(line_x, line_y, color="dimgrey", lw=1.2, ls="--",
-                 alpha=0.6, zorder=4, label="chosen action mean")
-
-    # Actual final arrival + oracle reference
-    ax4.axhline(states[-1].t_arr, color="crimson", ls="-", lw=1.8,
-                label=f"simulation arrival {states[-1].t_arr:.2f}h", zorder=7)
-    if oracle_feas and oracle_obj:
-        ax4.axhline(oracle_obj, color="green", ls="-", lw=1.8,
-                    label=f"oracle (hindsight optimal) {oracle_obj:.2f}h", zorder=7)
-        ax4.fill_between([0, tend_all], oracle_obj, states[-1].t_arr,
-                         alpha=0.08, color="red", label="suboptimality gap")
-
-    ax4.set_ylabel("Horizon arrival time (h)")
-    ax4.legend(fontsize=7, loc="upper left", ncol=3)
-
-    plt.tight_layout()
-
-    if oracle_feas and oracle_obj:
-        gap = tend - oracle_obj
-        feas_ok2, feas_iss2 = check_simulation_feasibility(results, full_data)
-        feas_tag  = "✓ feasible" if feas_ok2 else f"✗ INFEASIBLE ({len(feas_iss2)} HoS violations)"
-        ora_opt   = oracle.get("optimal", False)
-        ora_gap   = oracle.get("gap", float("nan"))
-        ora_tag   = "optimal" if ora_opt else f"feasible (gap≈{ora_gap:.1%})" if not np.isnan(ora_gap) else "feasible"
-        print(f"\n  ┌────────────────────────────────────────────────────┐")
-        print(f"  │  Simulation arrival :   {tend:>8.3f} h                    │")
-        print(f"  │  Simulation status  :   {feas_tag:<32}│")
-        print(f"  │  Oracle  arrival    :   {oracle_obj:>8.3f} h  [{ora_tag}]  │")
-        print(f"  │  Gap (sim − oracle) :   {gap:>+8.3f} h ({100*gap/oracle_obj:.1f}%)              │")
-        if not feas_ok2:
-            print(f"  │  ⚠  Gap meaningless — trajectory violates HoS.     │")
-            print(f"  │     Increase horizon (H ≥ 6h recommended).          │")
-        print(f"  └────────────────────────────────────────────────────┘")
-
-    if save:
-        import os as _oss
-        _oss.makedirs("figures", exist_ok=True)
-        if isinstance(results, dict) and results.get("fig_path"):
-            fname = results["fig_path"]
-        else:
-            fname = _oss.path.join("figures", f"simulation_{title}_{int(_t.time())}.png")
-        plt.savefig(fname, dpi=150, bbox_inches="tight")
-        print(f"  Plot saved: {fname}")
-
-    plt.show()
-    plt.close()
+# ══════════════════════════════════════════════════════════════════════════
+# VISUALISATION  →  see plots.py
+# ══════════════════════════════════════════════════════════════════════════
+from plots import plot_simulation_results    # noqa: F401 — re-exported for callers
 
 # ══════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
@@ -2160,14 +1985,18 @@ if __name__ == "__main__":
     horizon_hours  = float(sys.argv[3]) if len(sys.argv) > 3 else 8.0
     delta          = float(sys.argv[4]) if len(sys.argv) > 4 else 0.15
     n_workers      = int(sys.argv[5])   if len(sys.argv) > 5 else None
-    relax          = (sys.argv[6].lower() not in ("0","false","mip"))                      if len(sys.argv) > 6 else True
+    # solve_mode: 0/lp → "lp" (default),  1/mip → "mip",  2/both → "both"
+    _sm_raw        = sys.argv[6].lower() if len(sys.argv) > 6 else "0"
+    solve_mode     = {"0": "lp",  "lp":  "lp",
+                      "1": "mip", "mip": "mip",
+                      "2": "both","both":"both"}.get(_sm_raw, "lp")
     criterion      = sys.argv[7]        if len(sys.argv) > 7 else "mean"
-    charge_only    = (sys.argv[8].lower() in ("1","true","co"))                      if len(sys.argv) > 8 else False
+    charge_only    = (sys.argv[8].lower() in ("1","true","co")) \
+                                         if len(sys.argv) > 8 else False
     correlation    = float(sys.argv[9]) if len(sys.argv) > 9 else 0.0
-    # Usage: python simulation.py <inst> <N_scen> <H> <δ> [workers] [relax] [criterion] [charge_only] [correlation]
-    # criterion: mean (default) | worst | best
-    # charge_only: 0 (default) | 1
-    # correlation: 0.0 (default, independent) .. 1.0 (fully correlated per zone)
+    # Usage: python simulation.py <inst> <N_scen> <H> <δ> [workers] [solve_mode] [criterion] [charge_only] [correlation]
+    # solve_mode: 0/lp (default) | 1/mip | 2/both
+    # criterion:  mean (default) | worst | best
 
     if name not in INSTANCES:
         print(f"Unknown instance '{name}'. Choose: {list(INSTANCES)}")
@@ -2180,16 +2009,17 @@ if __name__ == "__main__":
         horizon_hours = horizon_hours,
         delta         = delta,
         seed          = 42,
-        time_limit    = 30,
+        time_limit    = 300,
         verbose       = True,
         n_workers     = n_workers,
-        relax         = relax,
+        solve_mode    = solve_mode,
         criterion     = criterion,
         charge_only   = charge_only,
         correlation   = correlation,
     )
 
     print_simulation_log(results, data)
+    print_oracle_log(results.get("oracle", {}), data)
     print(f"\n  Total simulated duration : {results['total_time']:.3f} h")
     print(f"  Computation time         : {results['wall_clock']:.1f} s")
 
