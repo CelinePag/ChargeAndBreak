@@ -198,7 +198,10 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
         ri   = b45 + b30 + rho1 + rho2
         rho  = rho1 + rho2
 
-        z_man_val  = float(bool(y or xsum))
+        # Manoeuver: rest always; break only when NOT synchronized with charging
+        _brk_active = bool(b45 + b15 + b30)
+        _brk_unsync = _brk_active and not (is_CS and bool(y))
+        z_man_val   = float(_brk_unsync or bool(rho1 + rho2))
         taub_hat_v = taub + tauc if is_CS else taub
         u_val      = tauc if (is_CS and y and not xsum) else 0.0
 
@@ -376,25 +379,26 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     solver.options["mip_heuristic_effort"]  = 0.2
 
     if tee:
-        _buf = _io.StringIO()
-        with _ctx.redirect_stdout(_buf):
+        # Write solver output directly to stdout.
+        # No redirect_stdout wrapper: HiGHS output is guaranteed to appear on
+        # the terminal regardless of how the solver writes to stdout/stderr.
+        # If log_fh is provided the solver log is not duplicated there (summary
+        # lines from _op still go to log_fh as usual).
+        try:
+            res    = solver.solve(model, tee=True, warmstart=True,
+                                  load_solution=False)
+            status = str(res.solver.termination_condition)
+            if status not in ("infeasible",):
+                model.solutions.load_from(res)
+        except Exception:
             try:
-                res    = solver.solve(model, tee=True, warmstart=True,
-                                      load_solution=False)
+                res    = solver.solve(model, tee=True, warmstart=True)
                 status = str(res.solver.termination_condition)
-                if status not in ("infeasible",):
-                    model.solutions.load_from(res)
-            except Exception:
-                try:
-                    res    = solver.solve(model, tee=True, warmstart=True)
-                    status = str(res.solver.termination_condition)
-                except RuntimeError:
-                    status = "infeasible"; res = None
-        _out = _buf.getvalue()
-        if verbose: print(_out)
+            except RuntimeError:
+                status = "infeasible"; res = None
         if log_fh:
-            print("\n[ORACLE SOLVER OUTPUT]", file=log_fh)
-            print(_out, file=log_fh)
+            print("\n[ORACLE SOLVER OUTPUT: printed to terminal (tee=True)]",
+                  file=log_fh)
     else:
         _sink = _io.StringIO()
         try:

@@ -5,7 +5,7 @@ Provides run_algorithm(), a single entry point that loads a precomputed
 instance JSON file and runs one of three algorithms:
 
   "LA"     — Look-ahead rolling-horizon simulation (Simulation.py)
-  "RO"     — Robust / deterministic simulation (Simulation.py, delta=0)
+  "RO"     — Robust optimisation, solved once on full route (RO.py)
   "greedy" — Greedy benchmark heuristic (greedy.py)
 
 Each JSON file produced by instance_io.py contains exactly one instance
@@ -34,15 +34,21 @@ Usage (CLI)
     --oracle_tee
     --run_id STR
 
-  LA / RO options:
+  LA options:
     --n_scenarios INT     scenarios per stop (default: 10)
     --horizon FLOAT       look-ahead horizon hours (default: 12.0)
     --delta FLOAT         uncertainty half-width (default: 0.20)
-    --time_limit INT      per-scenario solver time limit s (default: 20)
-    --n_workers INT       parallel workers (default: auto)
+    --time_limit INT      per-scenario solver time limit s (default: 300)
+    --n_workers INT       parallel workers (default: 8)
     --solve_mode STR      lp | mip | both (default: lp)
     --charge_only         enumerate charge decision only
     --criterion STR       mean | worst | best (default: mean)
+
+  RO options:
+    --delta FLOAT         uncertainty half-width (default: 0.20)
+    --gamma FLOAT         budget parameter Gamma (default: N/2)
+    --ro_time_limit INT   full-route MIP time limit s (default: 7200)
+    --ro_mip_gap FLOAT    MIP gap tolerance (default: 0.005)
 
   Greedy options:
     --safety FLOAT        SOC safety buffer fraction (default: 0.10)
@@ -59,17 +65,21 @@ from typing import Optional
 def run_algorithm(
     json_file: str,
     algorithm: str,
-    # LA / RO options
+    # LA options
     n_scenarios: int       = 10,
     horizon_hours: float   = 12.0,
     delta: float           = 0.20,
-    time_limit: int        = 20,
+    time_limit: int        = 300,
     n_workers              = None,
     solve_mode: str        = "lp",
     charge_only: bool      = False,
     criterion: str         = "mean",
     include_best: bool     = False,
     include_worst: bool    = False,
+    # RO options
+    ro_gamma: float        = None,   # None = N/2 (auto)
+    ro_time_limit: int     = 7200,
+    ro_mip_gap: float      = 0.005,
     # greedy options
     safety_buffer: float   = 0.10,
     queue_threshold: float = 999.0,
@@ -87,12 +97,11 @@ def run_algorithm(
                       (one file = one instance = one seed)
     algorithm       : "LA" | "RO" | "greedy"
 
-    LA / RO parameters
-    ------------------
+    LA parameters
+    -------------
     n_scenarios     : how many scenarios per stop to use (first n of 500)
     horizon_hours   : look-ahead window length (h)
-    delta           : uncertainty half-width passed to sub-problem (LA only;
-                      RO ignores this and uses delta=0)
+    delta           : uncertainty half-width passed to sub-problem
     time_limit      : per-scenario MILP time limit (s)
     n_workers       : parallel workers (None = auto)
     solve_mode      : "lp" | "mip" | "both"
@@ -100,6 +109,12 @@ def run_algorithm(
     criterion       : "mean" | "worst" | "best"
     include_best    : append best-case scenario
     include_worst   : append worst-case scenario
+
+    RO parameters
+    -------------
+    ro_gamma        : Bertsimas-Sim budget Gamma (None = N/2)
+    ro_time_limit   : full-route MIP solver time limit (s)
+    ro_mip_gap      : MIP relative gap tolerance
 
     Greedy parameters
     -----------------
@@ -144,13 +159,29 @@ def run_algorithm(
             oracle_tee      = oracle_tee,
         )
 
-    else:  # LA or RO
+    elif alg == "RO":
+        from RO import run_ro
+        return run_ro(
+            full_data  = full_data,
+            D_real     = D_real,
+            E_real     = E_real,
+            delta      = delta,
+            Gamma      = ro_gamma,
+            time_limit = ro_time_limit,
+            mip_gap    = ro_mip_gap,
+            tee        = False,
+            verbose    = verbose,
+            run_id     = run_id,
+            oracle_tee = oracle_tee,
+        )
+
+    else:  # LA
         from Simulation import run_simulation_precomputed
         return run_simulation_precomputed(
             full_data          = full_data,
             D_real             = D_real,
             E_real             = E_real,
-            scenarios_by_stop  = scenarios_by_stop if alg == "LA" else None,
+            scenarios_by_stop  = scenarios_by_stop,
             n_scenarios        = n_scenarios,
             horizon_hours      = horizon_hours,
             delta              = delta,
@@ -185,7 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet",       action="store_true", default=False)
     parser.add_argument("--oracle_tee",  action="store_true", default=False)
 
-    # LA / RO
+    # LA
     parser.add_argument("--n_scenarios", type=int,   default=10)
     parser.add_argument("--horizon",     type=float, default=12.0)
     parser.add_argument("--delta",       type=float, default=0.20)
@@ -196,6 +227,12 @@ if __name__ == "__main__":
     parser.add_argument("--charge_only", action="store_true", default=False)
     parser.add_argument("--criterion",   type=str,   default="mean",
                         choices=["mean", "worst", "best"])
+
+    # RO
+    parser.add_argument("--gamma",        type=float, default=None,
+                        help="RO budget Gamma (default: N/2)")
+    parser.add_argument("--ro_time_limit",type=int,   default=7200)
+    parser.add_argument("--ro_mip_gap",   type=float, default=0.005)
 
     # Greedy
     parser.add_argument("--safety",       type=float, default=0.10)
@@ -214,6 +251,9 @@ if __name__ == "__main__":
         solve_mode      = args.solve_mode,
         charge_only     = args.charge_only,
         criterion       = args.criterion,
+        ro_gamma        = args.gamma,
+        ro_time_limit   = args.ro_time_limit,
+        ro_mip_gap      = args.ro_mip_gap,
         safety_buffer   = args.safety,
         queue_threshold = args.queue_thresh,
         verbose         = not args.quiet,

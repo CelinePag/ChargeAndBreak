@@ -367,9 +367,18 @@ class BEHDV:
                          max(0, full_data["Tb30"] - tauc_exec) if brk == "b30" else 0.0)
 
         # ── 2. Manoeuver time ─────────────────────────────────────────────────
-        # Required when charging at a CS, or when taking any break / rest.
+        # Required when:
+        #   - a rest is taken (always: proper parking needed for 9-11 h)
+        #   - a break is taken WITHOUT simultaneous charging
+        #     (break synchronized with charging uses no extra parking;
+        #      the driver is already at the CS bay)
+        # Charging alone (y=1, no break/rest) does NOT trigger a manoeuver;
+        # plug-in/out is already accounted for in Q (queue/setup time).
+        _brk_active = brk in ("b45", "b15", "b30")
+        _rst_active  = rst in ("r1", "r2")
+        _brk_unsync  = _brk_active and not (is_CS and bool(y))
         man_time = (full_data["M"].get(stop, 5.0 / 60)
-                    if ((is_CS and y) or brk or rst) else 0.0)
+                    if (_rst_active or _brk_unsync) else 0.0)
 
         # ── 3. Departure time ─────────────────────────────────────────────────
         if is_CS:

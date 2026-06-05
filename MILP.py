@@ -289,11 +289,29 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
 
 
 def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
-                                     S_dict, M_drv, M_sd, M_sw, TK):
+                                     S_dict, M_drv, M_sd, M_sw, TK,
+                                     is_subproblem: bool = False):
     """
     Hours-of-Service accumulator propagation: cd, sd, sw.
 
     Big-M linearisation: l_k[i] = accumulator_k[i] if reset at stop i, else 0.
+
+    is_subproblem
+    -------------
+    In the full-route model stop 0 is always the origin (no work), so sw[0]=0
+    and the sw_prop formula is self-consistent: sw[i] includes work done AT i
+    (injected as work_next from the previous step).
+
+    In a subproblem, stop 0 is the current vehicle position (a CS or customer
+    stop). init_state["sw"] is the arrival value BEFORE any work at stop 0,
+    so the standard formula leaves work at stop 0 out of every sw constraint.
+    When is_subproblem=True we inject work_here (queue + working charge, or
+    service time) into the sw[1] propagation step to close this gap.
+
+    Additionally a direct upper-bound constraint is added:
+        sw[0] + work_at_stop_0 <= Twrk_sh
+    This catches the case where work at stop 0 itself pushes the driver over
+    the shift-working limit (not visible from sw[0] alone).
     """
     # --- Consecutive driving (reset by b45, b30, or any rest) ---
     m.l1u1 = pyo.Constraint(m.I,
@@ -348,30 +366,70 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
             work_next = S_dict.get(ip1, 0)
         else:
             work_next = 0
-        return m.sw[i+1] == m.sw[i] - m.l4[i] + man_i + m.D_nom[i] + work_next
+
+        # ── Subproblem correction ─────────────────────────────────────────────
+        # init_state["sw"] is the arrival value at local stop 0 (before any
+        # work there). The paper's convention requires sw[i] to include work
+        # done AT stop i (injected as work_next at i-1). For i=0 there is no
+        # i-1 step, so we must add work at stop 0 explicitly into sw[1].
+        if i == 0 and is_subproblem:
+            if 0 in K_set:
+                work_here = m.Q_nom[0] * m.y[0] + m.u[0]
+            elif 0 in C_set:
+                work_here = S_dict.get(0, 0.0)
+            else:
+                work_here = 0.0
+        else:
+            work_here = 0.0
+
+        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + man_i + m.D_nom[i] + work_next
     m.sw_prop = pyo.Constraint(m.I, rule=_sw)
     m.sw_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sw[i] <= m.Twrk_sh)
+
+    # ── Direct sw upper-bound at stop 0 for subproblem ────────────────────────
+    # sw[0] is the arrival value (before work). Add a constraint that sw[0]
+    # plus work at stop 0 cannot exceed the shift limit, catching violations
+    # that occur entirely within stop 0's activities.
+    if is_subproblem and N >= 1:
+        if 0 in K_set:
+            m.sw_stop0_ub = pyo.Constraint(
+                expr=m.sw[0] + m.Q_nom[0] * m.y[0] + m.u[0] <= m.Twrk_sh)
+        elif 0 in C_set:
+            S0 = S_dict.get(0, 0.0)
+            if S0 > 0:
+                m.sw_stop0_ub = pyo.Constraint(
+                    expr=m.sw[0] + S0 <= m.Twrk_sh)
 
 
 def _add_manoeuver_constraints(m, I_list, K_set):
     """
-    Link z_man to break/rest/charge decisions.
+    Link z_man to break/rest decisions (charging alone does NOT trigger a manoeuver;
+    plug-in/out is already captured in Q).
 
-    z_man[i] = 1 iff any activity requiring a physical manoeuver happens:
-      - All stops : break or rest  (x_b45/b15/b30 or rho1/rho2)
-      - CS stops  : additionally, charging (y=1) triggers a manoeuver
+    z_man[i] = 1 iff a physical manoeuver is required:
+      - Non-CS stops : any break or rest
+      - CS stops     : rest (always independent of charging)
+                       break WITHOUT simultaneous charging
+                       (a break synchronized with charging needs no extra parking)
 
+    Linearisation for CS break-without-charge:
+        z_man[i] >= (x_b45 + x_b15 + x_b30)[i] - y[i]
+        y=0, break=1 → z_man >= 1  (driver must park independently)
+        y=1, break=1 → z_man >= 0  (already at CS bay, no extra manoeuver)
     """
-    # Lower bound from break/rest decisions at all stops
-    m.z_man_brk = pyo.Constraint(m.I, rule=lambda m, i:
+    non_K = [i for i in I_list if i not in K_set]
+
+    # Non-CS stops: break or rest always requires a manoeuver
+    m.z_man_brk_nonK = pyo.Constraint(non_K, rule=lambda m, i:
         m.z_man[i] >= _model_xsum(m, i))
 
-    # Lower bound from charging at CS stops
-    def _z_man_chg(m, i):
-        if i not in K_set:
-            return pyo.Constraint.Skip
-        return m.z_man[i] >= m.y[i]
-    m.z_man_chg = pyo.Constraint(m.I, rule=_z_man_chg)
+    # CS stops: rest always requires a manoeuver (proper parking for 9-11 h)
+    m.z_man_rst_K = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.z_man[i] >= m.rho1[i] + m.rho2[i])
+
+    # CS stops: break requires a manoeuver only when NOT synchronized with charging
+    m.z_man_brk_K = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.z_man[i] >= m.x_b45[i] + m.x_b15[i] + m.x_b30[i] - m.y[i])
 
 
 def _add_soc_constraints(m, N, data):
@@ -752,7 +810,8 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     _add_break_rest_constraints(m, N, sub_data["I"], set(K), m.M_big,
                             rho2_limit=rho2_remaining)
     _add_hos_accumulator_constraints(m, N, sub_data["I"], set(C), set(K),
-                                    sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK)
+                                    sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
+                                    is_subproblem=True)
 
 
 
@@ -827,7 +886,7 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
     if tee:
         solver.options["write_model_file"] = "debug_stop23.lp"
     if not relax:
-        solver.options["mip_rel_gap"] = 0.05
+        solver.options["mip_rel_gap"] = 0.005
 
     t0 = _tm.perf_counter()
     try:
