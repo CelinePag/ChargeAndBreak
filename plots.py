@@ -1,29 +1,36 @@
 """
 plots.py — Visualisation for the BET scheduling system
 =======================================================
-All matplotlib figure code lives here.  No solver or simulation logic.
+All matplotlib figure code.  No solver, simulation, or optimisation logic.
 
 Public interface
 ----------------
     plot_solution(sol, data, title="solution")
         Three-panel figure for a full-route MILP solution:
-          1. Gantt  — activity timeline
-          2. SOC    — battery state of charge
-          3. HoS    — consecutive/shift driving + shift working accumulators
+          1. Gantt  — activity timeline per stop
+          2. SOC    — battery state of charge trajectory
+          3. HoS    — consecutive driving / shift driving / shift working
 
     plot_simulation_results(results, full_data, title="simulation", save=True)
-        Five-panel figure for a simulation run:
+        Five-panel figure for a completed simulation run:
           1. Gantt (simulation realisation)
           2. Gantt (oracle hindsight-optimal schedule)
-          3. SOC
-          4. HoS accumulators
-          5. Look-ahead scenario scatter (decision quality)
+          3. SOC trajectory
+          4. HoS accumulator trajectories
+          5. Look-ahead scenario scatter (decision quality across stops)
 
 Dependencies
 ------------
-    matplotlib, numpy  — plotting only; no pyomo, no HiGHS.
-    MILP2              — INFEASIBLE_PENALTY constant (scalar, no solver import).
-    Simulation         — check_simulation_feasibility (feasibility check helper).
+    matplotlib, numpy — plotting only; no pyomo, no HiGHS.
+    MILP              — INFEASIBLE_PENALTY constant (scalar, no solver import).
+    oracle            — check_simulation_feasibility (feasibility check helper).
+
+Import chain
+------------
+    plots.py → MILP (INFEASIBLE_PENALTY), oracle (check_simulation_feasibility)
+    No circular imports: MILP.py and oracle.py do not import from plots.py
+    (except MILP.py re-exports plot_solution for callers that use
+     `from MILP import plot_solution`).
 """
 
 import os
@@ -104,7 +111,7 @@ def plot_solution(sol, data, title="solution"):
     Parameters
     ----------
     sol   : list of per-stop dicts (from MILP.extract_solution)
-    data  : instance data dict (from MILP._make_data)
+    data  : instance data dict (from instances.make_data())
     title : string used in the figure suptitle and the saved filename
     """
     N    = data["N"]
@@ -263,14 +270,14 @@ def plot_solution(sol, data, title="solution"):
 # plot_simulation_results  (stochastic simulation run)
 # ═════════════════════════════════════════════════════════════════════════════
 
-def plot_simulation_results(results, full_data, title="simulation", save=True):
+def plot_simulation_results(results, full_data, title="simulation", save=True, show=False):
     """
     Five-panel figure for a complete simulation run.
 
     Parameters
     ----------
     results   : dict returned by Simulation.run_simulation
-    full_data : instance data dict from MILP._make_data
+    full_data : instance data dict from instances.make_data()
     title     : string for suptitle and filename
     save      : bool — save PNG to figures/ directory
 
@@ -284,9 +291,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True):
     """
     # Late imports — avoid circular dependency at module level.
     # INFEASIBLE_PENALTY is a plain scalar; importing it does not load HiGHS.
-    from MILP2 import INFEASIBLE_PENALTY
-    # check_simulation_feasibility is a pure data function, no solver needed.
-    from Simulation import check_simulation_feasibility
+    from MILP import INFEASIBLE_PENALTY
+    from oracle import check_simulation_feasibility
 
     states         = results["states"]
     actions        = results["actions"]
@@ -678,5 +684,6 @@ def plot_simulation_results(results, full_data, title="simulation", save=True):
         plt.savefig(fname, dpi=150, bbox_inches="tight")
         print(f"  Plot saved: {fname}")
 
-    plt.show()
-    plt.close()
+    if show:
+        plt.show()
+        plt.close()
