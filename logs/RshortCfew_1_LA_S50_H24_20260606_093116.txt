@@ -1,0 +1,28 @@
+
+=================================================================
+  LA SIMULATION START  (2026-06-06 09:31:16)
+  Instance : RshortCfew_1   run_id=RshortCfew_1_LA_S50_H24_20260606_093116
+  Route    : 29 stops  departure=8:00
+  Settings : N_scen=50  H=24.0h  d=40%  workers=8  LP-relax  [worst]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+
+[LA] stop 1 (CS)  t=8.512h  soc=326kWh  cd=0.51h  sd=0.51h  sw=0.51h  phi=0  r2=0
+     horizon [1->25]  travel=11.69h +1rest  10 actions × 50 scen  8w  [worst,lp]
+  y=0  brk=0    rst=0   31.687h (0.448h)  ok=50/50  ws=0/50  tauc=0m  taub=0m  (7.7s)
+  y=1  brk=0    rst=0   31.937h (0.448h)  ok=50/50  ws=0/50  tauc=15m  taub=0m  (2.8s)
+  y=0  brk=0    rst=r1  42.673h (0.383h)  ok=50/50  ws=0/50  tauc=0m  taub=0m  (3.4s)
+  y=1  brk=0    rst=r1  42.923h (0.383h)  ok=50/50  ws=0/50  tauc=15m  taub=0m  (2.6s)
+  y=0  brk=0    rst=r2  40.673h (0.383h)  ok=50/50  ws=0/50  tauc=0m  taub=0m  (2.7s)
+  y=1  brk=0    rst=r2  40.923h (0.383h)  ok=50/50  ws=0/50  tauc=15m  taub=0m  (5.1s)
+  y=0  brk=b45  rst=0   31.559h (0.137h)  ok=50/50  ws=0/50  tauc=0m  taub=45m  (2.7s)
+  y=1  brk=b45  rst=0   31.687h (0.138h)  ok=50/50  ws=0/50  tauc=15m  taub=30m  (2.7s)
+  y=0  brk=b15  rst=0   31.438h (0.274h)  ok=50/50  ws=0/50  tauc=0m  taub=15m  (2.7s)
+  y=1  brk=b15  rst=0   31.687h (0.447h)  ok=50/50  ws=0/50  tauc=15m  taub=0m  (2.8s)
+     [DIAG] max per-scenario delta spread across actions: 89.84 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=b15  rst=0  ok  hor_stops: brk=0 rst=1 chg=3 c+b=1 c+r=0  25.2s
+  -> CHOSEN y=0  brk=b15  rst=0  tauc=0m  taub=15m  ta=8.512h  td=9.012h  (worst=31.438h)  60.8s
+
+[LA] stop 2 (CS)  t=9.381h  soc=309kWh  cd=0.88h  sd=0.88h  sw=1.13h  phi=1  r2=0
+     horizon [2->27]  travel=12.21h +1rest  12 actions × 50 scen  8w  [worst,lp]  ws=prev
+     [FREE-LP]  obj=32.532h  0.3s  ws=yes  945v/1542c

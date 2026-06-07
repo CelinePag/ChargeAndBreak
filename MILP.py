@@ -471,6 +471,409 @@ def _add_time_constraints(m, N):
     m.tw_hard = pyo.Constraint(m.Cset, rule=lambda m, i:
         pyo.inequality(m.Wha[i], m.ta[i], m.Whf[i]))
 
+def _add_covering_inequalities(m, sub_data: dict, init_state: dict,
+                               fixed_action=None) -> int:
+    """
+    Add HoS-covering + SOC valid inequalities to tighten the LP relaxation.
+
+    Call AFTER all variables and constraints are on the model
+    (last statement in build_horizon_model, before 'return m').
+
+    Parameters
+    ----------
+    m            : fully built Pyomo ConcreteModel (horizon sub-problem)
+    sub_data     : dict from make_subproblem_data
+    init_state   : dict  —  ta, ea, cd, sd, sw, phi  (BEHDV.as_init_state())
+    fixed_action : dict or None  —  from build_horizon_model's fixed_action arg
+
+    Returns
+    -------
+    n_vis : int  —  total number of valid inequalities added
+    """
+
+    # ── Common ────────────────────────────────────────────────────────────────
+    N      = sub_data["N"]
+    D      = sub_data["D"]
+    S_dict = sub_data.get("S", {})
+    C_set  = set(sub_data.get("C", []))
+    K_set  = set(sub_data.get("K", []))
+
+    Tdrv_cons = sub_data["Tdrv_cons"]       # 4.5 h
+    Tdrv_sh1  = sub_data["Tdrv_sh1"]       # 9.0 h
+    Tr1  = sub_data.get("Tr1",  11.0)      # 11.0 h (full daily rest)
+    Tr2  = sub_data["Tr2"]                 # 9.0 h  (reduced rest)
+    Tb45 = sub_data["Tb45"]                # 0.75 h
+    Tb30 = sub_data.get("Tb30", 0.5)       # 0.50 h
+    M_dict = sub_data.get("M", {})         # {stop: manoeuver_hours}
+
+    Emin  = sub_data["Emin"]
+    Ecap  = sub_data["Ecap"]
+    Ebar  = sub_data["Ebar"]   # {r: kWh}  PWL energy breakpoints
+    Tbar  = sub_data["Tbar"]   # {r: h}    PWL cumulative-time breakpoints
+    Q_stp = sub_data.get("Q", {})
+    e2cs  = sub_data.get("e_to_next_cs", {})
+
+    # ── Post-stop-0 effective HoS state ───────────────────────────────────────
+    cd0  = float(init_state.get("cd",  0.0))
+    sd0  = float(init_state.get("sd",  0.0))
+    phi0 = int(  init_state.get("phi", 0))
+    ea0  = float(init_state.get("ea",  Emin))
+
+    if fixed_action is not None:
+        rst = fixed_action.get("rest_type")
+        brk = fixed_action.get("break_type")
+        if rst in ("r1", "r2"):
+            cd0 = sd0 = 0.0;  phi0 = 0
+        elif brk == "b45":
+            cd0 = 0.0;  phi0 = 0
+        elif brk == "b30":
+            cd0 = 0.0           # b30 resets cd; phi is consumed by b30 so clear it
+        elif brk == "b15":
+            phi0 = 1
+
+    # ── Collectors ────────────────────────────────────────────────────────────
+    vi_list: list[tuple] = []
+    _k = [0]
+
+    def _add(tag: str, expr) -> None:
+        vi_list.append((f"vi_{tag}_{_k[0]}", pyo.Constraint(expr=expr)))
+        _k[0] += 1
+
+    def _wstops(a: int, b: int) -> list:
+        """Stops in window (a, b] where activities are allowed (not stop N)."""
+        return [i for i in range(a + 1, b + 1) if 0 <= i < N]
+
+    # =========================================================================
+    # PART 1 — HoS VALID INEQUALITIES
+    # =========================================================================
+
+    # State-anchored forward trace -------------------------------------------------
+    cum_cd = cd0;  wa_cd = 0
+    cum_sd = sd0;  wa_sd = 0
+    n_rests     = 0
+    n_brks_only = 0
+
+    for leg in range(N):
+        d = D.get(leg, 0.0)
+        cum_cd += d
+        cum_sd += d
+
+        if cum_sd > Tdrv_sh1 + 1e-9:
+            wb = leg + 1
+            # sd covering (Family A) + explicit minimum dwell (Family B)
+            stops_sd = _wstops(wa_sd, wb)
+            if stops_sd:
+                _add("sd_anch_cov",
+                     sum(m.rho1[i] + m.rho2[i] for i in stops_sd) >= 1)
+                _add("sd_anch_rest",
+                     sum(m.taur[i] for i in stops_sd) >= Tr2)
+                # z_man covering: rests ALWAYS trigger z_man=1 (park for 9-11h).
+                # In the LP, z_man is continuous so fractional rests pay fractional
+                # Man cost. This forces the full manoeuver cost per rest window.
+                # Valid: sum(z_man)>=sum(rho)>=1, so sum(Man*z_man)>=min_Man. ✓
+                min_man_w = min(M_dict.get(i, 0.0) for i in stops_sd)
+                if min_man_w > 1e-6:
+                    _add("sd_anch_man",
+                         sum(m.Man[i] * m.z_man[i] for i in stops_sd) >= min_man_w)
+            # cd covering for the same window (rest also resets cd)
+            stops_cd = _wstops(wa_cd, wb)
+            if stops_cd:
+                _add("cd_anch_cov_r",
+                     sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
+                         for i in stops_cd) >= 1)
+            wa_sd = leg;  cum_sd = d
+            wa_cd = leg;  cum_cd = d
+            n_rests += 1
+
+        elif cum_cd > Tdrv_cons + 1e-9:
+            wb = leg + 1
+            stops_cd = _wstops(wa_cd, wb)
+            if stops_cd:
+                _add("cd_anch_cov",
+                     sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
+                         for i in stops_cd) >= 1)
+                # z_man covering for purely non-CS cd windows: any break there
+                # is unsynchronised with charging, so z_man=1 is forced. ✓
+                if not any(i in K_set for i in stops_cd):
+                    min_man_w = min(M_dict.get(i, 0.0) for i in stops_cd)
+                    if min_man_w > 1e-6:
+                        _add("cd_anch_man",
+                             sum(m.Man[i] * m.z_man[i] for i in stops_cd)
+                             >= min_man_w)
+            wa_cd = leg;  cum_cd = d
+            n_brks_only += 1
+
+    # Generic windows: one minimal window per start stop (Family A) ----------------
+    for a in range(N):
+        cum = 0.0
+        for b in range(a, N):
+            cum += D.get(b, 0.0)
+            if cum > Tdrv_sh1 + 1e-9:
+                stops = _wstops(a, b + 1)
+                if stops:
+                    _add("sd_gen_cov",
+                         sum(m.rho1[i] + m.rho2[i] for i in stops) >= 1)
+                    _add("sd_gen_rest",
+                         sum(m.taur[i] for i in stops) >= Tr2)
+                    min_man_w = min(M_dict.get(i, 0.0) for i in stops)
+                    if min_man_w > 1e-6:
+                        _add("sd_gen_man",
+                             sum(m.Man[i] * m.z_man[i] for i in stops) >= min_man_w)
+                break
+
+    for a in range(N):
+        cum = 0.0
+        for b in range(a, N):
+            cum += D.get(b, 0.0)
+            if cum > Tdrv_cons + 1e-9:
+                stops = _wstops(a, b + 1)
+                if stops:
+                    _add("cd_gen_cov",
+                         sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
+                             for i in stops) >= 1)
+                    if not any(i in K_set for i in stops):
+                        min_man_w = min(M_dict.get(i, 0.0) for i in stops)
+                        if min_man_w > 1e-6:
+                            _add("cd_gen_man",
+                                 sum(m.Man[i] * m.z_man[i] for i in stops)
+                                 >= min_man_w)
+                break
+
+    # Global rest lower bound (Family C, part 1) -----------------------------------
+    interior = [i for i in sub_data["I"] if 0 < i < N]
+    if interior and n_rests > 0:
+        _add("g_taur_lb",
+             sum(m.taur[i] for i in interior) >= n_rests * Tr2)
+
+    # =========================================================================
+    # PART 2 — SOC VALID INEQUALITIES
+    # =========================================================================
+
+    # PWL charging curve helper: T(e) = cumulative time to reach SOC e ----------
+    _R  = sorted(Ebar.keys())
+    _Es = [float(Ebar[r]) for r in _R]
+    _Ts = [float(Tbar[r]) for r in _R]
+
+    def _e2t(e: float) -> float:
+        """Cumulative charging time (h) to reach SOC e (kWh) on the PWL curve."""
+        e = max(_Es[0], min(_Es[-1], float(e)))
+        for i in range(len(_Es) - 1):
+            if _Es[i] <= e <= _Es[i + 1]:
+                span = _Es[i + 1] - _Es[i]
+                return (_Ts[i] + (e - _Es[i]) / span * (_Ts[i + 1] - _Ts[i])
+                        if span > 1e-12 else _Ts[i])
+        return _Ts[-1]
+
+    # Forward SOC simulation: ea_ub[j] = max arrival SOC at stop j ---------------
+    # Assumes charge to Ecap at EVERY CS stop encountered (best-case trajectory).
+    ea_ub: dict[int, float] = {0: ea0}
+    cur_dep = ea0  # departure SOC upper bound from stop 0
+
+    if 0 in K_set:
+        y0 = fixed_action.get("y") if fixed_action else None
+        if y0 != 0:        # y=1 or free: can charge to Ecap at stop 0
+            cur_dep = Ecap
+
+    for leg in range(N):
+        arr_soc = max(Emin, cur_dep - sub_data["E"].get(leg, 0.0))
+        nxt     = leg + 1
+        ea_ub[nxt] = arr_soc
+        cur_dep = Ecap if (nxt in K_set and nxt < N) else arr_soc
+
+    # Family SOC-D: explicit SOC floors (variable bound tightening) ---------------
+    # Non-CS stops: ea[j] ≥ Emin + e2cs[j]  (departure = arrival, no charging)
+    # CS stops    : ed[k] ≥ Emin + e2cs[k]  (departure after charging must cover next seg)
+    # NOTE: ea[j] ≥ ... is NOT valid for CS stops (vehicle can arrive low and charge up).
+    for j in sub_data["I"]:
+        if j >= N:
+            continue
+        e_need = e2cs.get(j, 0.0)
+        if e_need < 1e-6:
+            continue
+        lb = Emin + e_need
+        if lb > Ecap + 1e-6:
+            continue          # infeasible segment; skip silently
+        if j in K_set:
+            _add("soc_ed_floor", m.ed[j] >= lb)    # departure floor at CS
+        else:
+            _add("soc_ea_floor", m.ea[j] >= lb)    # arrival floor at non-CS
+
+    # Family SOC-E: forced-charging indicator y[k] = 1 ----------------------------
+    # When ea_ub[k] < ed_min[k], charging at k is unavoidable: y[k] ≥ 1.
+    # Proof: ea[k] ≤ ea_ub[k] < ed_min[k] ≤ ed[k]  ⟹  ed[k] > ea[k]
+    #        ⟹  Ecap·y[k] ≥ ed[k]−ea[k] > 0  (from pwl_no_free_charge)
+    #        ⟹  y[k] > 0  ⟹  y[k] = 1 in MIP. ✓
+    forced_K:   list[int]        = []
+    tauc_lbs:   dict[int, float] = {}
+
+    for k in K_set:
+        if k >= N:
+            continue
+        e_need  = e2cs.get(k, 0.0)
+        if e_need < 1e-6:
+            continue
+        ed_min  = Emin + e_need
+        if ed_min > Ecap + 1e-6:
+            continue
+        ea_ub_k = ea_ub.get(k, Ecap)
+
+        if ea_ub_k < ed_min - 1e-6:
+            _add("soc_y_forced", m.y[k] >= 1)
+            forced_K.append(k)
+
+            # Minimum tauc: charging from ea_ub[k] to ed_min on PWL curve.
+            # Using ea_ub (upper bound on arrival SOC) gives minimum charging time:
+            # tauc[k] = T(ed[k])−T(ea[k]) ≥ T(ed_min)−T(ea_ub[k]).
+            t_lb = _e2t(ed_min) - _e2t(ea_ub_k)
+            tauc_lbs[k] = max(0.0, t_lb)
+
+    # Family SOC-F: tightened charging-time lower bound tauc[k] ≥ t_lb · y[k] ----
+    # Applied to both forced and non-forced CS stops where a useful bound exists.
+    # Generalises chg_act2 (tauc ≥ 0.25·y); only added when strictly tighter.
+    chg_act2_coeff = 0.25
+    for k in K_set:
+        if k >= N:
+            continue
+        e_need  = e2cs.get(k, 0.0)
+        if e_need < 1e-6:
+            continue
+        ed_min  = Emin + e_need
+        if ed_min > Ecap + 1e-6:
+            continue
+        ea_ub_k = ea_ub.get(k, Ecap)
+        # Charging from ea_ub_k (best case arrival) to ed_min:
+        # clamp ea_ub_k to ed_min so we don't compute a negative bound
+        t_lb = max(0.0, _e2t(ed_min) - _e2t(min(ea_ub_k, ed_min)))
+        if t_lb > chg_act2_coeff + 1e-6:
+            _add("soc_tauc_lb", m.tauc[k] >= t_lb * m.y[k])
+
+    # =========================================================================
+    # PART 3 — AGGREGATE ARRIVAL-TIME LOWER BOUND (Family C, augmented)
+    # =========================================================================
+    # ta[N] ≥ ta[0]
+    #       + ΣD + ΣS_cust                             (fixed travel + service)
+    #       + stop0_dwell_lb                            (fixed action at stop 0)
+    #       + n_rests · (Tr2 + min_Man)                (mandatory rest dwell)
+    #       + min_brk_dwell                            (mandatory break dwell)
+    #       + Σ_{forced k} (Q[k] + tauc_lb[k])        (mandatory SOC dwell)
+    #
+    # Bug fixes in this version vs. the original:
+    #   1. stop0_dwell_lb: the fixed action at stop 0 (queue + charging + break)
+    #      was never subtracted from the "free" budget.  Without this, phi=1
+    #      actions (b15 sets phi) appear cheaper because they get Tb30 credit
+    #      for future breaks but their own stop-0 activities are not counted.
+    #   2. phi0 break cost: only the FIRST mandatory break can use b30 after
+    #      phi=1 (b30 consumes phi; subsequent breaks revert to b45).
+    #   3. Manoeuver cost: Man[i]·z_man[i] is in td but was never in the bound.
+    #      Rests always trigger z_man=1, so add n_rests · min_Man.
+    # =========================================================================
+    total_drive   = sum(D.get(leg, 0.0) for leg in range(N))
+    total_service = sum(S_dict.get(i, 0.0)
+                        for i in C_set if i in set(sub_data["I"]))
+
+    # ── FIX 2: phi0 break cost — only the first break after phi=1 uses b30 ──
+    # After a b30, phi resets to 0; all subsequent mandatory breaks use b45.
+    if phi0 == 1 and n_brks_only > 0:
+        min_brk_dwell = Tb30 + (n_brks_only - 1) * Tb45
+    else:
+        min_brk_dwell = n_brks_only * Tb45
+
+    # ── FIX 3: manoeuver cost — rests ALWAYS set z_man=1, so add min_Man ────
+    # z_man is continuous in LP relaxation, making Man·z_man fractional.
+    # For mandatory rests: z_man ≥ rho1+rho2, sum(rho)≥1 ⟹ z_man≥1 per window.
+    # Conservative lower bound: use the minimum Man across interior stops.
+    min_man = min((M_dict.get(i, 0.0) for i in interior), default=0.0)
+    man_dwell = n_rests * min_man    # each mandatory rest pays at least min_Man
+
+    # ── stop-0 mandatory dwell from fixed_action ─────────────────────────────
+    # The aggregate bound starts at ta[0].  Any dwell activity at stop 0
+    # created by the fixed_action must be added here explicitly.
+    #
+    # Mirrors BEHDV.advance() maneuver logic exactly:
+    #   maneuver triggered iff  (rest taken)  OR  (break without simultaneous charging)
+    #   i.e. _rst_active  OR  (_brk_active AND NOT (is_CS AND y=1))
+    #
+    # Three cases for the break/charge dwell:
+    #   CS  y=1 : Q + max(taub_hat_lb, tauc_lb)   [no extra maneuver — synchronized]
+    #   CS  y=0 with break : taub_hat + man0        [← was missing in previous version]
+    #   non-CS  with break : taub_hat + man0
+    stop0_dwell_lb = 0.0
+    if fixed_action is not None:
+        y0   = int(fixed_action.get("y",  0))
+        rst  = fixed_action.get("rest_type")
+        brk  = fixed_action.get("break_type")
+        man0 = M_dict.get(0, 0.0)
+
+        _is_cs_0    = 0 in K_set
+        _has_brk    = brk not in (None, "0")
+        _has_rst    = rst not in (None, "0")
+        _brk_unsync = _has_brk and not (_is_cs_0 and y0 == 1)
+
+        # Maneuver at stop 0 (same trigger as BEHDV.advance)
+        if _has_rst or _brk_unsync:
+            stop0_dwell_lb += man0
+
+        # Rest dwell
+        if   rst == "r1": stop0_dwell_lb += Tr1
+        elif rst == "r2": stop0_dwell_lb += Tr2
+
+        # Break / charging dwell
+        taub_hat_0 = (Tb45 if brk == "b45" else
+                      0.25 if brk == "b15" else   # Tb15
+                      Tb30 if brk == "b30" else 0.0)
+
+        if _is_cs_0 and y0 == 1:
+            # CS with charging: Q + max(taub_hat_lb, tauc_lb)
+            # Break is synchronised → no extra maneuver (handled above).
+            q0        = Q_stp.get(0, 0.0)
+            e_need_0  = e2cs.get(0, 0.0)
+            ed_min_0  = min(Ecap, Emin + e_need_0) if e_need_0 > 1e-6 else Emin
+            tauc_0_lb = max(0.25, max(0.0, _e2t(ed_min_0) - _e2t(ea0)))
+            stop0_dwell_lb += q0 + max(taub_hat_0, tauc_0_lb)
+        elif _has_brk:
+            # CS y=0 with break, or any non-CS stop with break.
+            # Maneuver already added above via _brk_unsync.
+            stop0_dwell_lb += taub_hat_0
+
+    # ── Aggregate bound ───────────────────────────────────────────────────────
+    # ta[N] ≥ ta[0]
+    #       + ΣD + ΣS_cust               (fixed travel + service)
+    #       + stop0_dwell_lb             (stop-0 fixed action dwell)
+    #       + n_rests · Tr2              (mandatory rest duration × count)
+    #       + n_rests · min_Man          (mandatory rest maneuver × count)
+    #       + Σ_{forced k>0} Q[k]+tauc_lb[k]   (forced SOC-charging dwell)
+    #
+    # VALIDITY NOTES
+    # --------------
+    # min_brk_dwell (n_brks_only × Tb45) was previously added here but is
+    # NOT a valid lower bound: a mandatory cd break can happen at a CS stop
+    # during a long charging session (tauc ≥ Tb45), in which case taub = 0
+    # and the break adds zero dwell.  Adding Tb45 would then exceed the
+    # true optimum → the aggregate constraint would cut the optimal solution.
+    # The covering constraints (Family A) already force the break to happen;
+    # the aggregate bound need not and must not add an extra break penalty.
+    #
+    # soc_dwell excludes stop 0: stop0_dwell_lb already accounts for
+    # Q[0]+tauc_lb[0] when y=1 at stop 0; double-adding via forced_K
+    # would make the bound invalid for that action.
+    hos_dwell = n_rests * Tr2 + man_dwell        # removed min_brk_dwell
+    soc_dwell = sum(Q_stp.get(k, 0.0) + tauc_lbs.get(k, 0.0)
+                    for k in forced_K if k > 0)  # exclude stop 0
+    min_dwell = stop0_dwell_lb + hos_dwell + soc_dwell
+
+    if min_dwell > 1e-6:
+        ta0 = float(init_state.get("ta", 0.0))
+        _add("g_ta_lb",
+             m.ta[N] >= ta0 + total_drive + total_service + min_dwell)
+
+    # ── Bulk-add ──────────────────────────────────────────────────────────────
+    for name, con in vi_list:
+        m.add_component(name, con)
+
+    return len(vi_list)
+
+
+
 # ── Quiet solver wrapper ──────────────────────────────────────────────────────
 
 def _solve_quiet(solver, model, tee, warmstart=False):
@@ -813,7 +1216,8 @@ def build_horizon_model(sub_data: dict, init_state: dict,
                                     sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
                                     is_subproblem=True)
 
-
+    #_add_covering_inequalities(m, sub_data, init_state,
+     #                          fixed_action=fixed_action)
 
     return m
 
@@ -864,10 +1268,37 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
     n_cons_pre = sum(1 for _ in model.component_data_objects(pyo.Constraint, active=True))
 
     if relax:
-        try:
-            pyo.TransformationFactory("core.relax_integer_vars").apply_to(model)
-        except KeyError:
-            pyo.TransformationFactory("core.relax_integrality").apply_to(model)
+        # ── Partial LP relaxation ──────────────────────────────────────────────
+        # Standard core.relax_integer_vars relaxes ALL binary variables,
+        # including break/rest variables at CUSTOMER stops.  With those
+        # fractional, the LP can take a 0.67% break at a customer stop
+        # (barely enough to satisfy the cd accumulator constraint) and pay
+        # only 0.033h maneuver instead of the integer-required 5h — a 150×
+        # underestimate.  The LP then thinks y=0,b0 is cheap and never triggers
+        # a proactive CS break, getting stuck at the customer stop later.
+        #
+        # Fix: keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops only.
+        # All other integer variables (including CS break/rest vars, y, mu_a,
+        # mu_d, phi) are relaxed as usual.  The result is a small partial MIP
+        # (typically 5–15 binary vars for 1–3 customer stops in the horizon)
+        # that HiGHS solves in milliseconds — far cheaper than a full MIP.
+        _CUST_KEEP_BINARY = frozenset(("x_b45", "x_b15", "x_b30", "rho1", "rho2"))
+        cust_set = set(model.Cset)
+
+        for var in model.component_objects(pyo.Var, active=True):
+            vname = var.local_name
+            for idx, vdata in var.items():
+                if vdata.domain not in (pyo.Binary, pyo.Integers,
+                                        pyo.NonNegativeIntegers):
+                    continue
+                # Keep binary if this is a break/rest variable at a customer stop
+                if (vname in _CUST_KEEP_BINARY
+                        and isinstance(idx, int) and idx in cust_set):
+                    continue  # leave as Binary
+                # Relax everything else
+                vdata.domain = pyo.NonNegativeReals
+                if vdata.ub is None:
+                    vdata.setub(1.0)
 
     if False:
         for var in model.component_objects(pyo.Var, active=True):

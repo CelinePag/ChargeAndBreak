@@ -164,7 +164,7 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 
 def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
               Ebar, Tbar, Wha, Whf, label, title,
-              km=None, Q=None) -> dict:
+              km=None, Q=None, M_man_h: float = 15.0 / 60) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -196,6 +196,13 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
             Fixed queue times at each CS stop (plug-in + initial waiting).
             When None, drawn uniformly from U[0, 10] min using the current
             global random state; call random.seed() first for reproducibility.
+    M_man_h : float
+            Manoeuver time (h) applied uniformly to every stop.  A manoeuver
+            is charged whenever a break or rest is taken without simultaneous
+            charging (the driver must physically park/unpark the truck).
+            Default 15/60 h (15 min).  Use larger values (e.g. 10.0 h) to
+            model high-penalty scenarios where off-CS stops are very costly,
+            forcing the optimiser to plan breaks exclusively at CS bays.
 
     Returns
     -------
@@ -217,8 +224,11 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
         i: random.randint(0, 10) / 60 for i in K
     }
 
-    # Manoeuver time per active stop: 15 min (backing into berth / plug-in)
-    M_man   = {i: 15.0 / 60 for i in range(N)}
+    # Manoeuver time per active stop.
+    # Default 15 min; override via M_man_h to penalise off-CS breaks/rests.
+    # Note: lb_t / ub_t use Man_default so that MILP variable bounds remain
+    # consistent with the manoeuver time used in the model.
+    M_man = {i: float(M_man_h) for i in range(N + 1)}
 
     T_START = 8.0                   # 08:00 departure (absolute hours)
     T_hor   = T_START + 5 * 24     # 5-day planning horizon
@@ -228,7 +238,7 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
     lb_t, ub_t = compute_time_bounds(
         I, C, K, D, S, Q_nom, Tbar, T_hor,
         t0=T_START,
-        Man_default=M_man[0] if M_man else 5.0 / 60,
+        Man_default=float(M_man_h),
     )
 
     # Time windows: convert from relative (hours-since-T_START) to absolute

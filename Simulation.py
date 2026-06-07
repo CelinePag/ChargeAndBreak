@@ -854,8 +854,18 @@ def select_best_action(full_data, stop: int, state,
                 _p(f"     [NOM-MIP] free MIP also infeasible, using first_feas LP sol")
                 nom_sol = first_feas
     else:
-        nom_sol = winner[4]   # MIP batch already produced an integer solution
-
+        nom_sol = solve_horizon(
+            full_data      = full_data,
+            start_stop     = stop,
+            end_stop       = end_stop,
+            init_state     = state.as_init_state(),
+            fixed_action   = best_action,
+            rho2_remaining = 3 - state.rho2_used,
+            tee            = False,
+            time_limit     = time_limit * 4,
+            relax          = False,
+            warm_start     = free_sol,
+        )
     nom_ok = nom_sol is not None and nom_sol.get("feasible", False)
     if nom_ok and nom_sol.get("sol") and _needs_milp:
         _nh = _sol_activity_summary(nom_sol["sol"], skip_stop0=True)

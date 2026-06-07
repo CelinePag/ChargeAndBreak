@@ -87,6 +87,7 @@ def run_algorithm(
     verbose: bool          = True,
     oracle_tee: bool       = False,
     run_id: Optional[str]  = None,
+    m_man_h: Optional[float] = None,   # override stored M values (h); None = keep JSON value
 ) -> dict:
     """
     Load a precomputed instance JSON file and run the specified algorithm.
@@ -126,6 +127,12 @@ def run_algorithm(
     verbose         : print per-stop decisions
     oracle_tee      : show HiGHS output in oracle solve
     run_id          : override auto-generated run_id
+    m_man_h         : override the manoeuver time (h) stored in the JSON file.
+                      The JSON was generated once with instances.make_data(); if
+                      you have since changed M_man_h there, existing JSON files
+                      still carry the OLD value.  Pass m_man_h here to inject the
+                      new value at load-time without regenerating every file.
+                      None (default) keeps whatever the JSON contains.
 
     Returns
     -------
@@ -144,6 +151,15 @@ def run_algorithm(
         json_file,
         max_scenarios = n_scenarios if alg == "LA" else None,
     )
+
+    # ── Override manoeuver time if requested ───────────────────────────────────
+    # The JSON stores M from when the instance was first generated.  If you have
+    # changed M_man_h in instances.make_data() since then, existing JSON files
+    # still carry the OLD value.  This block injects the new value at load-time
+    # so you don't need to regenerate every file just to change one parameter.
+    if m_man_h is not None:
+        N_inst = full_data["N"]
+        full_data["M"] = {i: float(m_man_h) for i in range(N_inst + 1)}
 
     # ── Dispatch ───────────────────────────────────────────────────────────────
     if alg == "GREEDY":
@@ -214,7 +230,7 @@ if __name__ == "__main__":
     # Common
     parser.add_argument("--run_id",      type=str,   default=None)
     parser.add_argument("--quiet",       action="store_true", default=False)
-    parser.add_argument("--oracle_tee",  action="store_true", default=False)
+    parser.add_argument("--oracle_tee",  action="store_true", default=True)
 
     # LA
     parser.add_argument("--n_scenarios", type=int,   default=10)
@@ -237,6 +253,10 @@ if __name__ == "__main__":
     # Greedy
     parser.add_argument("--safety",       type=float, default=0.10)
     parser.add_argument("--queue_thresh", type=float, default=999.0)
+    parser.add_argument("--m_man",        type=float, default=None,
+                        help="Override manoeuver time h stored in JSON "
+                             "(e.g. 0.25 = 15 min, 10 = 10 h). "
+                             "Without this flag the value saved in the JSON is used.")
 
     args = parser.parse_args()
 
@@ -259,6 +279,7 @@ if __name__ == "__main__":
         verbose         = not args.quiet,
         oracle_tee      = args.oracle_tee,
         run_id          = args.run_id,
+        m_man_h         = args.m_man,
     )
 
     print(f"\n  Algorithm  : {args.algorithm.upper()}")
