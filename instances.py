@@ -73,6 +73,7 @@ import math
 import os
 import random
 import sys
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -112,7 +113,7 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 
     These bounds are used by MILP.build_model and MILP.build_horizon_model to
     set variable lower/upper bounds, which significantly tightens the LP
-    relaxation and speeds up HiGHS presolve.
+    relaxation and speeds up presolve.
 
     Parameters
     ----------
@@ -127,13 +128,6 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
     t0           : float — departure time (absolute hours, default 0)
     Man_default  : float — manoeuver time per active stop; must match M_man
                    in make_data to keep ub_t internally consistent
-
-    Notes
-    -----
-    Upper bounds use Tr1=11h (the longest possible rest period) so that ub_t
-    is always large enough to accommodate any rest type.  Using Tr2=9h instead
-    was a previous bug that caused r1 actions to appear spuriously infeasible
-    during presolve.
     """
     N   = max(I)
     TK  = Tbar[max(Tbar)]          # maximum possible charging duration
@@ -162,9 +156,8 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 # make_data — CANONICAL DATA DICT CONSTRUCTOR
 # ══════════════════════════════════════════════════════════════════════════════
 
-def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
-              Ebar, Tbar, Wha, Whf, label, title,
-              km=None, Q=None, M_man_h: float = 15.0 / 60) -> dict:
+def make_data(I, C, K, D, E, Wha, Whf, label, title,
+              km=None, Bcap=350, Q=None, M_man_h: float = 15.0 / 60) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -220,8 +213,14 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
     assert not (set(C) & set(K)), "C and K must be disjoint"
 
     # Queue times at CS stops
+    mean_wait = 10   # minutes (your expected wait)
+    std_wait  = 8    # minutes (your uncertainty)
+
+    # Convert to lognormal parameters:
+    mu    = np.log(mean_wait**2 / np.sqrt(std_wait**2 + mean_wait**2))
+    sigma = np.sqrt(np.log(1 + (std_wait / mean_wait)**2))
     Q_nom = dict(Q) if Q is not None else {
-        i: random.randint(0, 10) / 60 for i in K
+        i: np.random.lognormal(mu, sigma) / 60 for i in K
     }
 
     # Manoeuver time per active stop.
@@ -229,6 +228,13 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
     # Note: lb_t / ub_t use Man_default so that MILP variable bounds remain
     # consistent with the manoeuver time used in the model.
     M_man = {i: float(M_man_h) for i in range(N + 1)}
+
+    S={c: 0.5 for c in C}
+    E0=Bcap
+    Ecap=Bcap
+    Emin=0.2 * Bcap
+    Ebar={0: 0, 1: 0.40 * Bcap, 2: 0.80 * Bcap, 3: Bcap}
+    Tbar={0: 0.0, 1: 0.55, 2: 1.367, 3: 2.50}
 
     T_START = 8.0                   # 08:00 departure (absolute hours)
     T_hor   = T_START + 5 * 24     # 5-day planning horizon
@@ -270,116 +276,6 @@ def make_data(I, C, K, D, E, S, E0, Ecap, Emin,
 # BENCHMARK INSTANCES
 # ══════════════════════════════════════════════════════════════════════════════
 
-def instance_tiny() -> dict:
-    """
-    Minimal 5-stop route (4 legs).
-    Tests basic SOC propagation and time feasibility on a small problem.
-    """
-    N = 4
-    return make_data(
-        I=list(range(N + 1)), C=[1], K=[2, 3],
-        D={0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5},
-        E={0: 8.0, 1: 8.0, 2: 8.0, 3: 8.0},
-        S={1: 0.5},
-        E0=60, Ecap=100, Emin=10,
-        Ebar={0: 0, 1: 40, 2: 80, 3: 100},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={1: 0}, Whf={1: 5},
-        label="tiny — 5 stops, basic SOC + timing check",
-        title="tiny",
-    )
-
-
-def instance_break_forced() -> dict:
-    """
-    10-stop route where the 4.5h consecutive driving limit is tight.
-    All legs are 1h → cd reaches 4.5h exactly after 4.5 legs, so a
-    b45 break must be inserted somewhere within the first 4 CS stops.
-    """
-    N = 10
-    C, K = [2, 7], [1, 3, 4, 5, 6, 8, 9]
-    return make_data(
-        I=list(range(N + 1)), C=C, K=K,
-        D={i: 1.0 for i in range(N)},
-        E={i: 7.0 for i in range(N)},
-        S={2: 0.5, 7: 0.5},
-        E0=90, Ecap=100, Emin=10,
-        Ebar={0: 0, 1: 40, 2: 80, 3: 100},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={2: 0, 7: 0}, Whf={2: 20, 7: 20},
-        label="break_forced — 10 stops, 4.5h driving limit binds",
-        title="break_forced",
-    )
-
-
-def instance_charging_needed() -> dict:
-    """
-    8-stop route with high energy consumption (22 kWh/leg).
-    Battery would deplete without at least one charge stop; tests that
-    the MILP selects a charging action and the simulation follows.
-    """
-    N = 8
-    C, K = [2, 6], [1, 3, 4, 5, 7]
-    return make_data(
-        I=list(range(N + 1)), C=C, K=K,
-        D={i: 1.0 for i in range(N)},
-        E={i: 22.0 for i in range(N)},
-        S={2: 0.5, 6: 0.5},
-        E0=80, Ecap=100, Emin=10,
-        Ebar={0: 0, 1: 40, 2: 80, 3: 100},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={2: 0, 6: 0}, Whf={2: 20, 6: 20},
-        label="charging_needed — 8 stops, high consumption forces charging",
-        title="charging_needed",
-    )
-
-
-def instance_rest_forced() -> dict:
-    """
-    14-stop route where the 9h shift-driving limit forces a daily rest.
-    Legs of 1h each → after 9 legs without rest, sd=9h exactly.
-    """
-    N = 14
-    C = [3, 8, 12]
-    K = [1, 2, 4, 5, 6, 7, 9, 10, 11, 13]
-    return make_data(
-        I=list(range(N + 1)), C=C, K=K,
-        D={i: 1.0 for i in range(N)},
-        E={i: 7.0 for i in range(N)},
-        S={3: 0.5, 8: 0.5, 12: 0.5},
-        E0=90, Ecap=100, Emin=10,
-        Ebar={0: 0, 1: 40, 2: 80, 3: 100},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={3: 0, 8: 0, 12: 0}, Whf={3: 30, 8: 30, 12: 30},
-        label="rest_forced — 14 stops, 9h shift limit forces daily rest",
-        title="rest_forced",
-    )
-
-
-def instance_3day() -> dict:
-    """
-    34-stop three-day route with 10 customers and 23 CS stops.
-    Requires 3 mandatory daily rests and multiple charges.
-    Representative of a realistic multi-day long-haul mission.
-    """
-    N = 34
-    C = [3, 7, 11, 15, 19, 22, 25, 28, 30, 32]
-    K = [i for i in range(1, N) if i not in C]
-    return make_data(
-        I=list(range(N + 1)), C=C, K=K,
-        D={i: 1.0  for i in range(N)},
-        E={i: 8.0  for i in range(N)},
-        S={c: 0.75 for c in C},
-        E0=90, Ecap=100, Emin=10,
-        Ebar={0: 0, 1: 40, 2: 80, 3: 100},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={c: 0   for c in C},
-        Whf={c: 200 for c in C},
-        label="3-day — 34 legs, 10 customers, 23 CS, 3 mandatory rests",
-        title="3day",
-    )
-
-
 def instance_realistic(route_class: str = "medium",
                        clusters: int = 3,
                        customers_class: str = "few") -> dict:
@@ -396,7 +292,7 @@ def instance_realistic(route_class: str = "medium",
     route_class      : "short" (800–1200 km) | "medium" (1500–2500 km)
                        | "long" (3000–4000 km)
     clusters         : 1 | 2 | 3 — number of customer delivery clusters
-    customers_class  : "few" (1–3) | "medium" (4–5) | "many" (6–15)
+    customers_class  : "few" (1–3) | "medium" (4–6) | "many" (7–15)
 
     Notes
     -----
@@ -405,7 +301,7 @@ def instance_realistic(route_class: str = "medium",
       realistic_{route_class}_{customers_class}_{clusters}
     """
     distances = {"short": [800, 1200], "medium": [1500, 2500], "long": [3000, 4000]}
-    customers = {"few": (1, 3), "medium": (4, 5), "many": (6, 15)}
+    customers = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
     average_speed    = 80        # km/h nominal highway speed
     CS_spacing       = 40        # km between consecutive CS stops
     Battery_capacity = 350       # kWh
@@ -460,136 +356,12 @@ def instance_realistic(route_class: str = "medium",
     print(f"Route: {route_distance} km, {len(C)} customers, {len(K)} CS")
 
     km = {i: average_speed * D[i] for i in D}
-    Bcap = Battery_capacity
     return make_data(
-        I=I, C=C, K=K, D=D, E=E, km=km,
-        S={c: 0.5 for c in C},
-        E0=Bcap, Ecap=Bcap, Emin=0.2 * Bcap,
-        Ebar={0: 0, 1: 0.40 * Bcap, 2: 0.80 * Bcap, 3: Bcap},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.367, 3: 2.50},
+        I=I, C=C, K=K, D=D, E=E, km=km, Bcap=Battery_capacity,
         Wha={c: 0        for c in C},
         Whf={c: 20000000 for c in C},
         label="realistic — randomly generated long-haul route",
         title=f"realistic_{route_class}_{customers_class}_{clusters}",
-    )
-
-
-# ── Targeted edge-case instances ──────────────────────────────────────────────
-
-def instance_split_break() -> dict:
-    """
-    Forces the b15→b30 split-break sequence.
-
-    Leg sizes are chosen so that cd approaches 4.5h but stays under even
-    with δ=20%: max drawn cd = (1.5+1.4)×1.2 = 3.48h < 4.5h.
-    A b15 at stop 1 sets phi=1, enabling b30 at stop 3.
-    """
-    return make_data(
-        I=[0, 1, 2, 3, 4], C=[2], K=[1, 3],
-        D={0: 1.5, 1: 0.4, 2: 1.4, 3: 0.7},
-        E={0: 45,  1: 12,  2: 42,  3: 20},
-        S={2: 0.5},
-        E0=200, Ecap=200, Emin=40,
-        Ebar={0: 0, 1: 80, 2: 160, 3: 200},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={2: 0}, Whf={2: 1e7},
-        label="split_break — forces b15+b30 sequence",
-        title="split_break",
-    )
-
-
-def instance_phi_inherited() -> dict:
-    """
-    Start mid-route with phi=1 (b15 already taken in a previous window).
-    The b30 option must be available at the first sub-problem stop.
-    Tests that phi is correctly propagated through init_state in solve_horizon.
-    """
-    return make_data(
-        I=[0, 1, 2, 3], C=[], K=[1, 2],
-        D={0: 1.5, 1: 1.0, 2: 0.8},
-        E={0: 45,  1: 30,  2: 25},
-        S={},
-        E0=150, Ecap=200, Emin=30,
-        Ebar={0: 0, 1: 80, 2: 160, 3: 200},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={}, Whf={},
-        label="phi_inherited — b30 available from start",
-        title="phi_inherited",
-    )
-
-
-def instance_rho2_budget() -> dict:
-    """
-    Route requiring four daily rests.  The first three may use r2 (9h);
-    the fourth must use r1 (11h) once the rho2_used budget is exhausted.
-    Tests that the rho2_used counter is tracked and the budget enforced.
-    """
-    shift_d = 8.5 / 3
-    C = [3, 6, 9]
-    K = [1, 2, 4, 5, 7, 8, 10, 11]
-    return make_data(
-        I=list(range(13)), C=C, K=K,
-        D={i: shift_d for i in range(12)},
-        E={i: shift_d * 30 for i in range(12)},
-        S={3: 0.5, 6: 0.5, 9: 0.5},
-        E0=350, Ecap=350, Emin=50,
-        Ebar={0: 0, 1: 140, 2: 280, 3: 350},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={c: 0   for c in C},
-        Whf={c: 1e7 for c in C},
-        label="rho2_budget — 4 rests, first 3 can be r2",
-        title="rho2_budget",
-    )
-
-
-def instance_tight_energy_chain() -> dict:
-    """
-    Battery must charge at every CS stop: each leg consumes 85% of usable
-    capacity (136 kWh), so skipping any CS charge causes energy infeasibility.
-
-    NOTE: use delta=0 only (listed in DET_ONLY_INSTANCES).
-    With δ>0 the drawn energy may exceed the usable capacity within a single
-    leg, which no policy can recover from.
-    """
-    Ecap = 200; Emin = 40
-    E_leg = (Ecap - Emin) * 0.85
-    D_leg = round(E_leg / 100, 3)
-    N_legs = 5
-    return make_data(
-        I=list(range(N_legs + 1)), C=[], K=list(range(1, N_legs)),
-        D={i: D_leg for i in range(N_legs)},
-        E={i: E_leg for i in range(N_legs)},
-        S={},
-        E0=Ecap, Ecap=Ecap, Emin=Emin,
-        Ebar={0: 0, 1: 80, 2: 160, 3: 200},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={}, Whf={},
-        label="tight_energy_chain — must charge at every CS",
-        title="tight_energy",
-    )
-
-
-def instance_sd_boundary() -> dict:
-    """
-    Route where shift driving approaches 9h, forcing a preemptive rest.
-    Three legs of 2.9h each push sd to 8.7h; the fourth leg would
-    exceed the 9h limit, so a rest must be inserted before it.
-
-    NOTE: use delta=0 only (listed in DET_ONLY_INSTANCES).
-    With δ=20%: max sd = 2.9×1.2×3 = 10.44h which exceeds the limit
-    mid-leg — something no look-ahead policy can avoid.
-    """
-    return make_data(
-        I=[0, 1, 2, 3, 4, 5], C=[], K=[1, 2, 3, 4],
-        D={0: 2.9, 1: 2.9, 2: 2.9, 3: 0.4, 4: 0.4},
-        E={0: 87,  1: 87,  2: 87,  3: 12,  4: 12},
-        S={},
-        E0=350, Ecap=350, Emin=50,
-        Ebar={0: 0, 1: 140, 2: 280, 3: 350},
-        Tbar={0: 0.0, 1: 0.55, 2: 1.37, 3: 2.50},
-        Wha={}, Whf={},
-        label="sd_boundary — sd approaches 9h, rest required",
-        title="sd_boundary",
     )
 
 
@@ -598,17 +370,7 @@ def instance_sd_boundary() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ALL_INSTANCES: dict[str, callable] = {
-    "tiny"              : instance_tiny,
-    "break_forced"      : instance_break_forced,
-    "charging_needed"   : instance_charging_needed,
-    "rest_forced"       : instance_rest_forced,
-    "3day"              : instance_3day,
     "realistic"         : instance_realistic,
-    "split_break"       : instance_split_break,
-    "phi_inherited"     : instance_phi_inherited,
-    "rho2_budget"       : instance_rho2_budget,
-    "tight_energy_chain": instance_tight_energy_chain,
-    "sd_boundary"       : instance_sd_boundary,
 }
 
 # These instances are only meaningful with delta=0 (noise would violate

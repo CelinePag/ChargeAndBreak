@@ -372,15 +372,14 @@ def oracle_solve(full_data: dict, D_actual_list: list,
         _op(f"  Warm-start: sim arrival {sim_results['total_time']:.3f}h "
             f"injected as incumbent")
 
-    solver = pyo.SolverFactory("appsi_highs")
-    solver.options["mip_rel_gap"]           = 0.005
-    solver.options["time_limit"]            = time_limit
-    solver.options["presolve"]              = "on"
-    solver.options["mip_heuristic_effort"]  = 0.2
+    solver = pyo.SolverFactory("gurobi")
+    solver.options["MIPGap"]     = 0.005
+    solver.options["TimeLimit"]  = time_limit
+    solver.options["Heuristics"] = 0.2
 
     if tee:
         # Write solver output directly to stdout.
-        # No redirect_stdout wrapper: HiGHS output is guaranteed to appear on
+        # No redirect_stdout wrapper: Gurobi output is guaranteed to appear on
         # the terminal regardless of how the solver writes to stdout/stderr.
         # If log_fh is provided the solver log is not duplicated there (summary
         # lines from _op still go to log_fh as usual).

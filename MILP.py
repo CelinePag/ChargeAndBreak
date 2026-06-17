@@ -290,7 +290,8 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
 
 def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
                                      S_dict, M_drv, M_sd, M_sw, TK,
-                                     is_subproblem: bool = False):
+                                     is_subproblem: bool = False,
+                                     D_wc: dict = None):
     """
     Hours-of-Service accumulator propagation: cd, sd, sw.
 
@@ -312,7 +313,24 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
         sw[0] + work_at_stop_0 <= Twrk_sh
     This catches the case where work at stop 0 itself pushes the driver over
     the shift-working limit (not visible from sw[0] alone).
+
+    D_wc : dict or None
+    -------------------
+    If provided, maps each leg index i to a worst-case travel time (h) used
+    in the cd, sd, and sw propagation constraints instead of m.D_nom[i].
+    Used by the Bertsimas-Sim robust counterpart (RO.py): passing
+    D_wc[i] = D_nom[i]*(1+delta) guarantees HoS feasibility under any
+    realised delay within the uncertainty set.  The nominal m.D_nom[i] is
+    still used in the time-propagation / objective (handled by the dual
+    penalty in the RO objective).
+    None (default) -> nominal behaviour, uses m.D_nom[i] throughout.
     """
+    # Travel time used in HoS accumulator propagation:
+    # nominal m.D_nom[i] by default; worst-case float D_wc[i] for RO.
+    def _d(i):
+        if D_wc is not None and i in D_wc:
+            return D_wc[i]
+        return m.D_nom[i]
     # --- Consecutive driving (reset by b45, b30, or any rest) ---
     m.l1u1 = pyo.Constraint(m.I,
         rule=lambda m, i: m.l1[i] <= M_drv * _model_ri(m, i))
@@ -323,7 +341,7 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
 
     def _cd(m, i):
         if i >= N: return pyo.Constraint.Skip
-        return m.cd[i+1] == m.cd[i] + m.D_nom[i] - m.l1[i]
+        return m.cd[i+1] == m.cd[i] + _d(i) - m.l1[i]
     m.cd_prop = pyo.Constraint(m.I, rule=_cd)
     m.cd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.cd[i] <= m.Tdrv_cons)
 
@@ -337,7 +355,7 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
 
     def _sd(m, i):
         if i >= N: return pyo.Constraint.Skip
-        return m.sd[i+1] == m.sd[i] + m.D_nom[i] - m.l2[i]
+        return m.sd[i+1] == m.sd[i] + _d(i) - m.l2[i]
     m.sd_prop = pyo.Constraint(m.I, rule=_sd)
     m.sd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sd[i] <= m.Tdrv_sh1)
 
@@ -382,7 +400,7 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
         else:
             work_here = 0.0
 
-        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + man_i + m.D_nom[i] + work_next
+        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + man_i + _d(i) + work_next
     m.sw_prop = pyo.Constraint(m.I, rule=_sw)
     m.sw_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sw[i] <= m.Twrk_sh)
 
@@ -953,10 +971,9 @@ def build_model(data: dict) -> pyo.ConcreteModel:
 
 def solve_model(model, tee=True):
     """Solve the full-route MIP to near-optimality (0.5% gap, 2h limit)."""
-    solver = pyo.SolverFactory("appsi_highs")
-    solver.options["mip_rel_gap"] = 0.005
-    solver.options["time_limit"]  = 60 * 60 * 2
-    solver.options["presolve"]    = "on"
+    solver = pyo.SolverFactory("gurobi")
+    solver.options["MIPGap"]    = 0.005
+    solver.options["TimeLimit"] = 60 * 60 * 2
     try:
         results = _solve_quiet(solver, model, tee)
         status  = str(results.solver.termination_condition)
@@ -1258,7 +1275,7 @@ def _inject_warm_start(model, warm_sol, start_stop):
 
 def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=False):
     """
-    Solve a horizon model with HiGHS.
+    Solve a horizon model with Gurobi.
 
     Returns (results, status_str, solve_info).
     solve_info keys: wall_s, obj, n_vars, n_cons, had_warm, relax, status.
@@ -1311,13 +1328,10 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
                     if vdata.ub is None:
                         vdata.setub(1.0)
 
-    solver = pyo.SolverFactory("appsi_highs")
-    solver.options["presolve"]   = "on"
-    solver.options["time_limit"] = time_limit
-    if tee:
-        solver.options["write_model_file"] = "debug_stop23.lp"
+    solver = pyo.SolverFactory("gurobi")
+    solver.options["TimeLimit"] = time_limit
     if not relax:
-        solver.options["mip_rel_gap"] = 0.005
+        solver.options["MIPGap"] = 0.005
 
     t0 = _tm.perf_counter()
     try:
