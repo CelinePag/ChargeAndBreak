@@ -57,7 +57,7 @@ import numpy as np
 from BEHDV     import BEHDV
 from MILP      import solve_horizon, INFEASIBLE_PENALTY
 from scenarios import generate_scenarios, ScenarioTracker
-from settings  import LOWER_PCT, V_NOM, ecr
+from settings  import LOWER_PCT, V_NOM, ecr, sample_travel_time
 from runner    import finalize_run
 from plots     import plot_simulation_results   # re-exported for callers
 
@@ -270,7 +270,11 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
 
     e_needed, cur = 0.0, stop
     while cur < N:
-        e_needed += ecr(V_NOM * (1.0 + delta)) * full_data["D"].get(cur, 0.0) * V_NOM
+        d_nom = full_data["D"].get(cur, 0.0)
+        L_km  = full_data.get("km", {}).get(cur, d_nom * V_NOM)
+        d_min = max(d_nom * (1.0 - delta), 1e-9)
+        v_wc  = L_km / d_min   # fastest speed → most energy (consistent with RO)
+        e_needed += L_km * ecr(v_wc)
         cur += 1
         if cur in K_set or cur == N:
             break
@@ -1151,13 +1155,16 @@ def run_simulation(full_data: dict,
         scores_log.append(score_list)
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
 
-
-        D_next = full_data["D_real"][stop]
-        E_next = full_data["E_real"][stop]
-
+        # Draw actual travel time and energy from the uncertainty distribution.
+        # This is the simulation realisation — NOT used in any decision above.
+        d_nom = full_data["D"].get(stop, 0.0)
+        D_next = sample_travel_time(d_nom, rng, lower_pct=delta, upper_pct=delta)
+        km_leg = full_data.get("km", {}).get(stop, d_nom * V_NOM)
+        v_act  = km_leg / D_next if D_next > 0 else V_NOM
+        E_next = km_leg * ecr(v_act)
 
         vehicle.advance(action=action, D_next=D_next, E_next=E_next, milp_sol=nom_sol)
-        tracker.record_realisation(stop, D_next)
+        tracker.record_realisation(stop, D_next, E_actual=E_next)
 
         if verbose and stop > 0:
             print(f"     -> arrived stop {vehicle.stop} after Driving {D_next:.2f}h and consuming {E_next:.1f}kWh"

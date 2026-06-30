@@ -69,29 +69,20 @@ T_START: float = 8.0       # departure time (absolute hours, 08:00)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-LOWER_PCT = 0.10
-MEAN_DELAY_PCT = 0.10
-ALPHA = 3.0
+LOWER_PCT = 0.25
+#MEAN_DELAY_PCT = 0.10
+#ALPHA = 3.0
 
 
 def sample_travel_time(
     D_i,
     rng,
-    lower_pct = LOWER_PCT,   # can be this much faster than D_i
-    upper_pct = LOWER_PCT,   # hard cap: cannot be this much slower
-    mean_delay_pct = MEAN_DELAY_PCT,  # mean delay as fraction of D_i
-    alpha = ALPHA,        # shape (1 = exponential, >1 = smoother)
+    lower_pct = LOWER_PCT,
+    upper_pct = LOWER_PCT,
     n = 1,
 ):
-
-    T_min  = D_i * (1 - lower_pct)
-    T_max  = D_i * (1 + upper_pct)
+    """Sample travel time uniformly from [D_i*(1-lower_pct), D_i*(1+upper_pct)]."""
+    T_min = D_i * (1 - lower_pct)
+    T_max = D_i * (1 + upper_pct)
     T = rng.uniform(T_min, T_max, size=n)
-    return T if n > 1 else float(T[0])
-    mean_X = D_i * mean_delay_pct   # mean of the unshifted delay
-    scale  = mean_X / alpha          # numpy gamma uses scale = 1/rate
-
-    X = rng.gamma(shape=alpha, scale=scale, size=n)
-    T = np.clip(T_min + X, T_min, T_max)
-
     return T if n > 1 else float(T[0])

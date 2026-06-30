@@ -118,7 +118,7 @@ def generate_scenarios(full_data: dict,
         D_scen: dict[int, float] = {}
         E_scen: dict[int, float] = {}
         for j, leg in enumerate(legs):
-            d_s = sample_travel_time(D_nom.get(leg, 0.0), rng, upper_pct = delta)
+            d_s = sample_travel_time(D_nom.get(leg, 0.0), rng, lower_pct = delta, upper_pct = delta)
             D_scen[leg] = d_s
             # Derive energy from ECR: E = L_km * ECR(v_s), v_s = L_km / d_s
             L_km = L_nom.get(leg,
@@ -128,15 +128,27 @@ def generate_scenarios(full_data: dict,
         scenarios.append({"D": D_scen, "E": E_scen})
 
     # ── Deterministic corner cases ─────────────────────────────────────────────
+    def _corner_energies(mult: float) -> dict:
+        """Compute energy for a deterministic speed-multiplier corner case."""
+        E_corner: dict[int, float] = {}
+        for leg in legs:
+            d_c  = D_nom.get(leg, 0.0) * mult
+            L_km = L_nom.get(leg, D_nom.get(leg, 0.0) * v_nom.get(leg, V_NOM))
+            v_c  = L_km / d_c if d_c > 0 else V_NOM
+            E_corner[leg] = L_km * _ecr(v_c)
+        return E_corner
+
     if include_best:
+        mult = (1 - delta)
         scenarios.append({
-            "D": {l: D_nom.get(l, 0.0) * (1 - delta) for l in legs},
-            "E": full_data["E"],
+            "D": {l: D_nom.get(l, 0.0) * mult for l in legs},
+            "E": _corner_energies(mult),
         })
     if include_worst:
+        mult = (1 + delta)
         scenarios.append({
-            "D": {l: D_nom.get(l, 0.0) * (1 + delta) for l in legs},
-            "E": full_data["E"],
+            "D": {l: D_nom.get(l, 0.0) * mult for l in legs},
+            "E": _corner_energies(mult),
         })
 
     return scenarios

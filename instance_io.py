@@ -197,7 +197,7 @@ def generate_instance_file(route_class: str,
     E_real = []
     for leg in range(N):
         d_nom = D_nom.get(leg, 0.0)
-        d_act = sample_travel_time(D_nom.get(leg, 0.0), rng, upper_pct = delta)
+        d_act = sample_travel_time(D_nom.get(leg, 0.0), rng, lower_pct = delta, upper_pct = delta)
         L_km  = km.get(leg, d_nom * V_NOM)
         v_act = L_km / d_act if d_act > 0 else V_NOM
         e_act = L_km * _ecr(v_act)
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else "instances"
     n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 2
     n_scenarios  = int(sys.argv[3])   if len(sys.argv) > 3 else 100
-    delta        = float(sys.argv[4]) if len(sys.argv) > 4 else 0.15
+    delta        = float(sys.argv[4]) if len(sys.argv) > 4 else 0.25
     first_seed   = int(sys.argv[5])   if len(sys.argv) > 5 else 1
 
     print("=" * 60)

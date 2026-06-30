@@ -245,6 +245,7 @@ def _ro_sol_to_actions(sol: list) -> list[dict]:
             tauc       = s["tauc"],
             taur       = s["taur"],
             tauq       = s["tauq"],
+            sigma      = s.get("sigma", 0),
         ))
     return actions
 
@@ -280,6 +281,7 @@ def _simulate_ro_schedule(full_data: dict, sol: list,
                 taub = action["taub"], tauc = action["tauc"],
                 taur = action["taur"], tauq = action["tauq"],
                 y    = action["y"],
+                sigma= action.get("sigma", 0),
                 b45  = int(action["break_type"] == "b45"),
                 b15  = int(action["break_type"] == "b15"),
                 b30  = int(action["break_type"] == "b30"),
