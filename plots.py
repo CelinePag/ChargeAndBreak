@@ -47,6 +47,8 @@ COL = dict(
     charge  = "#E67E22",
     brk     = "#F1C40F",
     rest    = "#8E44AD",
+    mstop   = "#95A5A6",   # maneuver/setup overhead at CS stop (v·Mstop)
+    mseq    = "#5D6D7E",   # sequential reposition overhead (sigma·Mseq)
 )
 EPS = 1e-3
 
@@ -128,16 +130,31 @@ def plot_solution(sol, data, title="solution"):
         vlines.append((ta, "gray", 0.5, 0.30, "--"))
         if s["is_C"]:
             t += data["S"].get(s["i"], 0)
-        if s["is_K"] and s["y"]:
-            if s["tauq"] > EPS:
-                t += s["tauq"]
-                vlines.append((t, COL["queue"],  0.6, 0.28, ":"))
-            if s["tauc"] > EPS:
-                t += s["tauc"]
-                vlines.append((t, COL["charge"], 0.7, 0.33, ":"))
+        if s["is_K"]:
+            sigma_v  = int(s.get("sigma", 0))
+            brk_v    = bool(s["b45"] or s["b15"] or s["b30"])
+            v_v      = bool(s["y"] or brk_v or s["rho1"] or s["rho2"])
+            mstop_t  = float(v_v)     * data.get("M_stop", {}).get(s["i"], 0.0)
+            mseq_t   = float(sigma_v) * data.get("M_seq",  {}).get(s["i"], 0.0)
+            if mstop_t > EPS:
+                t += mstop_t
+                vlines.append((t, COL["mstop"], 0.5, 0.25, ":"))
+            if s["y"]:
+                if s["tauq"] > EPS:
+                    t += s["tauq"]
+                    vlines.append((t, COL["queue"], 0.6, 0.28, ":"))
+                if s["tauc"] > EPS:
+                    if sigma_v == 0 and brk_v:
+                        t += s["tauc"] + s["taub"]  # concurrent window
+                    else:
+                        t += s["tauc"]
+                    vlines.append((t, COL["charge"], 0.7, 0.33, ":"))
         if s["taub"] > EPS:
-            vlines.append((t, COL["brk"],  0.8, 0.48, "--"))
-            t += s["taub"]
+            already = s["is_K"] and s["y"] and int(s.get("sigma", 0)) == 0 and \
+                      bool(s["b45"] or s["b15"] or s["b30"])
+            if not already:
+                vlines.append((t, COL["brk"], 0.8, 0.48, "--"))
+                t += s["taub"]
         if s["taur"] > EPS:
             vlines.append((t, COL["rest"], 1.0, 0.52, "--"))
 
@@ -148,31 +165,70 @@ def plot_solution(sol, data, title="solution"):
     Y, H = 0.5, 0.38
 
     for s in sol:
-        i = s["i"]
+        i         = s["i"]
+        is_K      = s["is_K"]; is_C = s["is_C"]
+        brk_type  = ("b45" if s["b45"] else "b15" if s["b15"] else
+                     "b30" if s["b30"] else None)
+        rst_type  = "r1" if s["rho1"] else ("r2" if s["rho2"] else None)
+        sigma_val = int(s.get("sigma", 0))
+
         if i > 0:
             _bar(ax, sol[i - 1]["td"], s["ta"] - sol[i - 1]["td"],
                  Y, H, COL["drive"], label=f"drv→{i}", fontsize=6.5)
-        t = s["ta"]
-        if s["is_C"]:
+        t        = s["ta"]
+        brk_drew = False
+        mseq_t   = 0.0
+
+        if is_C:
             svc = data["S"].get(i, 0)
             _bar(ax, t, svc, Y, H, COL["service"], label=f"C{i}", fontsize=7)
             t += svc
-        if s["is_K"] and s["y"] and s["tauq"] > EPS:
-            _bar(ax, t, s["tauq"], Y, H, COL["queue"], label="Q", fontsize=7)
-            t += s["tauq"]
-        if s["is_K"] and s["y"] and s["tauc"] > EPS:
-            _bar(ax, t, s["tauc"], Y, H, COL["charge"],
-                 label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
-            t += s["tauc"]
-        if s["taub"] > EPS:
-            lbl = "B45" if s["b45"] else ("B15" if s["b15"] else "B30")
+
+        if is_K:
+            v_val   = bool(s["y"] or s["b45"] or s["b15"] or s["b30"] or
+                           s["rho1"] or s["rho2"])
+            mstop_t = float(v_val)     * data.get("M_stop", {}).get(i, 0.0)
+            mseq_t  = float(sigma_val) * data.get("M_seq",  {}).get(i, 0.0)
+
+            if mstop_t > EPS:
+                _bar(ax, t, mstop_t, Y, H, COL["mstop"],
+                     label="setup", fontsize=7, text_color="#333")
+                t += mstop_t
+
+            if s["y"] and s["tauq"] > EPS:
+                _bar(ax, t, s["tauq"], Y, H, COL["queue"], label="Q", fontsize=7)
+                t += s["tauq"]
+
+            if s["y"] and s["tauc"] > EPS:
+                tauc = s["tauc"]; taub = s["taub"]
+                if sigma_val == 0 and brk_type:
+                    # concurrent: break underlaid, charge on top
+                    _bar(ax, t, tauc + taub, Y, H, COL["brk"],
+                         label=None, fontsize=7, text_color="#333")
+                    _bar(ax, t, tauc, Y, H, COL["charge"],
+                         label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
+                    t += tauc + taub
+                    brk_drew = True
+                else:
+                    # sequential or charge-only: charge first
+                    _bar(ax, t, tauc, Y, H, COL["charge"],
+                         label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
+                    t += tauc
+
+        if brk_type and s["taub"] > EPS and not brk_drew:
             _bar(ax, t, s["taub"], Y, H, COL["brk"],
-                 label=lbl, fontsize=7, text_color="#333")
+                 label=brk_type.upper(), fontsize=7, text_color="#333")
             t += s["taub"]
-        if s["taur"] > EPS:
+
+        if rst_type and s["taur"] > EPS:
             _bar(ax, t, s["taur"], Y, H, COL["rest"],
-                 label="RST-r1" if s["rho1"] else "RST-r2", fontsize=7)
-        typ = "●C" if s["is_C"] else ("▲K" if s["is_K"] else ("O" if i == 0 else "D"))
+                 label=f"RST-{rst_type}", fontsize=7)
+            t += s["taur"]
+
+        if is_K and mseq_t > EPS:
+            _bar(ax, t, mseq_t, Y, H, COL["mseq"], label="repos", fontsize=7)
+
+        typ = "●C" if is_C else ("▲K" if is_K else ("O" if i == 0 else "D"))
         ax.text(s["ta"], Y + H / 2 + 0.06, f"{typ}{i}",
                 ha="left", va="bottom", fontsize=6,
                 color="#444", rotation=45, clip_on=True)
@@ -196,12 +252,16 @@ def plot_solution(sol, data, title="solution"):
     tpts, spts = [], []
     for s in sol:
         ta, td, ea, ed = s["ta"], s["td"], s["ea"], s["ed"]
-        tauq = s["tauq"] if s["is_K"] else 0
-        tauc = s["tauc"] if s["is_K"] else 0
+        is_K  = s["is_K"]
+        tauq  = s["tauq"] if is_K else 0
+        tauc  = s["tauc"] if is_K else 0
+        v_val = bool(s.get("y") or s.get("b45") or s.get("b15") or s.get("b30") or
+                     s.get("rho1") or s.get("rho2")) if is_K else False
+        mstop_t = float(v_val) * data.get("M_stop", {}).get(s["i"], 0.0) if is_K else 0.0
         tpts.append(ta); spts.append(ea)
         if td - ta > EPS:
-            tcs = ta + tauq; tce = tcs + tauc
-            if tauq > EPS:
+            tcs = ta + mstop_t + tauq; tce = tcs + tauc
+            if mstop_t + tauq > EPS:
                 tpts.append(tcs); spts.append(ea)
             if tauc > EPS:
                 tpts.append(tce); spts.append(ed)
@@ -330,57 +390,56 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     Y, H = 0.5, 0.40
 
     for i in range(N):
-        st   = states[i]
-        ta_i = st.t_arr
-        act  = actions[i]
-        dur  = durations_list[i] if i < len(durations_list) else {}
-        td_i = td_list[i]        if i < len(td_list)        else ta_i
-        is_K = (i in K_set)
-        is_C = (i in C_set)
+        st    = states[i]
+        ta_i  = st.t_arr
+        act   = actions[i]
+        dur   = durations_list[i] if i < len(durations_list) else {}
+        td_i  = td_list[i]        if i < len(td_list)        else ta_i
+        is_K  = (i in K_set)
+        is_C  = (i in C_set)
         y_val = int(act.get("y", 0))
         brk   = act.get("break_type")
         rst   = act.get("rest_type")
+        sigma = int(dur.get("sigma", 0))
+        mstop = dur.get("mstop", 0.0)
+        mseq  = dur.get("mseq",  0.0)
         t     = ta_i
+        brk_drew = False
 
         if is_C:
             svc = full_data["S"].get(i, 0.0)
             _bar(ax1, t, svc, Y, H, COL["service"], f"C{i}", fontsize=7)
             t += svc
 
+        if is_K and mstop > EPS:
+            _bar(ax1, t, mstop, Y, H, COL["mstop"], "setup", fontsize=7, text_color="#333")
+            t += mstop
+
         if is_K and y_val:
             tauq = dur.get("tauq", 0.0)
             _bar(ax1, t, tauq, Y, H, COL["queue"], "Q", fontsize=7)
             t += tauq
-            tauc  = dur.get("tauc", 0.0)
-            taub  = dur.get("taub", 0.0)
-            ea_v  = st.e_arr
-            ed_v  = (states[i + 1].e_arr + full_data["E"].get(i, 0.0)
-                     if i + 1 < len(states) else ea_v)
-            # When charging and breaking simultaneously, the break spans
-            # the full max(tauc, T_break) window starting at t.
-            # Draw break bar first (full span), charge bar on top (narrower).
-            brk_type = act.get("break_type")
-            T_break_map = {"b45": full_data.get("Tb45", 0.75),
-                           "b15": full_data.get("Tb15", 0.25),
-                           "b30": full_data.get("Tb30", 0.50)}
-            T_break_min = T_break_map.get(brk_type, 0.0) if brk_type else 0.0
-            taub_hat    = tauc + taub   # total break-eligible window (MILP taub_hat)
-            if brk_type and taub_hat > EPS:
-                # Draw full break span underneath
-                _bar(ax1, t, taub_hat, Y, H, COL["brk"],
+            tauc = dur.get("tauc", 0.0)
+            taub = dur.get("taub", 0.0)
+            ea_v = st.e_arr
+            ed_v = (states[i + 1].e_arr + full_data["E"].get(i, 0.0)
+                    if i + 1 < len(states) else ea_v)
+            if sigma == 0 and brk and tauc + taub > EPS:
+                # concurrent: break underlaid across full window, charge on top
+                _bar(ax1, t, tauc + taub, Y, H, COL["brk"],
                      label=None, fontsize=7, text_color="#333")
-            _bar(ax1, t, tauc, Y, H, COL["charge"],
-                 f"CHG\n{ea_v:.0f}→{ed_v:.0f}", fontsize=6)
-            t += taub_hat if brk_type else tauc   # advance by full dwell
+                _bar(ax1, t, tauc, Y, H, COL["charge"],
+                     f"CHG\n{ea_v:.0f}→{ed_v:.0f}", fontsize=6)
+                t += tauc + taub
+                brk_drew = True
+            else:
+                # sequential or charge-only: charge first
+                _bar(ax1, t, tauc, Y, H, COL["charge"],
+                     f"CHG\n{ea_v:.0f}→{ed_v:.0f}", fontsize=6)
+                t += tauc
 
         taub = dur.get("taub", 0.0)
-        # At CS stops with charging, the break was already drawn overlapping
-        # with the charge bar above.  Only draw a separate break bar when
-        # the driver is NOT charging, or when there is still residual break
-        # time beyond what the charge bar covered (taub > 0 means the break
-        # extends past the charge — but visually it's already shown).
-        draw_sep_brk = brk and taub > EPS and not (is_K and y_val)
-        if draw_sep_brk:
+        if brk and taub > EPS and not brk_drew:
             lbl = {"b45": "B45", "b15": "B15", "b30": "B30"}.get(brk, brk)
             _bar(ax1, t, taub, Y, H, COL["brk"], lbl, fontsize=7, text_color="#333")
             t += taub
@@ -390,6 +449,10 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
             lbl = "RST-r1" if rst == "r1" else "RST-r2"
             _bar(ax1, t, taur, Y, H, COL["rest"], lbl, fontsize=7)
             t += taur
+
+        if is_K and mseq > EPS:
+            _bar(ax1, t, mseq, Y, H, COL["mseq"], "repos", fontsize=7)
+            t += mseq
 
         if i < N and i < len(D_actual_list):
             _bar(ax1, td_i, D_actual_list[i], Y, H, COL["drive"],
@@ -436,53 +499,72 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
             s_or = orsol.get(i, {})
             if not s_or:
                 continue
-            ta_or = s_or.get("ta", 0.0)
-            td_or = s_or.get("td", ta_or)
-            t     = ta_or
-            is_K  = i in K_set
-            is_C  = i in C_set
-            y_or  = s_or.get("y", 0)
+            ta_or    = s_or.get("ta", 0.0)
+            td_or    = s_or.get("td", ta_or)
+            t        = ta_or
+            is_K     = i in K_set
+            is_C     = i in C_set
+            y_or     = s_or.get("y", 0)
+            sigma_or = int(s_or.get("sigma", 0))
+            brk_or   = ("b45" if s_or.get("b45") else
+                        "b15" if s_or.get("b15") else
+                        "b30" if s_or.get("b30") else None)
+            rst_or   = "r1" if s_or.get("rho1") else ("r2" if s_or.get("rho2") else None)
+            brk_drew_or = False
+            mseq_or  = 0.0
 
             if is_C:
                 svc = full_data["S"].get(i, 0.0)
                 _bar(ax_or, t, svc, Yo, Ho, COL["service"], f"C{i}", fontsize=7)
                 t += svc
 
+            if is_K:
+                v_or    = bool(y_or or s_or.get("b45") or s_or.get("b15") or
+                               s_or.get("b30") or s_or.get("rho1") or s_or.get("rho2"))
+                mstop_or = float(v_or)    * full_data.get("M_stop", {}).get(i, 0.0)
+                mseq_or  = float(sigma_or) * full_data.get("M_seq",  {}).get(i, 0.0)
+                if mstop_or > EPS:
+                    _bar(ax_or, t, mstop_or, Yo, Ho, COL["mstop"],
+                         "setup", fontsize=7, text_color="#333")
+                    t += mstop_or
+
             if is_K and y_or:
                 tauq_or = s_or.get("tauq", 0.0)
                 _bar(ax_or, t, tauq_or, Yo, Ho, COL["queue"], "Q", fontsize=7)
                 t += tauq_or
-                tauc_or  = s_or.get("tauc", 0.0)
-                taub_or  = s_or.get("taub", 0.0)
-                ea_or    = s_or.get("ea", 0.0)
-                ed_or    = s_or.get("ed", 0.0)
-                brk_or   = ("b45" if s_or.get("b45") else
-                             "b15" if s_or.get("b15") else
-                             "b30" if s_or.get("b30") else None)
-                taub_hat_or = tauc_or + taub_or
-                if brk_or and taub_hat_or > EPS:
-                    _bar(ax_or, t, taub_hat_or, Yo, Ho, COL["brk"],
+                tauc_or = s_or.get("tauc", 0.0)
+                taub_or = s_or.get("taub", 0.0)
+                ea_or   = s_or.get("ea", 0.0)
+                ed_or   = s_or.get("ed", 0.0)
+                if sigma_or == 0 and brk_or:
+                    # concurrent: break underlaid, charge on top
+                    _bar(ax_or, t, tauc_or + taub_or, Yo, Ho, COL["brk"],
                          label=None, fontsize=7, text_color="#333")
-                _bar(ax_or, t, tauc_or, Yo, Ho, COL["charge"],
-                     f"CHG\n{ea_or:.0f}→{ed_or:.0f}", fontsize=6)
-                t += taub_hat_or if brk_or else tauc_or
+                    _bar(ax_or, t, tauc_or, Yo, Ho, COL["charge"],
+                         f"CHG\n{ea_or:.0f}→{ed_or:.0f}", fontsize=6)
+                    t += tauc_or + taub_or
+                    brk_drew_or = True
+                else:
+                    _bar(ax_or, t, tauc_or, Yo, Ho, COL["charge"],
+                         f"CHG\n{ea_or:.0f}→{ed_or:.0f}", fontsize=6)
+                    t += tauc_or
 
-            # At CS stops with charging, break was drawn overlapping with charge above
-            brk_or_type = ("b45" if s_or.get("b45") else
-                           "b15" if s_or.get("b15") else
-                           "b30" if s_or.get("b30") else None)
-            taub_or_val = s_or.get("taub", 0)
-            if brk_or_type and taub_or_val > EPS and not (is_K and y_or):
-                lbl = brk_or_type.upper()
+            taub_or_val = s_or.get("taub", 0.0)
+            if brk_or and taub_or_val > EPS and not brk_drew_or:
                 _bar(ax_or, t, taub_or_val, Yo, Ho,
-                     COL["brk"], lbl, fontsize=7, text_color="#333")
+                     COL["brk"], brk_or.upper(), fontsize=7, text_color="#333")
                 t += taub_or_val
 
-            if s_or.get("rho1") or s_or.get("rho2"):
-                lbl = "RST-r1" if s_or.get("rho1") else "RST-r2"
-                _bar(ax_or, t, s_or.get("taur", 0), Yo, Ho,
-                     COL["rest"], lbl, fontsize=7)
-                t += s_or.get("taur", 0)
+            if rst_or:
+                taur_or = s_or.get("taur", 0.0)
+                if taur_or > EPS:
+                    lbl = f"RST-{rst_or}"
+                    _bar(ax_or, t, taur_or, Yo, Ho, COL["rest"], lbl, fontsize=7)
+                    t += taur_or
+
+            if is_K and mseq_or > EPS:
+                _bar(ax_or, t, mseq_or, Yo, Ho, COL["mseq"], "repos", fontsize=7)
+                t += mseq_or
 
             if i < len(D_actual_list):
                 _bar(ax_or, td_or, D_actual_list[i], Yo, Ho,
@@ -517,15 +599,17 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     for i, (t, e) in enumerate(zip(t_pts, e_pts)):
         t_full.append(t); e_full.append(e)
         if i < N and int(actions[i].get("y", 0)):
-            dur  = durations_list[i] if i < len(durations_list) else {}
-            td_i = td_list[i]        if i < len(td_list)        else t
-            tauq = dur.get("tauq", 0.0)
-            tauc = dur.get("tauc", 0.0)
-            t_cs  = t + tauq
+            dur   = durations_list[i] if i < len(durations_list) else {}
+            td_i  = td_list[i]        if i < len(td_list)        else t
+            mstop = dur.get("mstop", 0.0)
+            tauq  = dur.get("tauq",  0.0)
+            tauc  = dur.get("tauc",  0.0)
+            t_cs  = t + mstop + tauq   # charging starts after setup + queue
             t_ce  = t_cs + tauc
             e_dep = (e_pts[i + 1] + full_data["E"].get(i, 0.0)
                      if i + 1 < len(e_pts) else e)
-            t_full.append(t_cs); e_full.append(e)
+            if mstop + tauq > EPS:
+                t_full.append(t_cs); e_full.append(e)
             t_full.append(t_ce); e_full.append(e_dep)
             t_full.append(td_i); e_full.append(e_dep)
 

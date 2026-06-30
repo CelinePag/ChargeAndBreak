@@ -4,13 +4,6 @@ MILP.py — Electric Truck Scheduling: Full-Route & Rolling-Horizon Models
 Single file for ALL Pyomo modelling code.  Organised into four parts:
 
   PART 1 — Shared helpers
-      _declare_common_vars  : declare the full set of decision variables
-      _add_pwl_*            : PWL charging constraints (Montoya et al. 2017)
-      _add_break_rest_*     : HoS break / rest binary constraints
-      _add_hos_accumulator_*: cd / sd / sw propagation with big-M resets
-      _add_manoeuver_*      : z_man activity-indicator constraints
-      _model_xsum / _ri / _rho : Pyomo expression shorthands
-      _solve_quiet          : solver wrapper that suppresses output when tee=False
 
   PART 2 — Full-route deterministic model
       build_model(data)       : build Pyomo model for complete route 0..N
@@ -47,11 +40,6 @@ Dependencies
   needed when building sub-problems at run-time with perturbed travel times).
   No other local imports at module level.
 
-References
-----------
-  Montoya et al. (2017) "The electric vehicle routing problem with nonlinear
-  charging function", Transportation Research Part B, 103, pp. 87-110.
-  https://doi.org/10.1016/j.trb.2017.02.004
 """
 
 from __future__ import annotations
@@ -136,9 +124,10 @@ def _declare_common_vars(m):
     m.l1 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.l2 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.l4 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.u  = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
-
-    m.z_man = pyo.Var(m.I, domain=pyo.Binary)
+    m.u     = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
+    m.p     = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)  # charging credited to break
+    m.v     = pyo.Var(m.Kset, domain=pyo.Binary)            # any activity at CS stop
+    m.sigma = pyo.Var(m.Kset, domain=pyo.Binary)            # sequential mode at CS stop
 
 
 # ── Parameters declaration ──────────────────────────────────────────────────────
@@ -170,9 +159,10 @@ def _declare_common_params(m, data):
 
     # ── Parameters ────────────────────────────────────────────────────────────
     m.D_nom = pyo.Param(m.Legs, initialize=data["D"])
-    m.Q_nom = pyo.Param(m.Kset, initialize=data["Q"],  default=0)
-    m.Man   = pyo.Param(m.I,    initialize={**data["M"], N: 0}, default=0)
-    m.S     = pyo.Param(m.Cset, initialize=data["S"],  default=0)
+    m.Q_nom = pyo.Param(m.Kset, initialize=data["Q"],      default=0)
+    m.Mstop = pyo.Param(m.Kset, initialize=data["M_stop"], default=0)
+    m.Mseq  = pyo.Param(m.Kset, initialize=data["M_seq"],  default=0)
+    m.S     = pyo.Param(m.Cset, initialize=data["S"],      default=0)
     m.Eparam= pyo.Param(m.Legs, initialize=data["E"])
     m.E0    = pyo.Param(initialize=data["E0"])
     m.Ecap  = pyo.Param(initialize=data["Ecap"])
@@ -247,10 +237,17 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
     """
     non_K = [i for i in I_list if i not in K_set]
 
+    # (33)–(34): taub_hat = p + taub at CS; taub_hat = taub elsewhere
+    # p = tauc in concurrent mode (σ=0), 0 in sequential mode (σ=1) — see (35)–(37)
     m.qb_K    = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.taub_hat[i] == m.taub[i] + m.tauc[i])
+        m.taub_hat[i] == m.taub[i] + m.p[i])
     m.qb_nonK = pyo.Constraint(non_K,  rule=lambda m, i:
         m.taub_hat[i] == m.taub[i])
+
+    # (35)–(37): linearise p_i = (1 − σ_i) · τ_c_i
+    m.p_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] <= m.tauc[i])
+    m.p_ub2 = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] <= m.TK * (1 - m.sigma[i]))
+    m.p_lb  = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] >= m.tauc[i] - m.TK * m.sigma[i])
 
     m.one_brk = pyo.Constraint(m.I, rule=lambda m, i:
         m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i] <= 1)
@@ -359,13 +356,15 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
     m.sd_prop = pyo.Constraint(m.I, rule=_sd)
     m.sd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sd[i] <= m.Tdrv_sh1)
 
-    # --- Shift working (reset by any rest; charge counts as work unless break) ---
+    # --- Shift working (reset by any rest; charge counts as work unless concurrent break) ---
+    # u linearises τ_c·(1 − x_i − ρ_i + σ_i): u=τ_c when no break/rest or sequential;
+    # u=0 when concurrent break/rest (σ=0) — charging overlaps with break, not work.
     m.u_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] <= TK * (1 - _model_xsum(m, i)))
+        m.u[i] <= TK * (1 - _model_xsum(m, i) + m.sigma[i]))
     m.u_ub2 = pyo.Constraint(m.Kset,
         rule=lambda m, i: m.u[i] <= m.tauc[i])
     m.u_lb  = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] >= m.tauc[i] - TK * _model_xsum(m, i))
+        m.u[i] >= m.tauc[i] - TK * (_model_xsum(m, i) - m.sigma[i]))
 
     m.l4u1 = pyo.Constraint(m.I,
         rule=lambda m, i: m.l4[i] <= M_sw * _model_rho(m, i))
@@ -374,12 +373,17 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
     m.l4lb  = pyo.Constraint(m.I,
         rule=lambda m, i: m.l4[i] >= m.sw[i] - M_sw * (1 - _model_rho(m, i)))
 
+    def _cs_work(m, j):
+        """Working activities at CS stop j before any break/rest: (66)."""
+        return (m.v[j]*m.Mstop[j] + m.Q_nom[j]*m.y[j]
+                + m.u[j] + m.sigma[j]*m.Mseq[j])
+
     def _sw(m, i):
         if i >= N: return pyo.Constraint.Skip
-        man_i = m.Man[i] * m.z_man[i]   # manoeuver counts as working time
-        ip1   = i + 1
+        ip1 = i + 1
+        # Working activities at stop i+1 that precede any break/rest
         if ip1 in K_set:
-            work_next = m.Q_nom[ip1] * m.y[ip1] + m.u[ip1]
+            work_next = _cs_work(m, ip1)
         elif ip1 in C_set:
             work_next = S_dict.get(ip1, 0)
         else:
@@ -387,12 +391,11 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
 
         # ── Subproblem correction ─────────────────────────────────────────────
         # init_state["sw"] is the arrival value at local stop 0 (before any
-        # work there). The paper's convention requires sw[i] to include work
-        # done AT stop i (injected as work_next at i-1). For i=0 there is no
-        # i-1 step, so we must add work at stop 0 explicitly into sw[1].
+        # work there). For i=0 there is no i-1 step, so inject work at stop 0
+        # explicitly into sw[1].
         if i == 0 and is_subproblem:
             if 0 in K_set:
-                work_here = m.Q_nom[0] * m.y[0] + m.u[0]
+                work_here = _cs_work(m, 0)
             elif 0 in C_set:
                 work_here = S_dict.get(0, 0.0)
             else:
@@ -400,18 +403,15 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
         else:
             work_here = 0.0
 
-        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + man_i + _d(i) + work_next
+        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + _d(i) + work_next
     m.sw_prop = pyo.Constraint(m.I, rule=_sw)
     m.sw_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sw[i] <= m.Twrk_sh)
 
     # ── Direct sw upper-bound at stop 0 for subproblem ────────────────────────
-    # sw[0] is the arrival value (before work). Add a constraint that sw[0]
-    # plus work at stop 0 cannot exceed the shift limit, catching violations
-    # that occur entirely within stop 0's activities.
     if is_subproblem and N >= 1:
         if 0 in K_set:
             m.sw_stop0_ub = pyo.Constraint(
-                expr=m.sw[0] + m.Q_nom[0] * m.y[0] + m.u[0] <= m.Twrk_sh)
+                expr=m.sw[0] + _cs_work(m, 0) <= m.Twrk_sh)
         elif 0 in C_set:
             S0 = S_dict.get(0, 0.0)
             if S0 > 0:
@@ -419,35 +419,41 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
                     expr=m.sw[0] + S0 <= m.Twrk_sh)
 
 
-def _add_manoeuver_constraints(m, I_list, K_set):
+def _add_v_sigma_constraints(m, M_big):
     """
-    Link z_man to break/rest decisions (charging alone does NOT trigger a manoeuver;
-    plug-in/out is already captured in Q).
+    Constraints (5)–(14) from the model.
 
-    z_man[i] = 1 iff a physical manoeuver is required:
-      - Non-CS stops : any break or rest
-      - CS stops     : rest (always independent of charging)
-                       break WITHOUT simultaneous charging
-                       (a break synchronized with charging needs no extra parking)
+    v_i  ∈ {0,1}: = 1 if any activity occurs at CS stop i (charging, break, or rest).
+    σ_i  ∈ {0,1}: = 1 if sequential mode: charging completes before the break begins.
 
-    Linearisation for CS break-without-charge:
-        z_man[i] >= (x_b45 + x_b15 + x_b30)[i] - y[i]
-        y=0, break=1 → z_man >= 1  (driver must park independently)
-        y=1, break=1 → z_man >= 0  (already at CS bay, no extra manoeuver)
+    Concurrent (σ=0): break runs in parallel with charging; charging is credited toward
+      the break duration via p_i = τ_c_i.  Charging must be long enough to cover the
+      declared break/rest (constraints 10–14).
+    Sequential (σ=1): charging first, then break; p_i = 0, extra M_seq overhead applies.
     """
-    non_K = [i for i in I_list if i not in K_set]
+    # (5)–(7): v_i activity indicator
+    m.v_lb_y  = pyo.Constraint(m.Kset, rule=lambda m, i: m.v[i] >= m.y[i])
+    m.v_lb_xr = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.v[i] >= _model_xsum(m, i))
+    m.v_ub    = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.v[i] <= m.y[i] + _model_xsum(m, i))
 
-    # Non-CS stops: break or rest always requires a manoeuver
-    m.z_man_brk_nonK = pyo.Constraint(non_K, rule=lambda m, i:
-        m.z_man[i] >= _model_xsum(m, i))
+    # (8)–(9): σ_i sequential-mode indicator
+    m.sigma_ub_y  = pyo.Constraint(m.Kset, rule=lambda m, i: m.sigma[i] <= m.y[i])
+    m.sigma_ub_xr = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.sigma[i] <= _model_xsum(m, i))
 
-    # CS stops: rest always requires a manoeuver (proper parking for 9-11 h)
-    m.z_man_rst_K = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.z_man[i] >= m.rho1[i] + m.rho2[i])
-
-    # CS stops: break requires a manoeuver only when NOT synchronized with charging
-    m.z_man_brk_K = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.z_man[i] >= m.x_b45[i] + m.x_b15[i] + m.x_b30[i] - m.y[i])
+    # (10)–(14): in concurrent mode (σ=0, y=1) charging must cover the declared break/rest
+    m.conc_b45 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= m.Tb45 * m.x_b45[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
+    m.conc_b15 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= m.Tb15 * m.x_b15[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
+    m.conc_b30 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= m.Tb30 * m.x_b30[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
+    m.conc_r1  = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= m.Tr1 * m.rho1[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
+    m.conc_r2  = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.tauc[i] >= m.Tr2 * m.rho2[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
 
 
 def _add_soc_constraints(m, N, data):
@@ -478,418 +484,229 @@ def _add_time_constraints(m, N):
         return m.ta[i + 1] == m.td[i] + m.D_nom[i]
     m.time_prop = pyo.Constraint(m.I, rule=_tp)
 
+    # (3): customer departure — service + break/rest, no maneuver overhead
     m.td_C = pyo.Constraint(m.Cset, rule=lambda m, i:
-        m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i]
-                 + m.Man[i] * m.z_man[i])
+        m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i])
 
+    # (4): CS departure — stop overhead (v·Mstop) + queue + charging + break/rest
+    #                   + sequential repositioning (σ·Mseq)
     m.td_K = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.td[i] == m.ta[i] + m.Q_nom[i]*m.y[i] + m.tauc[i] + m.taub[i] + m.taur[i]
-                 + m.Man[i] * m.z_man[i])
+        m.td[i] == m.ta[i] + m.v[i]*m.Mstop[i] + m.Q_nom[i]*m.y[i]
+                 + m.tauc[i] + m.taub[i] + m.taur[i] + m.sigma[i]*m.Mseq[i])
 
     m.tw_hard = pyo.Constraint(m.Cset, rule=lambda m, i:
         pyo.inequality(m.Wha[i], m.ta[i], m.Whf[i]))
 
-def _add_covering_inequalities(m, sub_data: dict, init_state: dict,
-                               fixed_action=None) -> int:
-    """
-    Add HoS-covering + SOC valid inequalities to tighten the LP relaxation.
 
-    Call AFTER all variables and constraints are on the model
-    (last statement in build_horizon_model, before 'return m').
+
+def add_valid_inequalities(m: pyo.ConcreteModel,
+                           data: dict,
+                           init_state: dict | None = None) -> None:
+    """
+    Add valid inequalities to model *m* in-place.
 
     Parameters
     ----------
-    m            : fully built Pyomo ConcreteModel (horizon sub-problem)
-    sub_data     : dict from make_subproblem_data
-    init_state   : dict  —  ta, ea, cd, sd, sw, phi  (BEHDV.as_init_state())
-    fixed_action : dict or None  —  from build_horizon_model's fixed_action arg
-
-    Returns
-    -------
-    n_vis : int  —  total number of valid inequalities added
+    m          : Pyomo ConcreteModel from build_model() or build_horizon_model().
+    data       : The same data dict passed to the build function (full or sub).
+    init_state : dict with keys 'sd' (from init_state passed to
+                 build_horizon_model).  Required for subproblems; omit (or
+                 pass None) for the full-route model where sd=0 at stop 0.
     """
+    N       = data["N"]
+    I_list  = list(data["I"])       # local indices [0, 1, ..., N]
+    D       = data["D"]             # {local_leg_index: hours}
+    Ecap    = data["Ecap"]
+    Emin    = data["Emin"]
 
-    # ── Common ────────────────────────────────────────────────────────────────
-    N      = sub_data["N"]
-    D      = sub_data["D"]
-    S_dict = sub_data.get("S", {})
-    C_set  = set(sub_data.get("C", []))
-    K_set  = set(sub_data.get("K", []))
+    usable  = Ecap - Emin           # max energy gain per charging session
+    D_total = sum(D.get(i, 0.0) for i in range(N))
 
-    Tdrv_cons = sub_data["Tdrv_cons"]       # 4.5 h
-    Tdrv_sh1  = sub_data["Tdrv_sh1"]       # 9.0 h
-    Tr1  = sub_data.get("Tr1",  11.0)      # 11.0 h (full daily rest)
-    Tr2  = sub_data["Tr2"]                 # 9.0 h  (reduced rest)
-    Tb45 = sub_data["Tb45"]                # 0.75 h
-    Tb30 = sub_data.get("Tb30", 0.5)       # 0.50 h
-    M_dict = sub_data.get("M", {})         # {stop: manoeuver_hours}
+    sd_0  = 0.0
+    if init_state is not None:
+        sd_0  = float(init_state.get("sd",  0.0))
 
-    Emin  = sub_data["Emin"]
-    Ecap  = sub_data["Ecap"]
-    Ebar  = sub_data["Ebar"]   # {r: kWh}  PWL energy breakpoints
-    Tbar  = sub_data["Tbar"]   # {r: h}    PWL cumulative-time breakpoints
-    Q_stp = sub_data.get("Q", {})
-    e2cs  = sub_data.get("e_to_next_cs", {})
+    Tdrv_c  = float(pyo.value(m.Tdrv_cons))
+    Tdrv_s  = float(pyo.value(m.Tdrv_sh1))
 
-    # ── Post-stop-0 effective HoS state ───────────────────────────────────────
-    cd0  = float(init_state.get("cd",  0.0))
-    sd0  = float(init_state.get("sd",  0.0))
-    phi0 = int(  init_state.get("phi", 0))
-    ea0  = float(init_state.get("ea",  Emin))
+    _add_vi1(m, usable)
+    _add_vi3(m, I_list, D, N, Tdrv_s)
+    _add_vi4(m, I_list, D, N, Tdrv_c)
+    _add_vi5(m, I_list, D_total, sd_0, Tdrv_s)
 
-    if fixed_action is not None:
-        rst = fixed_action.get("rest_type")
-        brk = fixed_action.get("break_type")
-        if rst in ("r1", "r2"):
-            cd0 = sd0 = 0.0;  phi0 = 0
-        elif brk == "b45":
-            cd0 = 0.0;  phi0 = 0
-        elif brk == "b30":
-            cd0 = 0.0           # b30 resets cd; phi is consumed by b30 so clear it
-        elif brk == "b15":
-            phi0 = 1
 
-    # ── Collectors ────────────────────────────────────────────────────────────
-    vi_list: list[tuple] = []
-    _k = [0]
+# ─────────────────────────────────────────────────────────────────────────────
+# VI-1  Tightened charging energy bound
+# ─────────────────────────────────────────────────────────────────────────────
 
-    def _add(tag: str, expr) -> None:
-        vi_list.append((f"vi_{tag}_{_k[0]}", pyo.Constraint(expr=expr)))
-        _k[0] += 1
+def _add_vi1(m, usable):
+    """
+    ed[i] − ea[i]  ≤  (Ecap − Emin) · y[i]     for i ∈ K
 
-    def _wstops(a: int, b: int) -> list:
-        """Stops in window (a, b] where activities are allowed (not stop N)."""
-        return [i for i in range(a + 1, b + 1) if 0 <= i < N]
+    Tighter than the existing pwl_no_free_charge which uses Ecap instead of
+    Ecap−Emin.  The existing constraint is deactivated and replaced.
 
-    # =========================================================================
-    # PART 1 — HoS VALID INEQUALITIES
-    # =========================================================================
+    Validity: if y=0 then ed=ea; if y=1 then ed≤Ecap and ea≥Emin so
+    ed−ea ≤ Ecap−Emin.  Reference: big-M tightening [1, §9.3].
+    """
+    if not list(m.Kset):
+        return
+    if hasattr(m, "pwl_no_free_charge"):
+        m.pwl_no_free_charge.deactivate()
 
-    # State-anchored forward trace -------------------------------------------------
-    cum_cd = cd0;  wa_cd = 0
-    cum_sd = sd0;  wa_sd = 0
-    n_rests     = 0
-    n_brks_only = 0
+    m.vi1 = pyo.Constraint(
+        m.Kset,
+        rule=lambda m, i: m.ed[i] - m.ea[i] <= usable * m.y[i],
+        doc="VI-1: ed-ea ≤ (Ecap-Emin)·y"
+    )
 
-    for leg in range(N):
-        d = D.get(leg, 0.0)
-        cum_cd += d
-        cum_sd += d
 
-        if cum_sd > Tdrv_sh1 + 1e-9:
-            wb = leg + 1
-            # sd covering (Family A) + explicit minimum dwell (Family B)
-            stops_sd = _wstops(wa_sd, wb)
-            if stops_sd:
-                _add("sd_anch_cov",
-                     sum(m.rho1[i] + m.rho2[i] for i in stops_sd) >= 1)
-                _add("sd_anch_rest",
-                     sum(m.taur[i] for i in stops_sd) >= Tr2)
-                # z_man covering: rests ALWAYS trigger z_man=1 (park for 9-11h).
-                # In the LP, z_man is continuous so fractional rests pay fractional
-                # Man cost. This forces the full manoeuver cost per rest window.
-                # Valid: sum(z_man)>=sum(rho)>=1, so sum(Man*z_man)>=min_Man. ✓
-                min_man_w = min(M_dict.get(i, 0.0) for i in stops_sd)
-                if min_man_w > 1e-6:
-                    _add("sd_anch_man",
-                         sum(m.Man[i] * m.z_man[i] for i in stops_sd) >= min_man_w)
-            # cd covering for the same window (rest also resets cd)
-            stops_cd = _wstops(wa_cd, wb)
-            if stops_cd:
-                _add("cd_anch_cov_r",
-                     sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
-                         for i in stops_cd) >= 1)
-            wa_sd = leg;  cum_sd = d
-            wa_cd = leg;  cum_cd = d
-            n_rests += 1
+# ─────────────────────────────────────────────────────────────────────────────
+# VI-3  Prefix shift-rest count
+# ─────────────────────────────────────────────────────────────────────────────
 
-        elif cum_cd > Tdrv_cons + 1e-9:
-            wb = leg + 1
-            stops_cd = _wstops(wa_cd, wb)
-            if stops_cd:
-                _add("cd_anch_cov",
-                     sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
-                         for i in stops_cd) >= 1)
-                # z_man covering for purely non-CS cd windows: any break there
-                # is unsynchronised with charging, so z_man=1 is forced. ✓
-                if not any(i in K_set for i in stops_cd):
-                    min_man_w = min(M_dict.get(i, 0.0) for i in stops_cd)
-                    if min_man_w > 1e-6:
-                        _add("cd_anch_man",
-                             sum(m.Man[i] * m.z_man[i] for i in stops_cd)
-                             >= min_man_w)
-            wa_cd = leg;  cum_cd = d
-            n_brks_only += 1
+def _add_vi3(m, I_list, D, N, Tdrv_sh1):
+    """
+    For each i ∈ I:
+        Σ_{l<i} (ρ1[l] + ρ2[l])  ≥  ⌈ Σ_{l<i} D_l / T^drv_shift ⌉ − 1
 
-    # Generic windows: one minimal window per start stop (Family A) ----------------
+    Prefix shift-rest count: before reaching stop i, enough shift rests must
+    have been taken to cover the accumulated driving time.
+    """
+    if Tdrv_sh1 <= 0:
+        return
+
+    active = {}
+    cum_D = 0.0
+    for i in I_list:
+        if i > 0:
+            cum_D += D.get(i - 1, 0.0)
+        rhs = max(0, _mi.ceil(cum_D / Tdrv_sh1) - 1)
+        if rhs <= 0:
+            continue
+        stops_before = [l for l in I_list if l < i]
+        if not stops_before:
+            continue
+        active[i] = (stops_before, int(rhs))
+
+    def _rule(m, i):
+        if i not in active:
+            return pyo.Constraint.Skip
+        stops_before, rhs = active[i]
+        return sum(m.rho1[l] + m.rho2[l] for l in stops_before) >= rhs
+
+    m.vi3 = pyo.Constraint(m.I, rule=_rule,
+                           doc="VI-3: prefix shift-rest count")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VI-4  Prefix consecutive-driving reset count
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_vi4(m, I_list, D, N, Tdrv_cons):
+    """
+    For each i ∈ I:
+        Σ_{l<i} (x_b45[l] + x_b30[l] + ρ1[l] + ρ2[l])  ≥  ⌈ Σ_{l<i} D_l / T^drv_cons ⌉ − 1
+
+    Prefix consecutive-driving reset count: before reaching stop i, enough
+    cd-resets must have been taken to cover the accumulated driving time.
+    Note: x_b15 is excluded as it does not reset the cd accumulator.
+    """
+    if Tdrv_cons <= 0:
+        return
+
+    active = {}
+    cum_D = 0.0
+    for i in I_list:
+        if i > 0:
+            cum_D += D.get(i - 1, 0.0)
+        rhs = max(0, _mi.ceil(cum_D / Tdrv_cons) - 1)
+        if rhs <= 0:
+            continue
+        stops_before = [l for l in I_list if l < i]
+        if not stops_before:
+            continue
+        active[i] = (stops_before, int(rhs))
+
+    def _rule(m, i):
+        if i not in active:
+            return pyo.Constraint.Skip
+        stops_before, rhs = active[i]
+        return sum(m.x_b45[l] + m.x_b30[l] + m.rho1[l] + m.rho2[l]
+                   for l in stops_before) >= rhs
+
+    m.vi4 = pyo.Constraint(m.I, rule=_rule,
+                           doc="VI-4: prefix cd-reset count")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VI-5  Minimum shift-rest count
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_vi5(m, I_list, D_total, sd_0, Tdrv_sh1):
+    """
+    Σ (ρ1 + ρ2)  ≥  max(0, ⌈(D_total + sd_0) / T_drv_sh1⌉ − 1)
+
+    Validity: same block-decomposition argument as VI-4 but applied to the
+    shift-driving accumulator sd (reset ONLY by ρ1 or ρ2, not by breaks).
+    sd[0]=sd_0 is the accumulated shift driving at the sub-window start.
+    Reference: [5], [2].
+    """
+    if Tdrv_sh1 <= 0:
+        return
+    n_rho = max(0, _mi.ceil((D_total + sd_0) / Tdrv_sh1) - 1)
+    if n_rho <= 0:
+        return
+
+    m.vi5 = pyo.Constraint(
+        expr=sum(m.rho1[i] + m.rho2[i] for i in I_list) >= n_rho,
+        doc=f"VI-5: shift-rests ≥ {n_rho} (sd_0={sd_0:.2f}h)"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional: window energy cover cuts (extension of VI-3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_window_energy_covers(m: pyo.ConcreteModel, data: dict,
+                             max_cuts: int = 50) -> int:
+    """
+    For any segment [a, b] with Σ_{l=a}^{b-1} E[l] > (Ecap−Emin):
+        Σ_{i∈K ∩ [a,b]} y[i]  ≥  ⌈(E_{a,b} − usable) / usable⌉
+
+    Validity: entering [a,b] with full battery, at most Ecap−Emin kWh is
+    usable without charging.  If the segment consumes more, at least one
+    CS stop within [a,b] is mandatory.  Reference: [3, §4], [4, §3.2].
+
+    Returns the number of cuts added.
+    """
+    N      = data["N"]
+    K      = list(data["K"])
+    E      = data["E"]
+    usable = data["Ecap"] - data["Emin"]
+
+    cuts = []
     for a in range(N):
-        cum = 0.0
-        for b in range(a, N):
-            cum += D.get(b, 0.0)
-            if cum > Tdrv_sh1 + 1e-9:
-                stops = _wstops(a, b + 1)
-                if stops:
-                    _add("sd_gen_cov",
-                         sum(m.rho1[i] + m.rho2[i] for i in stops) >= 1)
-                    _add("sd_gen_rest",
-                         sum(m.taur[i] for i in stops) >= Tr2)
-                    min_man_w = min(M_dict.get(i, 0.0) for i in stops)
-                    if min_man_w > 1e-6:
-                        _add("sd_gen_man",
-                             sum(m.Man[i] * m.z_man[i] for i in stops) >= min_man_w)
-                break
+        seg_E = 0.0
+        for b in range(a + 1, N + 1):
+            seg_E += E.get(b - 1, 0.0)
+            rhs = _mi.ceil(max(0.0, (seg_E - usable) / usable))
+            if rhs <= 0:
+                continue
+            K_win = [i for i in K if a <= i <= b]
+            if len(K_win) < rhs:
+                continue
+            cuts.append((a, b, K_win, int(rhs)))
 
-    for a in range(N):
-        cum = 0.0
-        for b in range(a, N):
-            cum += D.get(b, 0.0)
-            if cum > Tdrv_cons + 1e-9:
-                stops = _wstops(a, b + 1)
-                if stops:
-                    _add("cd_gen_cov",
-                         sum(m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
-                             for i in stops) >= 1)
-                    if not any(i in K_set for i in stops):
-                        min_man_w = min(M_dict.get(i, 0.0) for i in stops)
-                        if min_man_w > 1e-6:
-                            _add("cd_gen_man",
-                                 sum(m.Man[i] * m.z_man[i] for i in stops)
-                                 >= min_man_w)
-                break
+    cuts.sort(key=lambda c: -c[3])
+    cuts = cuts[:max_cuts]
 
-    # Global rest lower bound (Family C, part 1) -----------------------------------
-    interior = [i for i in sub_data["I"] if 0 < i < N]
-    if interior and n_rests > 0:
-        _add("g_taur_lb",
-             sum(m.taur[i] for i in interior) >= n_rests * Tr2)
-
-    # =========================================================================
-    # PART 2 — SOC VALID INEQUALITIES
-    # =========================================================================
-
-    # PWL charging curve helper: T(e) = cumulative time to reach SOC e ----------
-    _R  = sorted(Ebar.keys())
-    _Es = [float(Ebar[r]) for r in _R]
-    _Ts = [float(Tbar[r]) for r in _R]
-
-    def _e2t(e: float) -> float:
-        """Cumulative charging time (h) to reach SOC e (kWh) on the PWL curve."""
-        e = max(_Es[0], min(_Es[-1], float(e)))
-        for i in range(len(_Es) - 1):
-            if _Es[i] <= e <= _Es[i + 1]:
-                span = _Es[i + 1] - _Es[i]
-                return (_Ts[i] + (e - _Es[i]) / span * (_Ts[i + 1] - _Ts[i])
-                        if span > 1e-12 else _Ts[i])
-        return _Ts[-1]
-
-    # Forward SOC simulation: ea_ub[j] = max arrival SOC at stop j ---------------
-    # Assumes charge to Ecap at EVERY CS stop encountered (best-case trajectory).
-    ea_ub: dict[int, float] = {0: ea0}
-    cur_dep = ea0  # departure SOC upper bound from stop 0
-
-    if 0 in K_set:
-        y0 = fixed_action.get("y") if fixed_action else None
-        if y0 != 0:        # y=1 or free: can charge to Ecap at stop 0
-            cur_dep = Ecap
-
-    for leg in range(N):
-        arr_soc = max(Emin, cur_dep - sub_data["E"].get(leg, 0.0))
-        nxt     = leg + 1
-        ea_ub[nxt] = arr_soc
-        cur_dep = Ecap if (nxt in K_set and nxt < N) else arr_soc
-
-    # Family SOC-D: explicit SOC floors (variable bound tightening) ---------------
-    # Non-CS stops: ea[j] ≥ Emin + e2cs[j]  (departure = arrival, no charging)
-    # CS stops    : ed[k] ≥ Emin + e2cs[k]  (departure after charging must cover next seg)
-    # NOTE: ea[j] ≥ ... is NOT valid for CS stops (vehicle can arrive low and charge up).
-    for j in sub_data["I"]:
-        if j >= N:
-            continue
-        e_need = e2cs.get(j, 0.0)
-        if e_need < 1e-6:
-            continue
-        lb = Emin + e_need
-        if lb > Ecap + 1e-6:
-            continue          # infeasible segment; skip silently
-        if j in K_set:
-            _add("soc_ed_floor", m.ed[j] >= lb)    # departure floor at CS
-        else:
-            _add("soc_ea_floor", m.ea[j] >= lb)    # arrival floor at non-CS
-
-    # Family SOC-E: forced-charging indicator y[k] = 1 ----------------------------
-    # When ea_ub[k] < ed_min[k], charging at k is unavoidable: y[k] ≥ 1.
-    # Proof: ea[k] ≤ ea_ub[k] < ed_min[k] ≤ ed[k]  ⟹  ed[k] > ea[k]
-    #        ⟹  Ecap·y[k] ≥ ed[k]−ea[k] > 0  (from pwl_no_free_charge)
-    #        ⟹  y[k] > 0  ⟹  y[k] = 1 in MIP. ✓
-    forced_K:   list[int]        = []
-    tauc_lbs:   dict[int, float] = {}
-
-    for k in K_set:
-        if k >= N:
-            continue
-        e_need  = e2cs.get(k, 0.0)
-        if e_need < 1e-6:
-            continue
-        ed_min  = Emin + e_need
-        if ed_min > Ecap + 1e-6:
-            continue
-        ea_ub_k = ea_ub.get(k, Ecap)
-
-        if ea_ub_k < ed_min - 1e-6:
-            _add("soc_y_forced", m.y[k] >= 1)
-            forced_K.append(k)
-
-            # Minimum tauc: charging from ea_ub[k] to ed_min on PWL curve.
-            # Using ea_ub (upper bound on arrival SOC) gives minimum charging time:
-            # tauc[k] = T(ed[k])−T(ea[k]) ≥ T(ed_min)−T(ea_ub[k]).
-            t_lb = _e2t(ed_min) - _e2t(ea_ub_k)
-            tauc_lbs[k] = max(0.0, t_lb)
-
-    # Family SOC-F: tightened charging-time lower bound tauc[k] ≥ t_lb · y[k] ----
-    # Applied to both forced and non-forced CS stops where a useful bound exists.
-    # Generalises chg_act2 (tauc ≥ 0.25·y); only added when strictly tighter.
-    chg_act2_coeff = 0.25
-    for k in K_set:
-        if k >= N:
-            continue
-        e_need  = e2cs.get(k, 0.0)
-        if e_need < 1e-6:
-            continue
-        ed_min  = Emin + e_need
-        if ed_min > Ecap + 1e-6:
-            continue
-        ea_ub_k = ea_ub.get(k, Ecap)
-        # Charging from ea_ub_k (best case arrival) to ed_min:
-        # clamp ea_ub_k to ed_min so we don't compute a negative bound
-        t_lb = max(0.0, _e2t(ed_min) - _e2t(min(ea_ub_k, ed_min)))
-        if t_lb > chg_act2_coeff + 1e-6:
-            _add("soc_tauc_lb", m.tauc[k] >= t_lb * m.y[k])
-
-    # =========================================================================
-    # PART 3 — AGGREGATE ARRIVAL-TIME LOWER BOUND (Family C, augmented)
-    # =========================================================================
-    # ta[N] ≥ ta[0]
-    #       + ΣD + ΣS_cust                             (fixed travel + service)
-    #       + stop0_dwell_lb                            (fixed action at stop 0)
-    #       + n_rests · (Tr2 + min_Man)                (mandatory rest dwell)
-    #       + min_brk_dwell                            (mandatory break dwell)
-    #       + Σ_{forced k} (Q[k] + tauc_lb[k])        (mandatory SOC dwell)
-    #
-    # Bug fixes in this version vs. the original:
-    #   1. stop0_dwell_lb: the fixed action at stop 0 (queue + charging + break)
-    #      was never subtracted from the "free" budget.  Without this, phi=1
-    #      actions (b15 sets phi) appear cheaper because they get Tb30 credit
-    #      for future breaks but their own stop-0 activities are not counted.
-    #   2. phi0 break cost: only the FIRST mandatory break can use b30 after
-    #      phi=1 (b30 consumes phi; subsequent breaks revert to b45).
-    #   3. Manoeuver cost: Man[i]·z_man[i] is in td but was never in the bound.
-    #      Rests always trigger z_man=1, so add n_rests · min_Man.
-    # =========================================================================
-    total_drive   = sum(D.get(leg, 0.0) for leg in range(N))
-    total_service = sum(S_dict.get(i, 0.0)
-                        for i in C_set if i in set(sub_data["I"]))
-
-    # ── FIX 2: phi0 break cost — only the first break after phi=1 uses b30 ──
-    # After a b30, phi resets to 0; all subsequent mandatory breaks use b45.
-    if phi0 == 1 and n_brks_only > 0:
-        min_brk_dwell = Tb30 + (n_brks_only - 1) * Tb45
-    else:
-        min_brk_dwell = n_brks_only * Tb45
-
-    # ── FIX 3: manoeuver cost — rests ALWAYS set z_man=1, so add min_Man ────
-    # z_man is continuous in LP relaxation, making Man·z_man fractional.
-    # For mandatory rests: z_man ≥ rho1+rho2, sum(rho)≥1 ⟹ z_man≥1 per window.
-    # Conservative lower bound: use the minimum Man across interior stops.
-    min_man = min((M_dict.get(i, 0.0) for i in interior), default=0.0)
-    man_dwell = n_rests * min_man    # each mandatory rest pays at least min_Man
-
-    # ── stop-0 mandatory dwell from fixed_action ─────────────────────────────
-    # The aggregate bound starts at ta[0].  Any dwell activity at stop 0
-    # created by the fixed_action must be added here explicitly.
-    #
-    # Mirrors BEHDV.advance() maneuver logic exactly:
-    #   maneuver triggered iff  (rest taken)  OR  (break without simultaneous charging)
-    #   i.e. _rst_active  OR  (_brk_active AND NOT (is_CS AND y=1))
-    #
-    # Three cases for the break/charge dwell:
-    #   CS  y=1 : Q + max(taub_hat_lb, tauc_lb)   [no extra maneuver — synchronized]
-    #   CS  y=0 with break : taub_hat + man0        [← was missing in previous version]
-    #   non-CS  with break : taub_hat + man0
-    stop0_dwell_lb = 0.0
-    if fixed_action is not None:
-        y0   = int(fixed_action.get("y",  0))
-        rst  = fixed_action.get("rest_type")
-        brk  = fixed_action.get("break_type")
-        man0 = M_dict.get(0, 0.0)
-
-        _is_cs_0    = 0 in K_set
-        _has_brk    = brk not in (None, "0")
-        _has_rst    = rst not in (None, "0")
-        _brk_unsync = _has_brk and not (_is_cs_0 and y0 == 1)
-
-        # Maneuver at stop 0 (same trigger as BEHDV.advance)
-        if _has_rst or _brk_unsync:
-            stop0_dwell_lb += man0
-
-        # Rest dwell
-        if   rst == "r1": stop0_dwell_lb += Tr1
-        elif rst == "r2": stop0_dwell_lb += Tr2
-
-        # Break / charging dwell
-        taub_hat_0 = (Tb45 if brk == "b45" else
-                      0.25 if brk == "b15" else   # Tb15
-                      Tb30 if brk == "b30" else 0.0)
-
-        if _is_cs_0 and y0 == 1:
-            # CS with charging: Q + max(taub_hat_lb, tauc_lb)
-            # Break is synchronised → no extra maneuver (handled above).
-            q0        = Q_stp.get(0, 0.0)
-            e_need_0  = e2cs.get(0, 0.0)
-            ed_min_0  = min(Ecap, Emin + e_need_0) if e_need_0 > 1e-6 else Emin
-            tauc_0_lb = max(0.25, max(0.0, _e2t(ed_min_0) - _e2t(ea0)))
-            stop0_dwell_lb += q0 + max(taub_hat_0, tauc_0_lb)
-        elif _has_brk:
-            # CS y=0 with break, or any non-CS stop with break.
-            # Maneuver already added above via _brk_unsync.
-            stop0_dwell_lb += taub_hat_0
-
-    # ── Aggregate bound ───────────────────────────────────────────────────────
-    # ta[N] ≥ ta[0]
-    #       + ΣD + ΣS_cust               (fixed travel + service)
-    #       + stop0_dwell_lb             (stop-0 fixed action dwell)
-    #       + n_rests · Tr2              (mandatory rest duration × count)
-    #       + n_rests · min_Man          (mandatory rest maneuver × count)
-    #       + Σ_{forced k>0} Q[k]+tauc_lb[k]   (forced SOC-charging dwell)
-    #
-    # VALIDITY NOTES
-    # --------------
-    # min_brk_dwell (n_brks_only × Tb45) was previously added here but is
-    # NOT a valid lower bound: a mandatory cd break can happen at a CS stop
-    # during a long charging session (tauc ≥ Tb45), in which case taub = 0
-    # and the break adds zero dwell.  Adding Tb45 would then exceed the
-    # true optimum → the aggregate constraint would cut the optimal solution.
-    # The covering constraints (Family A) already force the break to happen;
-    # the aggregate bound need not and must not add an extra break penalty.
-    #
-    # soc_dwell excludes stop 0: stop0_dwell_lb already accounts for
-    # Q[0]+tauc_lb[0] when y=1 at stop 0; double-adding via forced_K
-    # would make the bound invalid for that action.
-    hos_dwell = n_rests * Tr2 + man_dwell        # removed min_brk_dwell
-    soc_dwell = sum(Q_stp.get(k, 0.0) + tauc_lbs.get(k, 0.0)
-                    for k in forced_K if k > 0)  # exclude stop 0
-    min_dwell = stop0_dwell_lb + hos_dwell + soc_dwell
-
-    if min_dwell > 1e-6:
-        ta0 = float(init_state.get("ta", 0.0))
-        _add("g_ta_lb",
-             m.ta[N] >= ta0 + total_drive + total_service + min_dwell)
-
-    # ── Bulk-add ──────────────────────────────────────────────────────────────
-    for name, con in vi_list:
-        m.add_component(name, con)
-
-    return len(vi_list)
-
+    for a, b, K_win, rhs in cuts:
+        name = f"vi_win_{a}_{b}"
+        setattr(m, name,
+                pyo.Constraint(expr=sum(m.y[i] for i in K_win) >= rhs,
+                               doc=f"window cover [{a},{b}] rhs={rhs}"))
+    return len(cuts)
 
 
 # ── Quiet solver wrapper ──────────────────────────────────────────────────────
@@ -961,7 +778,7 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     # ── Shared constraint blocks ───────────────────────────────────────────────
     _add_soc_constraints(m, N, data)
     _add_time_constraints(m, N)
-    _add_manoeuver_constraints(m, data["I"], set(K))
+    _add_v_sigma_constraints(m, m.M_big)
     _add_pwl_charging_constraints(m, K, R, Rseg)
     _add_break_rest_constraints(m, N, data["I"], set(K), m.M_big, rho2_limit=3)
     _add_hos_accumulator_constraints(m, N, data["I"], set(C), set(K),
@@ -996,26 +813,27 @@ def extract_solution(model, data: dict) -> list[dict]:
         tauq_val = data["Q"].get(i, 0.0) * y_val if is_K else 0.0
 
         sol.append(dict(
-            i    = i,
-            ta   = pyo.value(model.ta[i]),
-            td   = pyo.value(model.td[i]),
-            ea   = pyo.value(model.ea[i]),
-            ed   = pyo.value(model.ed[i]),
-            cd   = pyo.value(model.cd[i]),
-            sd   = pyo.value(model.sd[i]),
-            sw   = pyo.value(model.sw[i]),
-            tauc = pyo.value(model.tauc[i]) if is_K else 0.0,
-            tauq = tauq_val,
-            taub = pyo.value(model.taub[i]),
-            taur = pyo.value(model.taur[i]),
-            y    = y_val,
-            b45  = round(pyo.value(model.x_b45[i])),
-            b15  = round(pyo.value(model.x_b15[i])),
-            b30  = round(pyo.value(model.x_b30[i])),
-            rho1 = round(pyo.value(model.rho1[i])),
-            rho2 = round(pyo.value(model.rho2[i])),
-            is_C = i in data["C"],
-            is_K = is_K,
+            i     = i,
+            ta    = pyo.value(model.ta[i]),
+            td    = pyo.value(model.td[i]),
+            ea    = pyo.value(model.ea[i]),
+            ed    = pyo.value(model.ed[i]),
+            cd    = pyo.value(model.cd[i]),
+            sd    = pyo.value(model.sd[i]),
+            sw    = pyo.value(model.sw[i]),
+            tauc  = pyo.value(model.tauc[i]) if is_K else 0.0,
+            tauq  = tauq_val,
+            taub  = pyo.value(model.taub[i]),
+            taur  = pyo.value(model.taur[i]),
+            y     = y_val,
+            sigma = round(pyo.value(model.sigma[i])) if is_K else 0,
+            b45   = round(pyo.value(model.x_b45[i])),
+            b15   = round(pyo.value(model.x_b15[i])),
+            b30   = round(pyo.value(model.x_b30[i])),
+            rho1  = round(pyo.value(model.rho1[i])),
+            rho2  = round(pyo.value(model.rho2[i])),
+            is_C  = i in data["C"],
+            is_K  = is_K,
             D_nom = data["D"].get(i, 0.0),
         ))
     return sol
@@ -1062,15 +880,13 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
     D_loc = {j: D_src.get(start_stop + j, 0.0) for j in range(H)}
     E_loc = {j: E_src.get(start_stop + j, 0.0) for j in range(H)}
 
-    S_loc  = {j: full_data["S"].get(start_stop + j, 0.0) for j in C_loc}
-    Q_loc  = {j: full_data["Q"].get(start_stop + j, 0.0) for j in K_loc}
-    M_loc  = {}
-    for j in range(H + 1):
-        g = start_stop + j
-        M_loc[j] = full_data["M"].get(g, 5.0 / 60) if g < N_glob else 0.0
-    M_loc[H] = 0.0
-    if start_stop == 0:
-        M_loc[0] = 0.0
+    S_loc      = {j: full_data["S"].get(start_stop + j, 0.0) for j in C_loc}
+    Q_loc      = {j: full_data["Q"].get(start_stop + j, 0.0) for j in K_loc}
+    M_stop_loc = {j: full_data["M_stop"].get(start_stop + j, 0.0) for j in K_loc}
+    M_seq_loc  = {j: full_data["M_seq"].get(start_stop + j, 0.0)  for j in K_loc}
+    # Keep old M dict for covering-inequality helper (uses M_dict = sub_data["M"])
+    M_loc = {j: full_data["M"].get(start_stop + j, 5.0 / 60)
+             for j in range(H + 1)}
 
     Wha_loc = {j: full_data["Wha"].get(start_stop + j, 0.0)
                for j in C_loc if (start_stop + j) in full_data.get("Wha", {})}
@@ -1110,7 +926,7 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         title=f"sub_{start_stop}_{end_stop}",
         N=H, I=I_loc, C=C_loc, K=K_loc, R=R, Rseg=Rseg,
         D=D_loc, E=E_loc,
-        S=S_loc, Q=Q_loc, M=M_loc,
+        S=S_loc, Q=Q_loc, M=M_loc, M_stop=M_stop_loc, M_seq=M_seq_loc,
         Wha=Wha_loc, Whf=Whf_loc,
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],
@@ -1166,7 +982,7 @@ def build_horizon_model(sub_data: dict, init_state: dict,
 
 
     m.obj = pyo.Objective(
-        expr  = m.ta[N] - m.ea[N]/5000,
+        expr  = m.ta[N],
         sense = pyo.minimize,
     )
 
@@ -1225,13 +1041,16 @@ def build_horizon_model(sub_data: dict, init_state: dict,
 
     _add_soc_constraints(m, N, sub_data)
     _add_time_constraints(m, N)
-    _add_manoeuver_constraints(m, sub_data["I"], set(K))
+    _add_v_sigma_constraints(m, m.M_big)
     _add_pwl_charging_constraints(m, K, R, Rseg)
     _add_break_rest_constraints(m, N, sub_data["I"], set(K), m.M_big,
                             rho2_limit=rho2_remaining)
     _add_hos_accumulator_constraints(m, N, sub_data["I"], set(C), set(K),
                                     sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
                                     is_subproblem=True)
+
+    add_valid_inequalities(m, sub_data, init_state=init_state)          # all 7 families
+    #add_window_energy_covers(m, sub_data, max_cuts=50)  # optional extra energy cuts
 
     #_add_covering_inequalities(m, sub_data, init_state,
      #                          fixed_action=fixed_action)
@@ -1286,19 +1105,8 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
 
     if relax:
         # ── Partial LP relaxation ──────────────────────────────────────────────
-        # Standard core.relax_integer_vars relaxes ALL binary variables,
-        # including break/rest variables at CUSTOMER stops.  With those
-        # fractional, the LP can take a 0.67% break at a customer stop
-        # (barely enough to satisfy the cd accumulator constraint) and pay
-        # only 0.033h maneuver instead of the integer-required 5h — a 150×
-        # underestimate.  The LP then thinks y=0,b0 is cheap and never triggers
-        # a proactive CS break, getting stuck at the customer stop later.
-        #
-        # Fix: keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops only.
-        # All other integer variables (including CS break/rest vars, y, mu_a,
-        # mu_d, phi) are relaxed as usual.  The result is a small partial MIP
-        # (typically 5–15 binary vars for 1–3 customer stops in the horizon)
-        # that HiGHS solves in milliseconds — far cheaper than a full MIP.
+        # keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops only.
+
         _CUST_KEEP_BINARY = frozenset(("x_b45", "x_b15", "x_b30", "rho1", "rho2"))
         cust_set = set(model.Cset)
 
@@ -1369,26 +1177,27 @@ def extract_horizon_solution(model, sub_data: dict) -> list[dict]:
         tauq_val = sub_data["Q"].get(i, 0.0) * y_val if is_K else 0.0
 
         sol.append(dict(
-            i    = i,
-            ta   = pyo.value(model.ta[i]),
-            td   = pyo.value(model.td[i]),
-            ea   = pyo.value(model.ea[i]),
-            ed   = pyo.value(model.ed[i]),
-            cd   = pyo.value(model.cd[i]),
-            sd   = pyo.value(model.sd[i]),
-            sw   = pyo.value(model.sw[i]),
-            tauc = pyo.value(model.tauc[i]) if is_K else 0.0,
-            tauq = tauq_val,
-            taub = pyo.value(model.taub[i]),
-            taur = pyo.value(model.taur[i]),
-            y    = y_val,
-            b45  = round(pyo.value(model.x_b45[i])),
-            b15  = round(pyo.value(model.x_b15[i])),
-            b30  = round(pyo.value(model.x_b30[i])),
-            rho1 = round(pyo.value(model.rho1[i])),
-            rho2 = round(pyo.value(model.rho2[i])),
-            is_C = i in set(sub_data["C"]),
-            is_K = is_K,
+            i     = i,
+            ta    = pyo.value(model.ta[i]),
+            td    = pyo.value(model.td[i]),
+            ea    = pyo.value(model.ea[i]),
+            ed    = pyo.value(model.ed[i]),
+            cd    = pyo.value(model.cd[i]),
+            sd    = pyo.value(model.sd[i]),
+            sw    = pyo.value(model.sw[i]),
+            tauc  = pyo.value(model.tauc[i]) if is_K else 0.0,
+            tauq  = tauq_val,
+            taub  = pyo.value(model.taub[i]),
+            taur  = pyo.value(model.taur[i]),
+            y     = y_val,
+            sigma = round(pyo.value(model.sigma[i])) if is_K else 0,
+            b45   = round(pyo.value(model.x_b45[i])),
+            b15   = round(pyo.value(model.x_b15[i])),
+            b30   = round(pyo.value(model.x_b30[i])),
+            rho1  = round(pyo.value(model.rho1[i])),
+            rho2  = round(pyo.value(model.rho2[i])),
+            is_C  = i in set(sub_data["C"]),
+            is_K  = is_K,
             D_nom = sub_data["D"].get(i, 0.0),
         ))
     return sol
@@ -1570,9 +1379,20 @@ def print_schedule(sol: list, data: dict):
         i   = s["i"]
         typ = ("ORIG" if i==0 else "DEST" if i==N else "CUST" if s["is_C"] else "CS")
         acts = []
-        if s["is_K"] and s["y"]:
-            acts.append(f"CHG {s['ea']:.0f}→{s['ed']:.0f}kWh ({s['tauc']:.2f}h)"
-                        f" Q={s['tauq']*60:.0f}m")
+        if s["is_K"]:
+            sigma_s  = int(s.get("sigma", 0))
+            v_s      = bool(s["y"] or s["b45"] or s["b15"] or s["b30"] or
+                            s["rho1"] or s["rho2"])
+            mstop_s  = float(v_s)      * data.get("M_stop", {}).get(i, 0.0)
+            mseq_s   = float(sigma_s)  * data.get("M_seq",  {}).get(i, 0.0)
+            mode_s   = "SEQ" if sigma_s else "CONC"
+            if v_s:
+                acts.append(f"[{mode_s}] setup={mstop_s*60:.0f}m")
+            if s["y"]:
+                acts.append(f"CHG {s['ea']:.0f}→{s['ed']:.0f}kWh"
+                            f" ({s['tauc']:.2f}h) Q={s['tauq']*60:.0f}m")
+            if sigma_s and mseq_s > EPS:
+                acts.append(f"repos={mseq_s*60:.0f}m")
         if s["b45"]:  acts.append(f"B45 {s['taub']:.2f}h")
         if s["b15"]:  acts.append(f"B15 {s['taub']:.2f}h")
         if s["b30"]:  acts.append(f"B30 {s['taub']:.2f}h")

@@ -56,7 +56,8 @@ import numpy as np
 
 from BEHDV     import BEHDV
 from MILP      import solve_horizon, INFEASIBLE_PENALTY
-from scenarios import generate_scenarios, ScenarioTracker, _ecr, MAX_ECR
+from scenarios import generate_scenarios, ScenarioTracker
+from settings  import LOWER_PCT, V_NOM, ecr
 from runner    import finalize_run
 from plots     import plot_simulation_results   # re-exported for callers
 
@@ -229,7 +230,7 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
 
 
 def _prune_actions(actions: list, stop: int, state, full_data: dict,
-                   delta: float, charge_only: bool = False) -> tuple[list, int]:
+                   delta: float, charge_only: bool = False, horizon: int = 48) -> tuple[list, int]:
     """
     Drop structurally dominated or infeasible actions before evaluation.
 
@@ -255,7 +256,7 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     """
 
 
-    return actions, 0  # --- IGNORE ---
+    #return actions, 0  # --- IGNORE ---
 
     N     = full_data["N"]
     K_set = set(full_data["K"])
@@ -269,7 +270,7 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
 
     e_needed, cur = 0.0, stop
     while cur < N:
-        e_needed += full_data["E"].get(cur, 0.0) * (1.0 + delta)
+        e_needed += ecr(V_NOM * (1.0 + delta)) * full_data["D"].get(cur, 0.0) * V_NOM
         cur += 1
         if cur in K_set or cur == N:
             break
@@ -277,7 +278,7 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     if state.e_arr - e_needed < full_data["Emin"] and stop in K_set:
         must_charge = True   # must charge to reach next CS, so no point enumerating y=0
     print("DEBUG: e_needed to next CS =", e_needed, f"kWh. Must charge = {'yes' if must_charge else 'no'}")
-
+    #must_charge = False
 
     must_reset_cd = not charge_only and (
         state.cd + D_next_wc > full_data["Tdrv_cons"] - 1e-3)
@@ -296,6 +297,7 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
         if must_charge   and not y and stop in K_set: continue
         if must_reset_cd and (brk in ["0", "None"] and rst in ["0", "None"]):     continue
         if must_rest     and rst in ["0", "None"]:                 continue
+        if horizon <= 48 and rst == "r1" and state.rho2_used < 2: continue  # will always choose reduced rest anyway
         pruned.append(a)
 
     if not pruned:
@@ -573,7 +575,8 @@ def select_best_action(full_data, stop: int, state,
                        include_best=False, include_worst=False,
                        prev_nom_sol=None, log_fh=None,
                        tracker: ScenarioTracker = None,
-                       precomputed_scenarios=None) -> tuple:
+                       precomputed_scenarios=None,
+                       ext_shift_used: int = 0) -> tuple:
     """
     Enumerate, prune, score, and select the best action at ``stop``.
 
@@ -607,10 +610,19 @@ def select_best_action(full_data, stop: int, state,
             try: print(msg, file=log_fh)
             except Exception: pass
 
+    # ── Extended shift driving exception (EU Reg 561/2006, Art. 6(2)) ─────────
+    # Tdrv_sh2 (10h) is allowed instead of the normal Tdrv_sh1 (9h) at most
+    # twice per week.  When the budget is not yet exhausted, pass 10h as the
+    # effective shift-driving limit to every MILP/LP sub-problem built in this
+    # call.  A shallow copy of full_data is sufficient since only a scalar changes.
+    _tdrv_sh2 = full_data.get("Tdrv_sh2", full_data["Tdrv_sh1"])
+    if ext_shift_used < 2 and _tdrv_sh2 > full_data["Tdrv_sh1"]:
+        full_data = dict(full_data, Tdrv_sh1=_tdrv_sh2)
+
     # ── 1. Enumerate + prune ─────────────────────────────────────────────────
     actions, n_pruned = _prune_actions(
         enumerate_actions(stop, state, full_data, charge_only=charge_only),
-        stop, state, full_data, delta, charge_only=charge_only)
+        stop, state, full_data, delta, charge_only=charge_only, horizon = horizon_hours)
 
     end_stop, n_rests = find_horizon_end_stop(
         full_data, stop, horizon_hours, state=state)
@@ -623,7 +635,8 @@ def select_best_action(full_data, stop: int, state,
     _p(f"\n[LA] stop {stop} ({stype})"
        f"  t={state.t_arr:.3f}h  soc={state.e_arr:.0f}kWh"
        f"  cd={state.cd:.2f}h  sd={state.sd:.2f}h  sw={state.sw:.2f}h"
-       f"  phi={state.phi}  r2={state.rho2_used}")
+       f"  phi={state.phi}  r2={state.rho2_used}  ext_sh={ext_shift_used}/2"
+       f"  sd_lim={full_data['Tdrv_sh1']:.0f}h")
     _p(f"     horizon [{stop}->{end_stop}]"
        f"  travel={travel_h:.2f}h{f' +{n_rests}rest' if n_rests else ''}"
        f"  {len(actions)} actions × {n_scenarios} scen"
@@ -683,13 +696,6 @@ def select_best_action(full_data, stop: int, state,
                 relax          = free_relax,
             )
             raise RuntimeError("DEBUG STOP — check debug_stop23.lp and stdout above")
-
-
-
-
-
-
-
 
         si  = _fr.get("solve_info", {})
         tag = "LP" if free_relax else "MIP"
@@ -769,11 +775,11 @@ def select_best_action(full_data, stop: int, state,
            f"{max_nonconstant*60:.2f} min"
            f"  ({'constant shift' if max_nonconstant < 1/60 else 'non-constant -- downstream decisions differ'})")
 
-    # ── 6. Tie-breaking: prefer y=1 within same (brk, rst) if ≤5 min extra ───
+    # ── 6. Tie-breaking: prefer y=1 within same (brk, rst) if ≤5 min extra and prefer brk taken if y=1 anyway ───
     TIEBREAK = 5.0 / 60.0
     winner   = min(scored, key=lambda s: s[1])
     tb_flag  = False
-    if winner[0]["y"] == 0:
+    if winner[0]["y"] == 0 and winner[0].get("break_type") not in ["0", "None"] and winner[0].get("rest_type") not in ["0", "None"]:
         w_brk, w_rst = winner[0]["break_type"], winner[0]["rest_type"]
         peers = [s for s in scored
                  if s[0]["y"] == 1
@@ -785,6 +791,18 @@ def select_best_action(full_data, stop: int, state,
             if best_peer[1] <= winner[1] + TIEBREAK:
                 winner  = best_peer
                 tb_flag = True
+    if winner[0]["y"] == 1 and winner[0].get("break_type") in ["0", "None"]:
+        w_brk, w_rst = winner[0]["break_type"], winner[0]["rest_type"]
+        peers = [s for s in scored
+                 if s[0]["y"] == 1
+                 and s[0]["break_type"] in ["b15", "b30", "b45"]
+                 and s[1] < INFEASIBLE_PENALTY / 2]
+        if peers:
+            best_peer = min(peers, key=lambda s: s[1])
+            if best_peer[1] <= winner[1] + TIEBREAK:
+                winner  = best_peer
+                tb_flag = True
+
 
     best_action = winner[0]
     best_score  = winner[1]
@@ -872,15 +890,18 @@ def select_best_action(full_data, stop: int, state,
         _n_brk_only = _nh["n_break"]  - _nh["n_cb"]  - _nh["n_cr"]
         _n_rst_only = _nh["n_rest"]   - _nh["n_cr"]
         _n_chg_only = _nh["n_charge"] - _nh["n_cb"]  - _nh["n_cr"]
-        _nom_plan = (f"  hor_stops:"
-                     f" brk={_n_brk_only}"
-                     f" rst={_n_rst_only}"
-                     f" chg={_n_chg_only}"
-                     f" c+b={_nh['n_cb']}"
-                     f" c+r={_nh['n_cr']}")
+        _nom_sigma  = int(nom_sol["sol"][0].get("sigma", 0)) if nom_sol.get("sol") else 0
+        _nom_mode   = f"  {'SEQ' if _nom_sigma else 'CONC'}" if _y and stop in set(full_data["K"]) else ""
+        _nom_plan   = (f"  hor_stops:"
+                       f" brk={_n_brk_only}"
+                       f" rst={_n_rst_only}"
+                       f" chg={_n_chg_only}"
+                       f" c+b={_nh['n_cb']}"
+                       f" c+r={_nh['n_cr']}")
         _p(f"     [NOM-MIP] y={_y}"
            f"  brk={_brk or '-'}"
            f"  rst={_rst or '-'}"
+           f"{_nom_mode}"
            f"  ok{_nom_plan}"
            f"  {time.perf_counter()-t_nom:.1f}s")
     elif _needs_milp:
@@ -889,6 +910,31 @@ def select_best_action(full_data, stop: int, state,
            f"  rst={_rst or '-'}"
            f"  INFEASIBLE"
            f"  {time.perf_counter()-t_nom:.1f}s")
+
+    # ── Post-hoc break injection ──────────────────────────────────────────────
+    # The LP underestimates tauc (picks a small value), so a cheaper small-break
+    # or no-break action wins the LP scoring.  The nominal MIP may then pick a
+    # larger tauc that would have made a concurrent b45 (or b30) break free.
+    # Inject the upgrade here, covering brk=0 and brk=b15/b30 cases.
+    if (nom_ok
+            and nom_sol.get("sol")
+            and stop in set(full_data["K"])
+            and best_action.get("y") == 1
+            and best_action.get("break_type") in (None, "0", "None", "b15", "b30")
+            and best_action.get("rest_type")  in (None, "0", "None")):
+        _s0_patch = nom_sol["sol"][0]
+        _tc_patch  = float(_s0_patch.get("tauc", 0.0))
+        _sig_patch = int(_s0_patch.get("sigma", 0))
+        if _sig_patch == 0 and _tc_patch >= full_data["Tb45"] - 1e-6:
+            _s0_patch["b45"] = 1
+            best_action = dict(best_action, break_type="b45")
+            _brk = "b45"
+            _p(f"     [POST-HOC] tauc={_tc_patch*60:.0f}m >= 45m → b45 injected (free, concurrent)")
+        elif _sig_patch == 0 and _tc_patch >= full_data["Tb30"] - 1e-6 and best_action.get("break_type") in (None, "0", "None", "b15"):
+            _s0_patch["b30"] = 1
+            best_action = dict(best_action, break_type="b30")
+            _brk = "b30"
+            _p(f"     [POST-HOC] tauc={_tc_patch*60:.0f}m >= 30m → b30 injected (free, concurrent)")
 
     # ── LP vs MIP comparison log ──────────────────────────────────────────────
     if solve_mode == "both":
@@ -914,31 +960,38 @@ def select_best_action(full_data, stop: int, state,
     # When no nom_sol, derive td from minimum-duration action values.
     ta_cur = state.t_arr
     if nom_ok and nom_sol.get("sol"):
-        _ch   = _sol_activity_summary(nom_sol["sol"], skip_stop0=False)
-        _tauc = _ch["stop0_tauc"]
-        _taub = _ch["stop0_taub_hat"] if "stop0_taub_hat" in _ch else _ch["stop0_taub"]
-        _taur = _ch["stop0_taur"]
-        _tauq = _ch["stop0_tauq"]
-        td_cur = nom_sol["sol"][0].get("td", ta_cur + _tauq + _tauc + _taub + _taur)
+        _ch      = _sol_activity_summary(nom_sol["sol"], skip_stop0=False)
+        _tauc    = _ch["stop0_tauc"]
+        _taub    = _ch["stop0_taub_hat"] if "stop0_taub_hat" in _ch else _ch["stop0_taub"]
+        _taur    = _ch["stop0_taur"]
+        _tauq    = _ch["stop0_tauq"]
+        _sigma   = int(nom_sol["sol"][0].get("sigma", 0))
+        td_cur   = nom_sol["sol"][0].get("td", ta_cur + _tauq + _tauc + _taub + _taur)
         _soc_gain = _ch["stop0_ed"] - state.e_arr
         _chg_str  = f"  tauc={_tauc*60:.0f}m (+{_soc_gain:.0f}kWh)" if _y else "  tauc=0m"
         _brk_str  = f"  taub={_taub*60:.0f}m" if _taub > 1/60 else "  taub=0m"
     else:
-        _tauc = 0.0
-        _taub = (full_data["Tb45"] if _brk == "b45" else
-                 full_data["Tb15"] if _brk == "b15" else
-                 full_data["Tb30"] if _brk == "b30" else 0.0)
-        _taur = (full_data["Tr1"]  if _rst == "r1"  else
-                 full_data["Tr2"]  if _rst == "r2"  else 0.0)
-        _tauq = full_data["Q"].get(stop, 0.0) * _y if stop in set(full_data["K"]) else 0.0
+        _tauc  = 0.0
+        _sigma = 0
+        _taub  = (full_data["Tb45"] if _brk == "b45" else
+                  full_data["Tb15"] if _brk == "b15" else
+                  full_data["Tb30"] if _brk == "b30" else 0.0)
+        _taur  = (full_data["Tr1"]  if _rst == "r1"  else
+                  full_data["Tr2"]  if _rst == "r2"  else 0.0)
+        _tauq  = full_data["Q"].get(stop, 0.0) * _y if stop in set(full_data["K"]) else 0.0
         td_cur = ta_cur + _tauq + _tauc + _taub + _taur
         _chg_str = "  tauc=0m"
         _brk_str = f"  taub={_taub*60:.0f}m" if _taub > 1/60 else "  taub=0m"
+
+    _mode_str = ""
+    if _y and stop in set(full_data["K"]):
+        _mode_str = f"  [{'SEQ' if _sigma else 'CONC'}]"
 
     _p(f"  -> CHOSEN y={_y}"
        f"  brk={_brk or '-'}"
        f"  rst={_rst or '-'}"
        f"{_chg_str}{_brk_str}"
+       f"{_mode_str}"
        f"  ta={ta_cur:.3f}h  td={td_cur:.3f}h"
        f"  ({criterion}={best_score:.3f}h)"
        f"{'  [tiebreak]' if tb_flag else ''}"
@@ -1051,24 +1104,25 @@ def run_simulation(full_data: dict,
             score_list = [(action, 0.0, 0.0, 0, [])]
         else:
             action, score_list, nom_sol = select_best_action(
-                full_data     = full_data,
-                stop          = stop,
-                state         = vehicle,
-                n_scenarios   = n_scenarios,
-                horizon_hours = horizon_hours,
-                delta         = delta,
-                scenario_seed = int(rng.integers(0, 2**31)),
-                time_limit    = time_limit,
-                verbose       = verbose,
-                n_workers     = n_workers,
-                solve_mode    = solve_mode,
-                charge_only   = charge_only,
-                criterion     = criterion,
-                include_best  = include_best,
-                include_worst = include_worst,
-                prev_nom_sol  = prev_sol,
-                log_fh        = log,
-                tracker       = tracker,
+                full_data      = full_data,
+                stop           = stop,
+                state          = vehicle,
+                n_scenarios    = n_scenarios,
+                horizon_hours  = horizon_hours,
+                delta          = delta,
+                scenario_seed  = int(rng.integers(0, 2**31)),
+                time_limit     = time_limit,
+                verbose        = verbose,
+                n_workers      = n_workers,
+                solve_mode     = solve_mode,
+                charge_only    = charge_only,
+                criterion      = criterion,
+                include_best   = include_best,
+                include_worst  = include_worst,
+                prev_nom_sol   = prev_sol,
+                log_fh         = log,
+                tracker        = tracker,
+                ext_shift_used = vehicle.ext_shift_used,
             )
 
         # ── Forced-rest safety net ────────────────────────────────────────────
@@ -1098,10 +1152,8 @@ def run_simulation(full_data: dict,
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
 
 
-        D_next =  max(full_data["D"].get(stop, 0.0) * max(min(rng.lognormal(0, delta / 3.0), 1.0 + delta), 1.0 - delta), 1e-4)
-        L_km = full_data["D"].get(stop, 0.0) * 80.0  # nominal leg length in km (for energy calc)
-        v_s  = L_km / D_next if D_next > 0 else 80.0
-        E_next = L_km * _ecr(v_s)
+        D_next = full_data["D_real"][stop]
+        E_next = full_data["E_real"][stop]
 
 
         vehicle.advance(action=action, D_next=D_next, E_next=E_next, milp_sol=nom_sol)
@@ -1296,6 +1348,7 @@ def run_simulation_precomputed(
                 log_fh                = log,
                 tracker               = tracker,
                 precomputed_scenarios = stop_scens,
+                ext_shift_used        = vehicle.ext_shift_used,
             )
 
         # ── Forced-rest safety net ────────────────────────────────────────────

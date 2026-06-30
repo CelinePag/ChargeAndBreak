@@ -72,6 +72,7 @@ import numpy as np
 
 from instances import instance_realistic
 from scenarios import generate_scenarios, _ecr
+from settings  import V_NOM, sample_travel_time
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -196,12 +197,9 @@ def generate_instance_file(route_class: str,
     E_real = []
     for leg in range(N):
         d_nom = D_nom.get(leg, 0.0)
-        mult  = float(np.clip(
-            rng.lognormal(0.0, delta / 3.0), 1.0 - delta, 1.0 + delta
-        ))
-        d_act = max(d_nom * mult, 1e-4)
-        L_km  = km.get(leg, d_nom * 80.0)
-        v_act = L_km / d_act if d_act > 0 else 80.0
+        d_act = sample_travel_time(D_nom.get(leg, 0.0), rng, upper_pct = delta)
+        L_km  = km.get(leg, d_nom * V_NOM)
+        v_act = L_km / d_act if d_act > 0 else V_NOM
         e_act = L_km * _ecr(v_act)
         D_real.append(round(d_act, 6))
         E_real.append(round(e_act, 4))
@@ -348,6 +346,17 @@ def load_instance_json(filepath: str,
     full_data = _restore_int_keys(data["instance"])
     D_real    = data["D_real"]
     E_real    = data["E_real"]
+    delta_file = data["meta"].get("delta", 0.20)  # back-fill delta if missing from meta
+
+    # Back-fill M_stop / M_seq for JSON files generated before model_v5.
+    # Use the legacy M dict as the stop-overhead value; default M_seq to 5 min.
+    if "M_stop" not in full_data:
+        M_legacy = full_data.get("M", {})
+        K_set    = set(full_data.get("K", []))
+        full_data["M_stop"] = {k: M_legacy.get(k, 5.0 / 60) for k in K_set}
+    if "M_seq" not in full_data:
+        K_set = set(full_data.get("K", []))
+        full_data["M_seq"] = {k: 5.0 / 60 for k in K_set}
 
     scenarios_by_stop = []
     for stop_scens in data["scenarios"]:
@@ -356,7 +365,7 @@ def load_instance_json(filepath: str,
             restored = restored[:max_scenarios]
         scenarios_by_stop.append(restored)
 
-    return full_data, D_real, E_real, scenarios_by_stop
+    return full_data, D_real, E_real, scenarios_by_stop, delta_file
 
 
 def list_available(output_dir: str = "instances") -> list[str]:
@@ -392,9 +401,9 @@ def describe_file(filepath: str) -> dict:
 if __name__ == "__main__":
     # Usage: python instance_io.py [output_dir] [n_seeds] [n_scenarios] [delta] [first_seed]
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else "instances"
-    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 10
-    n_scenarios  = int(sys.argv[3])   if len(sys.argv) > 3 else 500
-    delta        = float(sys.argv[4]) if len(sys.argv) > 4 else 0.20
+    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 2
+    n_scenarios  = int(sys.argv[3])   if len(sys.argv) > 3 else 100
+    delta        = float(sys.argv[4]) if len(sys.argv) > 4 else 0.15
     first_seed   = int(sys.argv[5])   if len(sys.argv) > 5 else 1
 
     print("=" * 60)

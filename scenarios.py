@@ -56,15 +56,11 @@ from typing import Optional
 import numpy as np
 
 
-# ── ECR curve (must match instances.py and Simulation.py exactly) ─────────────
-_ECR_A, _ECR_B, _ECR_C = 33.055, -0.257, 7.2e-5
+# ── ECR curve ─────────────────────────────────────────────────────────────────
+from settings import ecr as _ecr, sample_travel_time, V_NOM
 
-def _ecr(v_kmh: float) -> float:
-    """Energy consumption rate (kWh/km) at speed v (km/h)."""
-    v = max(20.0, min(v_kmh, 120.0))
-    return _ECR_A / v + _ECR_B + _ECR_C * v ** 2
+MAX_ECR = max(_ecr(0.8 * V_NOM), _ecr(1.2 * V_NOM))
 
-MAX_ECR = max(_ecr(0.8*80.0), _ecr(1.2*80.0))  # ≈ 1.65 kWh/km at v=20km/h, for sanity checks
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -115,26 +111,19 @@ def generate_scenarios(full_data: dict,
 
     legs   = list(range(start_stop, min(end_stop, N)))
     n_legs = len(legs)
-    sigma  = delta / 3.0              # log-normal σ s.t. 3σ ≈ delta
 
     scenarios = []
-
-    # ── Multiplier matrix ──────────────────────────────────────────────────────
-    mults = rng.lognormal(0, sigma, size=(n_scenarios, max(n_legs, 1)))
-
-    # Clip to [1-delta, 1+delta]
-    mults = np.clip(mults, 1.0 - delta, 1.0 + delta)
 
     for k in range(n_scenarios):
         D_scen: dict[int, float] = {}
         E_scen: dict[int, float] = {}
         for j, leg in enumerate(legs):
-            d_s = max(D_nom.get(leg, 0.0) * mults[k, j], 1e-4)
+            d_s = sample_travel_time(D_nom.get(leg, 0.0), rng, upper_pct = delta)
             D_scen[leg] = d_s
             # Derive energy from ECR: E = L_km * ECR(v_s), v_s = L_km / d_s
             L_km = L_nom.get(leg,
-                   D_nom.get(leg, 0.0) * v_nom.get(leg, 80.0))
-            v_s  = L_km / d_s if d_s > 0 else 80.0
+                   D_nom.get(leg, 0.0) * v_nom.get(leg, V_NOM))
+            v_s  = L_km / d_s if d_s > 0 else V_NOM
             E_scen[leg] = L_km * _ecr(v_s)
         scenarios.append({"D": D_scen, "E": E_scen})
 

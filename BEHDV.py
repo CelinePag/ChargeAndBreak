@@ -159,7 +159,9 @@ def _charging_time_needed(ea: float, full_data: dict) -> float:
 
 _Snapshot = namedtuple(
     "_Snapshot",
-    ["stop", "t_arr", "e_arr", "cd", "sd", "sw", "phi", "rho2_used"],
+    ["stop", "t_arr", "e_arr", "cd", "sd", "sw", "phi", "rho2_used",
+     "ext_shift_used"],
+    defaults=(0,),   # ext_shift_used defaults to 0 for backward compatibility
 )
 """
 Immutable per-stop snapshot.  Returned by BEHDV.states and consumed by
@@ -198,14 +200,15 @@ class BEHDV:
         E0      = full_data["E0"]
 
         # ── State history at arrival (index = number of stops visited) ────────
-        self.stop_history      : list[int]   = [0]
-        self.t_arr_history     : list[float] = [T_START]
-        self.e_arr_history     : list[float] = [E0]
-        self.cd_history        : list[float] = [0.0]
-        self.sd_history        : list[float] = [0.0]
-        self.sw_history        : list[float] = [0.0]
-        self.phi_history       : list[int]   = [0]
-        self.rho2_used_history : list[int]   = [0]
+        self.stop_history           : list[int]   = [0]
+        self.t_arr_history          : list[float] = [T_START]
+        self.e_arr_history          : list[float] = [E0]
+        self.cd_history             : list[float] = [0.0]
+        self.sd_history             : list[float] = [0.0]
+        self.sw_history             : list[float] = [0.0]
+        self.phi_history            : list[int]   = [0]
+        self.rho2_used_history      : list[int]   = [0]
+        self.ext_shift_used_history : list[int]   = [0]
 
         # ── Execution history (index = stop departed from) ────────────────────
         self.actions       : list[dict]  = []   # action taken at each stop
@@ -231,6 +234,8 @@ class BEHDV:
     def phi(self)       -> int:   return self.phi_history[-1]
     @property
     def rho2_used(self) -> int:   return self.rho2_used_history[-1]
+    @property
+    def ext_shift_used(self) -> int: return self.ext_shift_used_history[-1]
 
     # ── Derived properties ────────────────────────────────────────────────────
 
@@ -248,14 +253,15 @@ class BEHDV:
         """
         return [
             _Snapshot(
-                stop      = self.stop_history[k],
-                t_arr     = self.t_arr_history[k],
-                e_arr     = self.e_arr_history[k],
-                cd        = self.cd_history[k],
-                sd        = self.sd_history[k],
-                sw        = self.sw_history[k],
-                phi       = self.phi_history[k],
-                rho2_used = self.rho2_used_history[k],
+                stop           = self.stop_history[k],
+                t_arr          = self.t_arr_history[k],
+                e_arr          = self.e_arr_history[k],
+                cd             = self.cd_history[k],
+                sd             = self.sd_history[k],
+                sw             = self.sw_history[k],
+                phi            = self.phi_history[k],
+                rho2_used      = self.rho2_used_history[k],
+                ext_shift_used = self.ext_shift_used_history[k],
             )
             for k in range(len(self.stop_history))
         ]
@@ -366,31 +372,38 @@ class BEHDV:
                          max(0, full_data["Tb15"] - tauc_exec) if brk == "b15" else
                          max(0, full_data["Tb30"] - tauc_exec) if brk == "b30" else 0.0)
 
-        # ── 2. Manoeuver time ─────────────────────────────────────────────────
-        # Required when:
-        #   - a rest is taken (always: proper parking needed for 9-11 h)
-        #   - a break is taken WITHOUT simultaneous charging
-        #     (break synchronized with charging uses no extra parking;
-        #      the driver is already at the CS bay)
-        # Charging alone (y=1, no break/rest) does NOT trigger a manoeuver;
-        # plug-in/out is already accounted for in Q (queue/setup time).
+        # ── 2. Activity indicator (v) and sequential-mode indicator (sigma) ─────
         _brk_active = brk in ("b45", "b15", "b30")
-        _rst_active  = rst in ("r1", "r2")
-        _brk_unsync  = _brk_active and not (is_CS and bool(y))
-        man_time = (full_data["M"].get(stop, 5.0 / 60)
-                    if (_rst_active or _brk_unsync) else 0.0)
+        _rst_active = rst in ("r1", "r2")
+
+        if milp_sol is not None and milp_sol.get("sol"):
+            sigma = int(s0.get("sigma", 0))
+        else:
+            sigma = 0  # default concurrent mode
+
+        # v=1 whenever any activity (charging, break, rest) occurs at a CS stop
+        v_val = int(is_CS and (bool(y) or _brk_active or _rst_active))
+
+        M_stop_val = full_data["M_stop"].get(stop, 0.0) if is_CS else 0.0
+        M_seq_val  = full_data["M_seq"].get(stop, 0.0)  if is_CS else 0.0
+        mstop_time = v_val * M_stop_val
+        mseq_time  = sigma * M_seq_val
 
         # ── 3. Departure time ─────────────────────────────────────────────────
+        # CS:       ta + v·Mstop + Q·y + tauc + taub + taur + sigma·Mseq
+        # Customer: ta + S + taub + taur  (no maneuver overhead)
         if is_CS:
-            td = self.t_arr + tauq_exec + tauc_exec + taub_exec + taur_exec + man_time
+            td = (self.t_arr + mstop_time + tauq_exec + tauc_exec
+                  + taub_exec + taur_exec + mseq_time)
         elif is_cust:
-            td = self.t_arr + S_stop + taub_exec + taur_exec + man_time
+            td = self.t_arr + S_stop + taub_exec + taur_exec
         else:
             td = self.t_arr
 
         self.actions.append(action)
         self.durations.append(
-            dict(taub=taub_exec, tauc=tauc_exec, taur=taur_exec, tauq=tauq_exec)
+            dict(taub=taub_exec, tauc=tauc_exec, taur=taur_exec, tauq=tauq_exec,
+                 sigma=sigma, v=v_val, mstop=mstop_time, mseq=mseq_time)
         )
         self.td_list.append(td)
 
@@ -429,8 +442,14 @@ class BEHDV:
         cd_dep = 0.0 if ri  else self.cd
         sd_dep = 0.0 if rho else self.sd
 
+        # u: charging counted as working time
+        #   sigma=0 (concurrent, break overlaps charge): u=0
+        #   sigma=1 (sequential) or no break/rest: u=tauc
+        _any_brk_rst = _brk_active or _rst_active
+        u_exec = tauc_exec if (not _any_brk_rst or sigma) else 0.0
+
         if is_CS:
-            work_now = (tauq_exec + (tauc_exec if not brk else 0.0)) if not rho else 0.0
+            work_now = (mstop_time + tauq_exec + u_exec + mseq_time) if not rho else 0.0
         elif is_cust:
             work_now = S_stop if not rho else 0.0
         else:
@@ -440,7 +459,7 @@ class BEHDV:
 
         cd_new = cd_dep + D_act
         sd_new = sd_dep + D_act
-        sw_new = sw_dep + man_time + D_act   # carry manoeuver + driving to next stop
+        sw_new = sw_dep + D_act   # driving to next stop (work_now already in sw_dep)
 
         # ── 7. phi (split-break flag) and rho2_used ───────────────────────────
         if ri or rho:
@@ -452,6 +471,16 @@ class BEHDV:
 
         rho2_new = self.rho2_used + (1 if rst == "r2" else 0)
 
+        # Extended shift driving exception (EU 561/2006, Art. 6(2)):
+        # count shifts where sd at rest time exceeded the normal 9h limit.
+        # self.sd is the cumulative shift driving on arrival at this stop;
+        # the concluded shift's total is self.sd (the leg to the next stop
+        # starts a fresh shift after the reset).
+        _Tdrv_sh1_nom = self._fd.get("Tdrv_sh1", 9.0)
+        ext_new = self.ext_shift_used + (
+            1 if (rho and self.sd > _Tdrv_sh1_nom - 1e-3) else 0
+        )
+
         # ── 8. Append new state ───────────────────────────────────────────────
         self.stop_history.append(stop + 1)
         self.t_arr_history.append(t_arr_new)
@@ -461,6 +490,7 @@ class BEHDV:
         self.sw_history.append(sw_new)
         self.phi_history.append(phi_new)
         self.rho2_used_history.append(rho2_new)
+        self.ext_shift_used_history.append(ext_new)
 
 
     # ── Dunder ────────────────────────────────────────────────────────────────
@@ -479,5 +509,6 @@ class BEHDV:
             f"sd={self.sd:.2f}h, "
             f"sw={self.sw:.2f}h, "
             f"phi={self.phi}, "
-            f"rho2={self.rho2_used})"
+            f"rho2={self.rho2_used}, "
+            f"ext_sh={self.ext_shift_used}/2)"
         )

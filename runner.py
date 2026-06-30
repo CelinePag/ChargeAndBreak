@@ -211,7 +211,8 @@ def finalize_run(
             dict(stop=s.stop, t_arr=round(s.t_arr, 4),
                  e_arr=round(s.e_arr, 2), cd=round(s.cd, 4),
                  sd=round(s.sd, 4), sw=round(s.sw, 4),
-                 phi=s.phi, rho2_used=s.rho2_used)
+                 phi=s.phi, rho2_used=s.rho2_used,
+                 ext_shift_used=getattr(s, "ext_shift_used", 0))
             for s in vehicle.states
         ],
         actions          = [_ser(a) for a in vehicle.actions],

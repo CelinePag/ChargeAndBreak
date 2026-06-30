@@ -64,7 +64,7 @@ ECR model reference
   Younes et al. (2020) "Energy consumption model for battery electric vehicles",
   Journal of Energy Storage, 32, 101758.
   https://doi.org/10.1016/j.est.2020.101758
-  Formula: ECR(v) = A/v + B + C·v²  (kWh/km),  A=33.055, B=−0.257, C=7.2e−5
+  Formula: ECR(v) = A/v + B + C·v²  (kWh/km),  A=33.055, B=0.2256, C=7.2e−5
 """
 
 from __future__ import annotations
@@ -77,25 +77,15 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ECR CURVE
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Constants must match _ecr() in scenarios.py and Simulation.py exactly.
-_ECR_A, _ECR_B, _ECR_C = 33.055, -0.257, 7.2e-5
-
-
-def _ecr(v: float) -> float:
-    """
-    Energy consumption rate (kWh/km) at speed v (km/h).
-
-    Piecewise physics model: rolling resistance (A/v), constant drag (B),
-    and aerodynamic drag (C·v²).  Clipped to [5, 150] km/h for numerical
-    stability at very low or very high speeds.
-    """
-    v = max(5.0, min(float(v), 150.0))
-    return _ECR_A / v + _ECR_B + _ECR_C * v ** 2
+from settings import (
+    ECR_A as _ECR_A, ECR_B as _ECR_B, ECR_C as _ECR_C, ecr as _ecr,
+    V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS, TBAR,
+    Tb45, Tb15, Tb30, Tr1, Tr2,
+    Tdrv_cons, Tdrv_sh1, Tdrv_sh2, Twrk_cons1, Twrk_cons2, Twrk_sh,
+    QUEUE_WAIT_MEAN_MIN, QUEUE_WAIT_STD_MIN,
+    M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H,
+    SERVICE_TIME_H, CS_SPACING_KM, T_START as _T_START,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -104,7 +94,7 @@ def _ecr(v: float) -> float:
 
 def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
                         t0: float = 0.0,
-                        Man_default: float = 5.0 / 60) -> tuple[dict, dict]:
+                        Man_default: float = M_MAN_DEFAULT_H) -> tuple[dict, dict]:
     """
     Forward-pass conservative arrival-time bounds for variable tightening.
 
@@ -130,9 +120,7 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
                    in make_data to keep ub_t internally consistent
     """
     N   = max(I)
-    TK  = Tbar[max(Tbar)]          # maximum possible charging duration
-    Tr1 = 11.0                     # longest rest period (EU 561/2006)
-    Tb  = 0.75                     # longest break (b45)
+    TK  = Tbar[max(Tbar)]  # maximum possible charging duration
     C_s = set(C)
     K_s = set(K)
 
@@ -141,10 +129,10 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
     for i in range(N):
         if i in C_s:
             dmin = S.get(i, 0.0)
-            dmax = S.get(i, 0.0) + Tb + Tr1 + Man_default + 0.1
+            dmax = S.get(i, 0.0) + Tb45 + Tr1 + Man_default + 0.1
         elif i in K_s:
             dmin = 0.0
-            dmax = Q.get(i, 0.0) + TK + Tb + Tr1 + Man_default + 0.1
+            dmax = Q.get(i, 0.0) + TK + Tb45 + Tr1 + Man_default + 0.1
         else:
             dmin = dmax = 0.0
         lb[i + 1] = lb[i] + dmin + D.get(i, 0.0)
@@ -157,7 +145,7 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def make_data(I, C, K, D, E, Wha, Whf, label, title,
-              km=None, Bcap=350, Q=None, M_man_h: float = 15.0 / 60) -> dict:
+              km=None, Bcap=BATTERY_CAPACITY, Q=None, M_man_h: float = M_MAN_DEFAULT_H) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -206,69 +194,68 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     AssertionError if C and K are not disjoint or do not cover {1..N-1}.
     """
     N    = max(I)
-    R    = sorted(Ebar.keys())
-    Rseg = R[1:]
+
     assert set(C) | set(K) == set(I) - {0, N}, (
         "C ∪ K must equal the intermediate stops {1..N-1}")
     assert not (set(C) & set(K)), "C and K must be disjoint"
 
-    # Queue times at CS stops
-    mean_wait = 10   # minutes (your expected wait)
-    std_wait  = 8    # minutes (your uncertainty)
-
-    # Convert to lognormal parameters:
-    mu    = np.log(mean_wait**2 / np.sqrt(std_wait**2 + mean_wait**2))
-    sigma = np.sqrt(np.log(1 + (std_wait / mean_wait)**2))
+    # Queue times at CS stops (lognormal distribution)
+    mu    = np.log(QUEUE_WAIT_MEAN_MIN**2 / np.sqrt(QUEUE_WAIT_STD_MIN**2 + QUEUE_WAIT_MEAN_MIN**2))
+    sigma = np.sqrt(np.log(1 + (QUEUE_WAIT_STD_MIN / QUEUE_WAIT_MEAN_MIN)**2))
     Q_nom = dict(Q) if Q is not None else {
         i: np.random.lognormal(mu, sigma) / 60 for i in K
     }
 
-    # Manoeuver time per active stop.
-    # Default 15 min; override via M_man_h to penalise off-CS breaks/rests.
-    # Note: lb_t / ub_t use Man_default so that MILP variable bounds remain
-    # consistent with the manoeuver time used in the model.
-    M_man = {i: float(M_man_h) for i in range(N + 1)}
+    # Maneuver overhead at CS stops.
+    # M_stop: incurred whenever any activity occurs at a CS (charging, break, or rest).
+    # M_seq:  additional repositioning in sequential mode (truck vacates charging bay
+    #         before the break begins).
+    M_man  = {i: float(M_man_h) for i in range(N + 1)}   # kept for compat
+    M_stop = {i: M_STOP_H for i in K}
+    M_seq  = {i: M_SEQ_H  for i in K}
 
-    S={c: 0.5 for c in C}
-    E0=Bcap
-    Ecap=Bcap
-    Emin=0.2 * Bcap
-    Ebar={0: 0, 1: 0.40 * Bcap, 2: 0.80 * Bcap, 3: Bcap}
-    Tbar={0: 0.0, 1: 0.55, 2: 1.367, 3: 2.50}
+    S    = {c: SERVICE_TIME_H for c in C}
+    E0   = Bcap
+    Ecap = Bcap
+    Emin = SOC_MIN_FRAC * Bcap
+    Ebar = {r: EBAR_FRACS[r] * Bcap for r in EBAR_FRACS}
+    Tbar = dict(TBAR)
 
-    T_START = 8.0                   # 08:00 departure (absolute hours)
-    T_hor   = T_START + 5 * 24     # 5-day planning horizon
+    R    = sorted(Ebar.keys())
+    Rseg = R[1:]
+
+    T_hor = _T_START + 7 * 24   # 7-day planning horizon
 
     km_dict = km if km is not None else dict(E)
 
     lb_t, ub_t = compute_time_bounds(
         I, C, K, D, S, Q_nom, Tbar, T_hor,
-        t0=T_START,
+        t0=_T_START,
         Man_default=float(M_man_h),
     )
 
     # Time windows: convert from relative (hours-since-T_START) to absolute
-    Wha_abs = {k: v + T_START for k, v in Wha.items()}
-    Whf_abs = {k: v + T_START for k, v in Whf.items()}
+    Wha_abs = {k: v + _T_START for k, v in Wha.items()}
+    Whf_abs = {k: v + _T_START for k, v in Whf.items()}
 
     return dict(
         label=label, title=title,
         N=N, I=I, C=C, K=K, R=R, Rseg=Rseg,
-        Q=Q_nom, M=M_man,
+        Q=Q_nom, M=M_man, M_stop=M_stop, M_seq=M_seq,
         D=D, E=E, km=km_dict, S=S,
         E0=E0, Ecap=Ecap, Emin=Emin,
         Ebar=Ebar, Tbar=Tbar,
         Wha=Wha_abs, Whf=Whf_abs,
-        T_hor=T_hor, T_START=T_START,
+        T_hor=T_hor, T_START=_T_START,
         lb_t=lb_t, ub_t=ub_t,
         # Break / rest minimum durations (EU Regulation 561/2006)
-        Tb45=0.75, Tb15=0.25, Tb30=0.50,
-        Tr1=11.0,  Tr2=9.0,
+        Tb45=Tb45, Tb15=Tb15, Tb30=Tb30,
+        Tr1=Tr1,   Tr2=Tr2,
         # HoS accumulator limits
-        Tdrv_cons=4.5,   Tdrv_sh1=9.0,   Tdrv_sh2=10.0,
-        Twrk_cons1=6.0,  Twrk_cons2=9.0, Twrk_sh=13.0,
+        Tdrv_cons=Tdrv_cons,   Tdrv_sh1=Tdrv_sh1,   Tdrv_sh2=Tdrv_sh2,
+        Twrk_cons1=Twrk_cons1, Twrk_cons2=Twrk_cons2, Twrk_sh=Twrk_sh,
         # Big-M constants for HoS linearisation (must be ≥ respective limit)
-        M_drv=4.5, M_sd=10.0, M_sw=13.0, M_big=1000.0,
+        M_drv=Tdrv_cons, M_sd=Tdrv_sh1, M_sw=Twrk_sh, M_big=1000.0,
     )
 
 
@@ -302,9 +289,9 @@ def instance_realistic(route_class: str = "medium",
     """
     distances = {"short": [800, 1200], "medium": [1500, 2500], "long": [3000, 4000]}
     customers = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
-    average_speed    = 80        # km/h nominal highway speed
-    CS_spacing       = 40        # km between consecutive CS stops
-    Battery_capacity = 350       # kWh
+    average_speed    = V_NOM
+    CS_spacing       = CS_SPACING_KM
+    Battery_capacity = BATTERY_CAPACITY
 
     nb_customers   = random.randint(*customers[customers_class])
     route_distance = random.randint(*distances[route_class])
@@ -326,7 +313,7 @@ def instance_realistic(route_class: str = "medium",
         ]
 
     customer_locations = sorted(
-        random.choice(cluster_centers) + random.randint(-75, 75)
+        random.choice(cluster_centers) + random.randint(-75, 75) + 0.5
         for _ in range(nb_customers)
     )
 

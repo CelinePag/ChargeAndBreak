@@ -76,6 +76,7 @@ def check_simulation_feasibility(results: dict, full_data: dict,
 
     Tdrv_cons = full_data["Tdrv_cons"]
     Tdrv_sh1  = full_data["Tdrv_sh1"]
+    Tdrv_sh2  = full_data.get("Tdrv_sh2", Tdrv_sh1)   # extended exception limit
     Twrk_sh   = full_data["Twrk_sh"]
     Emin      = full_data["Emin"]
     issues    = []
@@ -92,20 +93,34 @@ def check_simulation_feasibility(results: dict, full_data: dict,
 
         tauq = dur.get("tauq", 0.0)
         tauc = dur.get("tauc", 0.0)
+        _brk_active  = brk in ("b45", "b15", "b30")
+        _rst_active  = rst in ("r1", "r2")
+        _any_brk_rst = _brk_active or _rst_active
+        v_i          = int(is_CS and (bool(y) or _any_brk_rst))
+        # Approximate sigma=0 (concurrent) for the feasibility check
+        u_i   = tauc if (is_CS and y and not _any_brk_rst) else 0.0
+        M_s   = full_data.get("M_stop", {}).get(s, 0.0) if is_CS else 0.0
         if is_CS:
-            work = tauq * y + (tauc if (y and not brk and not rst) else 0.0)
+            work = v_i * M_s + tauq * y + u_i
         elif is_cust:
             work = full_data["S"].get(s, 0.0)
         else:
             work = 0.0
         sw_k = state.sw + work
 
+        # Effective shift-driving limit: 10h when extended-exception budget
+        # is not yet exhausted (ext_shift_used < 2), otherwise the regular 9h.
+        # ext_shift_used at stop s reflects exceptions consumed in rests taken
+        # at all stops before s, so it correctly governs the current shift.
+        _ext_used   = getattr(state, "ext_shift_used", 0)
+        _sd_limit   = Tdrv_sh2 if _ext_used < 2 else Tdrv_sh1
+
         if state.cd > Tdrv_cons + tol:
             issues.append(
                 f"stop {s:>2}: cd={state.cd:.3f}h > {Tdrv_cons}h (consec driving)")
-        if state.sd > Tdrv_sh1 + tol:
+        if state.sd > _sd_limit + tol:
             issues.append(
-                f"stop {s:>2}: sd={state.sd:.3f}h > {Tdrv_sh1}h (shift driving)")
+                f"stop {s:>2}: sd={state.sd:.3f}h > {_sd_limit}h (shift driving)")
         if sw_k > Twrk_sh + tol:
             issues.append(
                 f"stop {s:>2}: sw={sw_k:.3f}h > {Twrk_sh}h (shift working)")
@@ -113,19 +128,25 @@ def check_simulation_feasibility(results: dict, full_data: dict,
             issues.append(
                 f"stop {s:>2}: soc={state.e_arr:.1f}kWh < Emin={Emin}kWh")
 
-        # Check departure energy: advance clips e_arr to Emin, hiding violations
+        # Check departure energy using realized energy (derived from SOC history).
+        # Using full_data["E"] (nominal) here would cause false positives when
+        # realized energy differs from nominal — the BEHDV stores the realized
+        # SOC in e_arr_history, so e_dep_c − states[i+1].e_arr gives the true leg energy.
         if i < len(actions) and s < full_data["N"]:
-            E_leg   = full_data["E"].get(s, 0.0)
             e_dep_c = state.e_arr
             if is_CS and y:
                 tauc_i = (durs[i] if i < len(durs) else {}).get("tauc", 0.0)
                 if tauc_i > 0:
                     e_dep_c = _energy_after_charging(state.e_arr, tauc_i, full_data)
-            if e_dep_c - E_leg < Emin - tol:
+            if i + 1 < len(states):
+                E_leg_actual = e_dep_c - states[i + 1].e_arr
+            else:
+                E_leg_actual = full_data["E"].get(s, 0.0)
+            if e_dep_c - E_leg_actual < Emin - tol:
                 issues.append(
                     f"stop {s:>2}: energy violation — "
-                    f"ed={e_dep_c:.1f} − E[{s}]={E_leg:.1f} = "
-                    f"{e_dep_c-E_leg:.1f} < Emin={Emin}kWh (clipped in sim)")
+                    f"ed={e_dep_c:.1f} − E_act[{s}]={E_leg_actual:.1f} = "
+                    f"{e_dep_c-E_leg_actual:.1f} < Emin={Emin}kWh")
 
     return len(issues) == 0, issues
 
@@ -145,9 +166,9 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
 
     Variables initialised
     ---------------------
-    Continuous : ta, td, ea, ed, tauc, taub, taur, taub_hat, u, z_man,
+    Continuous : ta, td, ea, ed, tauc, taub, taur, taub_hat, u, p,
                  cd, sd, sw, l1, l2, l4, lam_a, lam_d
-    Binary     : y, x_b45/b15/b30, rho1/rho2, mu_a/mu_d, phi
+    Binary     : y, v, sigma, x_b45/b15/b30, rho1/rho2, mu_a/mu_d, phi
     """
     states    = sim_results["states"]
     actions   = sim_results["actions"]
@@ -198,12 +219,23 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
         ri   = b45 + b30 + rho1 + rho2
         rho  = rho1 + rho2
 
-        # Manoeuver: rest always; break only when NOT synchronized with charging
         _brk_active = bool(b45 + b15 + b30)
-        _brk_unsync = _brk_active and not (is_CS and bool(y))
-        z_man_val   = float(_brk_unsync or bool(rho1 + rho2))
-        taub_hat_v = taub + tauc if is_CS else taub
-        u_val      = tauc if (is_CS and y and not xsum) else 0.0
+        # Default concurrent mode (sigma=0); greedy always uses concurrent
+        sigma_val = 0
+        v_val     = int(is_CS and (bool(y) or _brk_active or bool(rho1 + rho2)))
+
+        # p linearizes (1-sigma)*tauc: equals tauc in concurrent, 0 in sequential
+        p_val = tauc * (1 - sigma_val) if is_CS else 0.0
+
+        # taub_hat = taub + p at CS (break credit includes concurrent charging)
+        taub_hat_v = taub + p_val if is_CS else taub
+
+        # u: charging counted as working time (0 in concurrent with break/rest)
+        _any_brk_rst = _brk_active or bool(rho1 + rho2)
+        u_val = tauc if (is_CS and y and (not _any_brk_rst or sigma_val)) else 0.0
+
+        M_stop_val = full_data["M_stop"].get(s, 0.0) if is_CS else 0.0
+        M_seq_val  = full_data["M_seq"].get(s, 0.0)  if is_CS else 0.0
 
         phi_now = phi_track
         if ri or b45:  phi_track = 0
@@ -219,11 +251,10 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
         elif s == 0:
             td_val = state.t_arr
         elif is_CS:
-            td_val = (state.t_arr + tauq * y + tauc + taub + taur
-                      + full_data["M"].get(s, 0.0) * z_man_val)
+            td_val = (state.t_arr + v_val * M_stop_val + tauq * y
+                      + tauc + taub + taur + sigma_val * M_seq_val)
         elif s in C_set:
-            td_val = (state.t_arr + full_data["S"].get(s, 0.0) + taub + taur
-                      + full_data["M"].get(s, 0.0) * z_man_val)
+            td_val = state.t_arr + full_data["S"].get(s, 0.0) + taub + taur
         else:
             td_val = state.t_arr
 
@@ -236,7 +267,7 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
             cd=state.cd, sd=state.sd, sw=state.sw, phi=phi_now,
             y=y, b45=b45, b15=b15, b30=b30, rho1=rho1, rho2=rho2,
             tauc=tauc, taub=taub, taur=taur, taub_hat=taub_hat_v,
-            u=u_val, z_man=z_man_val,
+            u=u_val, v=v_val, sigma=sigma_val, p=p_val,
             l1=float(state.cd) if ri  else 0.0,
             l2=float(state.sd) if rho else 0.0,
             l4=float(state.sw) if rho else 0.0,
@@ -268,7 +299,6 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
                 model.x_b30[i].set_value(sv["b30"])
                 model.rho1[i].set_value(sv["rho1"])
                 model.rho2[i].set_value(sv["rho2"])
-                model.z_man[i].set_value(sv["z_man"])
                 model.l1[i].set_value(sv["l1"])
                 model.l2[i].set_value(sv["l2"])
                 model.l4[i].set_value(sv["l4"])
@@ -283,6 +313,9 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
                 model.y[i].set_value(sv["y"])
                 model.tauc[i].set_value(sv["tauc"])
                 model.u[i].set_value(sv["u"])
+                model.v[i].set_value(sv["v"])
+                model.sigma[i].set_value(sv["sigma"])
+                model.p[i].set_value(sv["p"])
                 for r in model.Rset:
                     model.lam_a[i, r].set_value(sv["lam_a"].get(r, 0.0))
                     model.lam_d[i, r].set_value(sv["lam_d"].get(r, 0.0))
