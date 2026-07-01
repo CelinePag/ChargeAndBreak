@@ -70,8 +70,6 @@ T_START: float = 8.0       # departure time (absolute hours, 08:00)
 
 # ──────────────────────────────────────────────────────────────────────────────
 LOWER_PCT = 0.25
-#MEAN_DELAY_PCT = 0.10
-#ALPHA = 3.0
 
 
 def sample_travel_time(

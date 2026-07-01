@@ -59,9 +59,6 @@ import numpy as np
 # ── ECR curve ─────────────────────────────────────────────────────────────────
 from settings import ecr as _ecr, sample_travel_time, V_NOM
 
-MAX_ECR = max(_ecr(0.8 * V_NOM), _ecr(1.2 * V_NOM))
-
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SCENARIO GENERATION
@@ -106,8 +103,7 @@ def generate_scenarios(full_data: dict,
     rng   = np.random.default_rng(seed)
     N     = full_data["N"]
     D_nom = full_data["D"]
-    L_nom = full_data.get("L", {})    # leg lengths in km (optional)
-    v_nom = full_data.get("v", {})    # nominal speed km/h (optional)
+    L_nom = full_data.get("km", {})   # leg lengths in km (optional)
 
     legs   = list(range(start_stop, min(end_stop, N)))
     n_legs = len(legs)
@@ -121,8 +117,7 @@ def generate_scenarios(full_data: dict,
             d_s = sample_travel_time(D_nom.get(leg, 0.0), rng, lower_pct = delta, upper_pct = delta)
             D_scen[leg] = d_s
             # Derive energy from ECR: E = L_km * ECR(v_s), v_s = L_km / d_s
-            L_km = L_nom.get(leg,
-                   D_nom.get(leg, 0.0) * v_nom.get(leg, V_NOM))
+            L_km = L_nom.get(leg, D_nom.get(leg, 0.0) * V_NOM)
             v_s  = L_km / d_s if d_s > 0 else V_NOM
             E_scen[leg] = L_km * _ecr(v_s)
         scenarios.append({"D": D_scen, "E": E_scen})
@@ -133,7 +128,7 @@ def generate_scenarios(full_data: dict,
         E_corner: dict[int, float] = {}
         for leg in legs:
             d_c  = D_nom.get(leg, 0.0) * mult
-            L_km = L_nom.get(leg, D_nom.get(leg, 0.0) * v_nom.get(leg, V_NOM))
+            L_km = L_nom.get(leg, D_nom.get(leg, 0.0) * V_NOM)
             v_c  = L_km / d_c if d_c > 0 else V_NOM
             E_corner[leg] = L_km * _ecr(v_c)
         return E_corner

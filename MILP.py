@@ -468,13 +468,6 @@ def _add_soc_constraints(m, N, data):
     m.chg_act    = pyo.Constraint(m.Kset, rule=lambda m, i: m.tauc[i] <= m.TK * m.y[i])
     m.chg_act2   = pyo.Constraint(m.Kset, rule=lambda m, i: m.tauc[i] >= 0.25 * m.y[i])
 
-    usable_cap   = data["Ecap"] - data["Emin"]
-    initial_free = data["E0"]   - data["Emin"]
-    total_energy = sum(data["E"].values())
-    n_min = max(0, _mi.ceil((total_energy - initial_free) / usable_cap))
-
-    #m.ineq1 = pyo.Constraint(expr=sum(m.y[i] for i in m.Kset) >= n_min)
-
     m.pwl_no_free_charge = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.ed[i] - m.ea[i] <= m.Ecap * m.y[i])
 
@@ -1049,11 +1042,13 @@ def build_horizon_model(sub_data: dict, init_state: dict,
                                     sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
                                     is_subproblem=True)
 
-    add_valid_inequalities(m, sub_data, init_state=init_state)          # all 7 families
-    #add_window_energy_covers(m, sub_data, max_cuts=50)  # optional extra energy cuts
+    add_valid_inequalities(m, sub_data, init_state=init_state)
 
-    #_add_covering_inequalities(m, sub_data, init_state,
-     #                          fixed_action=fixed_action)
+
+    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b45[i] == 0)
+    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b15[i] == 0)
+    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b30[i] == 0)
+
 
     return m
 
@@ -1105,7 +1100,8 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
 
     if relax:
         # ── Partial LP relaxation ──────────────────────────────────────────────
-        # keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops only.
+        # keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops; keep ALL
+        # integer variables at local stop 1 (next stop) as integer.
 
         _CUST_KEEP_BINARY = frozenset(("x_b45", "x_b15", "x_b30", "rho1", "rho2"))
         cust_set = set(model.Cset)
@@ -1120,6 +1116,10 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
                 if (vname in _CUST_KEEP_BINARY
                         and isinstance(idx, int) and idx in cust_set):
                     continue  # leave as Binary
+                # Keep all integer variables at local stop 1 (next stop) as integer
+                stop_idx = idx if isinstance(idx, int) else (idx[0] if isinstance(idx, tuple) else None)
+                if stop_idx == 1:
+                    continue
                 # Relax everything else
                 vdata.domain = pyo.NonNegativeReals
                 if vdata.ub is None:

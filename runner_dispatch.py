@@ -49,7 +49,8 @@ Usage (CLI)
 
   Greedy options:
     --safety FLOAT        SOC safety buffer fraction (default: 0.10)
-    --queue_thresh FLOAT  skip CS with queue_time > this (h) (default: 999)
+    --queue_thresh FLOAT  skip charging at CS with queue_time > this (h)
+                          (default: adaptive, 80% of instance max queue)
 
   2SP options:
     --n_scenarios INT     extensive-form scenario count (default: 10)
@@ -133,8 +134,8 @@ def run_algorithm(
     ro_time_limit: int     = 7200,
     ro_mip_gap: float      = 0.005,
     # greedy options
-    safety_buffer: float   = 0.10,
-    queue_threshold: float = 999.0,
+    safety_buffer: float             = 0.10,
+    queue_threshold: Optional[float] = None,
     # 2SP options
     twosp_time_limit: int  = 7200,
     twosp_mip_gap: float   = 0.005,
@@ -174,7 +175,8 @@ def run_algorithm(
     Greedy parameters
     -----------------
     safety_buffer   : SOC safety buffer fraction above Emin (default 0.10)
-    queue_threshold : skip CS stops with queue_time > this (h)
+    queue_threshold : skip charging at CS stops with queue_time > this (h),
+                      unless mandatory.  None = adaptive 80% of max queue.
 
     Common parameters
     -----------------
@@ -337,7 +339,7 @@ if __name__ == "__main__":
 
     # Greedy
     parser.add_argument("--safety",       type=float, default=0.10)
-    parser.add_argument("--queue_thresh", type=float, default=999.0)
+    parser.add_argument("--queue_thresh", type=float, default=None)
     parser.add_argument("--m_man",        type=float, default=None,
                         help="Override manoeuver time h stored in JSON "
                              "(e.g. 0.25 = 15 min, 10 = 10 h). "

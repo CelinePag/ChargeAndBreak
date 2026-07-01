@@ -148,8 +148,9 @@ def generate_instance_file(route_class: str,
 
     The seed controls everything:
       - random.seed(seed)  fixes the route geometry (via instance_realistic)
-      - numpy RNG seeded from seed fixes the uncertainty realisation (D_real,
-        E_real) and all 500 scenario draws per stop.
+      - numpy RNG seeded from seed fixes CS queue-time draws (via
+        instance_realistic -> make_data), the uncertainty realisation
+        (D_real, E_real), and all 500 scenario draws per stop.
 
     Parameters
     ----------
@@ -171,10 +172,12 @@ def generate_instance_file(route_class: str,
 
     # ── 1. Generate route geometry ─────────────────────────────────────────────
     random.seed(seed)
+    rng = np.random.default_rng(seed)
     full_data = instance_realistic(
         route_class     = route_class,
         customers_class = customers_class,
         clusters        = 3,
+        rng             = rng,
     )
     # Override title/label with the canonical seed-based name so that all
     # output files (logs, figures, solutions) are named after the instance.
@@ -192,7 +195,6 @@ def generate_instance_file(route_class: str,
               f"  |K|={len(full_data['K'])}", end="  ")
 
     # ── 2. Draw uncertainty realisation ───────────────────────────────────────
-    rng    = np.random.default_rng(seed)
     D_real = []
     E_real = []
     for leg in range(N):
@@ -322,7 +324,7 @@ def generate_all(output_dir: str  = "instances",
 
 def load_instance_json(filepath: str,
                        max_scenarios: Optional[int] = None
-                       ) -> tuple[dict, list, list, list]:
+                       ) -> tuple[dict, list, list, list, float]:
     """
     Load a precomputed instance JSON file.
 

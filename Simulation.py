@@ -208,8 +208,8 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
             actions.append(dict(y=1, break_type=None, rest_type=None))
         return actions
 
-    break_opts = ["0", "b45", "b15"]
-    if state.phi == 1:
+    break_opts = ["0", "b45", "b15"] if is_CS else ["0"]
+    if state.phi == 1 and is_CS:
         break_opts.append("b30")
     rest_opts = ["0", "r1"]
     if state.rho2_used < 3:
@@ -254,10 +254,6 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     -------
     (pruned_actions, n_dropped)
     """
-
-
-    #return actions, 0  # --- IGNORE ---
-
     N     = full_data["N"]
     K_set = set(full_data["K"])
 
@@ -267,6 +263,8 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     D_next_wc = full_data["D"].get(stop, 0.0) * (1.0 + delta)
 
     must_charge = False
+    must_reset_cd = False
+    must_rest = False
 
     e_needed, cur = 0.0, stop
     while cur < N:
@@ -281,26 +279,36 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
 
     if state.e_arr - e_needed < full_data["Emin"] and stop in K_set:
         must_charge = True   # must charge to reach next CS, so no point enumerating y=0
-    print("DEBUG: e_needed to next CS =", e_needed, f"kWh. Must charge = {'yes' if must_charge else 'no'}")
-    #must_charge = False
 
-    must_reset_cd = not charge_only and (
-        state.cd + D_next_wc > full_data["Tdrv_cons"] - 1e-3)
-    must_rest = not charge_only and (
-        state.sd + D_next_wc > full_data["Tdrv_sh1"] - 1e-3 or
-        state.sw + D_next_wc > full_data["Twrk_sh"]  - 1e-3)
+    if state.cd + D_next_wc > full_data["Tdrv_cons"]:
+        must_reset_cd = True
+
+    if state.sd + D_next_wc > full_data["Tdrv_sh2"] and state.ext_shift_used < 2:
+        must_rest = True
+    elif state.sd + D_next_wc > full_data["Tdrv_sh1"] and state.ext_shift_used >= 2:
+        must_rest = True
+    elif state.sw + D_next_wc > full_data["Twrk_sh"]:
+        must_rest = True
 
     pruned = []
+
+
+    print()
+    print(f"     [PRUNE] stop={stop}  must_charge={must_charge} (e_arr={state.e_arr:.1f}, e_needed={e_needed:.1f}) ")
+    print(f"             must_reset_cd={must_reset_cd} (cd={state.cd:.2f}, D_next_wc={D_next_wc:.2f})  ")
+    print(f"             must_rest={must_rest}   (sd={state.sd:.2f}, sw={state.sw:.2f}, D_next_wc={D_next_wc:.2f}, ext_shift_used={state.ext_shift_used})  ")
+
+
     for a in actions:
         y, brk, rst = a["y"], a["break_type"], a["rest_type"]
         if not charge_only and brk == "b15" and state.phi == 1:
             continue   # b15 invalid: phi would need to be 2
         if y and stop in K_set and state.e_arr > full_data["Ecap"] - 1.0 \
-                and (brk in ["0", "None"] and rst in ["0", "None"]):
+                and brk in (None, "0") and rst in (None, "0"):
             continue   # pure charge on full battery: queue cost, negligible gain
         if must_charge   and not y and stop in K_set: continue
-        if must_reset_cd and (brk in ["0", "None"] and rst in ["0", "None"]):     continue
-        if must_rest     and rst in ["0", "None"]:                 continue
+        if must_reset_cd and brk in (None, "0") and rst in (None, "0"): continue
+        if must_rest     and rst in (None, "0"):                       continue
         if horizon <= 48 and rst == "r1" and state.rho2_used < 2: continue  # will always choose reduced rest anyway
         pruned.append(a)
 
@@ -621,7 +629,11 @@ def select_best_action(full_data, stop: int, state,
     # call.  A shallow copy of full_data is sufficient since only a scalar changes.
     _tdrv_sh2 = full_data.get("Tdrv_sh2", full_data["Tdrv_sh1"])
     if ext_shift_used < 2 and _tdrv_sh2 > full_data["Tdrv_sh1"]:
-        full_data = dict(full_data, Tdrv_sh1=_tdrv_sh2)
+        # M_sd is the big-M for the shift-driving linearisation (l2 = sd·ρ).
+        # It must be ≥ max(sd), i.e. ≥ Tdrv_sh1.  If we raise Tdrv_sh1 to 10h
+        # but leave M_sd=9h, the big-M constraints make sd>9h infeasible even
+        # though sd_ub allows 10h.
+        full_data = dict(full_data, Tdrv_sh1=_tdrv_sh2, M_sd=_tdrv_sh2)
 
     # ── 1. Enumerate + prune ─────────────────────────────────────────────────
     actions, n_pruned = _prune_actions(
@@ -783,7 +795,8 @@ def select_best_action(full_data, stop: int, state,
     TIEBREAK = 5.0 / 60.0
     winner   = min(scored, key=lambda s: s[1])
     tb_flag  = False
-    if winner[0]["y"] == 0 and winner[0].get("break_type") not in ["0", "None"] and winner[0].get("rest_type") not in ["0", "None"]:
+    if winner[0]["y"] == 0 and (winner[0].get("break_type") not in (None, "0")
+                                 or winner[0].get("rest_type") not in (None, "0")):
         w_brk, w_rst = winner[0]["break_type"], winner[0]["rest_type"]
         peers = [s for s in scored
                  if s[0]["y"] == 1
@@ -795,7 +808,7 @@ def select_best_action(full_data, stop: int, state,
             if best_peer[1] <= winner[1] + TIEBREAK:
                 winner  = best_peer
                 tb_flag = True
-    if winner[0]["y"] == 1 and winner[0].get("break_type") in ["0", "None"]:
+    if winner[0]["y"] == 1 and winner[0].get("break_type") in (None, "0"):
         w_brk, w_rst = winner[0]["break_type"], winner[0]["rest_type"]
         peers = [s for s in scored
                  if s[0]["y"] == 1
@@ -924,8 +937,8 @@ def select_best_action(full_data, stop: int, state,
             and nom_sol.get("sol")
             and stop in set(full_data["K"])
             and best_action.get("y") == 1
-            and best_action.get("break_type") in (None, "0", "None", "b15", "b30")
-            and best_action.get("rest_type")  in (None, "0", "None")):
+            and best_action.get("break_type") in (None, "0", "b15", "b30")
+            and best_action.get("rest_type")  in (None, "0")):
         _s0_patch = nom_sol["sol"][0]
         _tc_patch  = float(_s0_patch.get("tauc", 0.0))
         _sig_patch = int(_s0_patch.get("sigma", 0))
@@ -934,7 +947,7 @@ def select_best_action(full_data, stop: int, state,
             best_action = dict(best_action, break_type="b45")
             _brk = "b45"
             _p(f"     [POST-HOC] tauc={_tc_patch*60:.0f}m >= 45m → b45 injected (free, concurrent)")
-        elif _sig_patch == 0 and _tc_patch >= full_data["Tb30"] - 1e-6 and best_action.get("break_type") in (None, "0", "None", "b15"):
+        elif _sig_patch == 0 and _tc_patch >= full_data["Tb30"] - 1e-6 and best_action.get("break_type") in (None, "0", "b15"):
             _s0_patch["b30"] = 1
             best_action = dict(best_action, break_type="b30")
             _brk = "b30"

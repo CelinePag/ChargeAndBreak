@@ -145,7 +145,8 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def make_data(I, C, K, D, E, Wha, Whf, label, title,
-              km=None, Bcap=BATTERY_CAPACITY, Q=None, M_man_h: float = M_MAN_DEFAULT_H) -> dict:
+              km=None, Bcap=BATTERY_CAPACITY, Q=None, M_man_h: float = M_MAN_DEFAULT_H,
+              rng: np.random.Generator | None = None) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -175,8 +176,11 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
             energy as proportional to travel time — backward-compatible).
     Q     : dict {cs_stop: h} or None
             Fixed queue times at each CS stop (plug-in + initial waiting).
-            When None, drawn uniformly from U[0, 10] min using the current
-            global random state; call random.seed() first for reproducibility.
+            When None, drawn from a lognormal distribution using `rng`.
+    rng   : np.random.Generator or None
+            Generator used to draw Q when Q is None.  Pass a seeded
+            np.random.default_rng(seed) for reproducible queue times; when
+            None, a fresh unseeded generator is used.
     M_man_h : float
             Manoeuver time (h) applied uniformly to every stop.  A manoeuver
             is charged whenever a break or rest is taken without simultaneous
@@ -202,8 +206,9 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     # Queue times at CS stops (lognormal distribution)
     mu    = np.log(QUEUE_WAIT_MEAN_MIN**2 / np.sqrt(QUEUE_WAIT_STD_MIN**2 + QUEUE_WAIT_MEAN_MIN**2))
     sigma = np.sqrt(np.log(1 + (QUEUE_WAIT_STD_MIN / QUEUE_WAIT_MEAN_MIN)**2))
+    _rng  = rng if rng is not None else np.random.default_rng()
     Q_nom = dict(Q) if Q is not None else {
-        i: np.random.lognormal(mu, sigma) / 60 for i in K
+        i: _rng.lognormal(mu, sigma) / 60 for i in K
     }
 
     # Maneuver overhead at CS stops.
@@ -265,7 +270,8 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
 
 def instance_realistic(route_class: str = "medium",
                        clusters: int = 3,
-                       customers_class: str = "few") -> dict:
+                       customers_class: str = "few",
+                       rng: np.random.Generator | None = None) -> dict:
     """
     Randomly generated long-haul route with realistic geometry.
 
@@ -340,7 +346,6 @@ def instance_realistic(route_class: str = "medium",
         I_nb += 1; prev_cs = real
 
     I.append(I_nb)
-    print(f"Route: {route_distance} km, {len(C)} customers, {len(K)} CS")
 
     km = {i: average_speed * D[i] for i in D}
     return make_data(
@@ -349,6 +354,7 @@ def instance_realistic(route_class: str = "medium",
         Whf={c: 20000000 for c in C},
         label="realistic — randomly generated long-haul route",
         title=f"realistic_{route_class}_{customers_class}_{clusters}",
+        rng=rng,
     )
 
 
@@ -359,7 +365,3 @@ def instance_realistic(route_class: str = "medium",
 ALL_INSTANCES: dict[str, callable] = {
     "realistic"         : instance_realistic,
 }
-
-# These instances are only meaningful with delta=0 (noise would violate
-# the constraints mid-leg, which no policy can prevent).
-DET_ONLY_INSTANCES: set[str] = {"tight_energy_chain", "sd_boundary"}

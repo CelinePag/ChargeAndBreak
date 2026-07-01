@@ -19,8 +19,10 @@ The greedy driver operates without planning tools and follows three rules:
      the energy to reach the next CS (worst-case) falls below Emin + buffer.
 
   3. AVOID BUSY STATIONS
-     If a CS stop has a queue time above `queue_threshold`, skip it unless
-     charging is mandatory (energy constraint or HoS forces a stop there).
+     If a CS stop has a queue time above `queue_threshold`, skip charging
+     there unless charging is mandatory (energy constraint forces a stop).
+     When `queue_threshold` is not given, it defaults to 80% of the
+     instance's maximum CS queue time (0.8 * max(full_data["Q"].values())).
 
   4. FREE BREAK WITHIN CHARGE
      If the driver must stop at a CS and charging takes at least Tb45 hours,
@@ -86,8 +88,9 @@ import datetime
 import os
 import sys
 import time
+from typing import Optional
 
-from BEHDV     import BEHDV, _energy_after_charging
+from BEHDV     import BEHDV, _energy_after_charging, _charging_time_needed
 from scenarios import ScenarioTracker
 from runner    import finalize_run
 from plots     import plot_simulation_results   # re-exported for callers
@@ -116,33 +119,6 @@ def _energy_to_next_cs(full_data: dict, stop_global: int) -> float:
             break
         k += 1
     return cum
-
-
-def _charging_time_to_full(ea: float, full_data: dict) -> float:
-    """
-    Charging time (h) needed to top up from ``ea`` kWh to full capacity.
-
-    Evaluates the piecewise-linear charging curve by inverting the
-    energy→time and time→energy mappings.  Returns 0.0 if already full.
-    """
-    Ebar = full_data["Ebar"]
-    Tbar = full_data["Tbar"]
-    Ecap = full_data["Ecap"]
-
-    rs = sorted(Ebar)
-    Es = [Ebar[r] for r in rs]
-    Ts = [Tbar[r] for r in rs]
-
-    def _e2t(e):
-        e = max(Es[0], min(Es[-1], e))
-        for k in range(len(Es) - 1):
-            if Es[k] <= e <= Es[k + 1]:
-                span = Es[k + 1] - Es[k]
-                return (Ts[k] + (e - Es[k]) / span * (Ts[k + 1] - Ts[k])
-                        if span else Ts[k])
-        return Ts[-1]
-
-    return max(0.0, _e2t(Ecap) - _e2t(ea))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -180,7 +156,7 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
     tauq = full_data["Q"].get(stop, 0.0) * y if is_CS else 0.0
 
     if is_CS and y:
-        tauc = _charging_time_to_full(state.e_arr, full_data)
+        tauc = _charging_time_needed(state.e_arr, full_data)
         # Break runs in parallel with charging; only residual time is extra
         taub = max(0.0, break_min - tauc)
     else:
@@ -195,9 +171,9 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
-                    safety_buffer_frac: float = 0.10,
-                    queue_threshold: float    = 999.0,
-                    verbose: bool             = False) -> tuple[dict, str]:
+                    safety_buffer_frac: float    = 0.10,
+                    queue_threshold: Optional[float] = None,
+                    verbose: bool                 = False) -> tuple[dict, str]:
     """
     Make a greedy action decision at ``stop_global``.
 
@@ -213,9 +189,11 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
         Extra SOC buffer above Emin when assessing mandatory charges.
         Charge if  e_arr - e_to_next  <  Emin + safety_buffer_frac * usable.
         Default 0.10 (10% of usable capacity).
-    queue_threshold : float (hours)
-        CS stops with queue_time > queue_threshold are skipped unless a
-        mandatory condition forces a stop there.  Default 999 (never skip).
+    queue_threshold : float (hours) or None
+        CS stops with queue_time > queue_threshold are not charged at unless
+        a mandatory energy condition (must_charge) forces a stop there.
+        When None (default), computed adaptively as 80% of the instance's
+        maximum CS queue time: 0.8 * max(full_data["Q"].values()).
 
     Returns
     -------
@@ -252,6 +230,13 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
     batt_full = (state.e_arr >= Ecap - 1.0)
 
+    # ── Queue avoidance: skip charging at busy CS unless energy forces it ──────
+    Q_all = full_data.get("Q", {})
+    if queue_threshold is None:
+        queue_threshold = 0.8 * max(Q_all.values()) if Q_all else float("inf")
+    queue_busy  = is_CS and Q_all.get(stop_global, 0.0) > queue_threshold
+    avoid_queue = queue_busy and not must_charge
+
     y   = 0
     brk = None
     rst = None
@@ -259,22 +244,26 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     # ── Priority 1: MUST-REST ──────────────────────────────────────────────────
     if must_rest:
         rst = "r2" if state.rho2_used < 3 else "r1"
-        # Charging is free during rest dwell at a CS
-        y      = 1 if (is_CS and not batt_full) else 0
+        # Charging is free during rest dwell at a CS, unless the station is busy
+        y      = 1 if (is_CS and not batt_full and not avoid_queue) else 0
         reason = f"MUST-REST ({rst.upper()})"
+        if avoid_queue:
+            reason += "  [queue busy, no charge]"
 
     # ── Priority 2: MUST-BREAK ────────────────────────────────────────────────
     elif must_break:
         brk = "b30" if must_b30 else "b45"
-        # Charging is free during break dwell at a CS
-        y      = 1 if (is_CS and not batt_full) else 0
+        # Charging is free during break dwell at a CS, unless the station is busy
+        y      = 1 if (is_CS and not batt_full and not avoid_queue) else 0
         reason = f"MUST-BREAK ({brk.upper()})"
+        if avoid_queue:
+            reason += "  [queue busy, no charge]"
 
     # ── Priority 3: MUST-CHARGE ───────────────────────────────────────────────
     elif must_charge:
         # must_charge implies is_CS already
         y        = 1
-        tauc_est = _charging_time_to_full(state.e_arr, full_data)
+        tauc_est = _charging_time_needed(state.e_arr, full_data)
         # Insert a break for free only if the charge is long enough to cover it
         if state.phi == 1 and tauc_est >= Tb30:
             brk    = "b30"
@@ -309,11 +298,11 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 def run_greedy(full_data: dict,
                D_real: list,
                E_real: list,
-               safety_buffer: float   = 0.10,
-               queue_threshold: float = 999.0,
-               verbose: bool          = True,
-               run_id: str            = None,
-               oracle_tee: bool       = True) -> dict:
+               safety_buffer: float             = 0.10,
+               queue_threshold: Optional[float] = None,
+               verbose: bool                    = True,
+               run_id: str                      = None,
+               oracle_tee: bool                 = True) -> dict:
     """
     Run the greedy benchmark simulation from stop 0 to stop N.
 
@@ -333,7 +322,8 @@ def run_greedy(full_data: dict,
     D_real          : list[float] -- realised travel times per leg (h), length N
     E_real          : list[float] -- realised energy per leg (kWh), length N
     safety_buffer   : minimum SOC buffer above Emin (fraction of usable)
-    queue_threshold : CS queue time (h) above which the station is skipped
+    queue_threshold : CS queue time (h) above which charging is skipped
+                      (unless mandatory).  None = adaptive 80% of max queue.
     verbose         : print per-stop decisions to stdout
     run_id          : base name for output files (auto-generated if None)
     oracle_tee      : pass tee=True to oracle_solve (shows HiGHS output)
@@ -349,6 +339,10 @@ def run_greedy(full_data: dict,
 
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
+
+    Q_all = full_data.get("Q", {})
+    if queue_threshold is None:
+        queue_threshold = 0.8 * max(Q_all.values()) if Q_all else float("inf")
 
     # ── Output directories and file paths ─────────────────────────────────────
     for d in ("logs", "figures", "solutions"):
@@ -495,7 +489,7 @@ if __name__ == "__main__":
 
     # Usage: python greedy.py <json_file> [queue_threshold]
     json_file = sys.argv[1] if len(sys.argv) > 1 else None
-    queue_thr = float(sys.argv[2]) if len(sys.argv) > 2 else 999.0
+    queue_thr = float(sys.argv[2]) if len(sys.argv) > 2 else None
 
     if json_file is None:
         print("Usage: python greedy.py <json_file> [queue_threshold]")
