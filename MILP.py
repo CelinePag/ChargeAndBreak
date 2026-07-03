@@ -1045,9 +1045,10 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     add_valid_inequalities(m, sub_data, init_state=init_state)
 
 
-    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b45[i] == 0)
-    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b15[i] == 0)
-    pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b30[i] == 0)
+    # DEBUG
+    #pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b45[i] == 0)
+    #pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b15[i] == 0)
+    #pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b30[i] == 0)
 
 
     return m

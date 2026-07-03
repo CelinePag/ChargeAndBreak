@@ -208,8 +208,8 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
             actions.append(dict(y=1, break_type=None, rest_type=None))
         return actions
 
-    break_opts = ["0", "b45", "b15"] if is_CS else ["0"]
-    if state.phi == 1 and is_CS:
+    break_opts = ["0", "b45", "b15"] #if is_CS else ["0"]
+    if state.phi == 1:# and is_CS:
         break_opts.append("b30")
     rest_opts = ["0", "r1"]
     if state.rho2_used < 3:
@@ -1227,7 +1227,6 @@ def run_simulation_precomputed(
     full_data: dict,
     D_real: list,
     E_real: list,
-    scenarios_by_stop: list      = None,
     n_scenarios: int             = 10,
     horizon_hours: float         = 12.0,
     delta: float                 = 0.20,
@@ -1243,23 +1242,22 @@ def run_simulation_precomputed(
     oracle_tee: bool             = False,
 ) -> dict:
     """
-    Run the rolling-horizon simulation using a precomputed uncertainty
-    realisation and scenario pool from instance_io.py.
+    Run the rolling-horizon look-ahead (LA) simulation using a precomputed
+    uncertainty realisation from instance_io.py.
 
-    Identical to run_simulation() except:
-      - Travel times / energies come from D_real / E_real (no live RNG draw).
-      - Scenarios come from scenarios_by_stop[stop][:n_scenarios] (LA mode).
-        If scenarios_by_stop is None, the sub-problem uses delta=0 (RO mode).
+    Identical to run_simulation() except travel times / energies come from
+    D_real / E_real (no live RNG draw).  Scenarios are NOT precomputed or
+    stored anywhere: at each decision stop, select_best_action() draws
+    n_scenarios fresh scenarios over [stop, horizon_end) via
+    scenarios.generate_scenarios() (same mechanism RO.py uses), so LA runs
+    are not tied to a fixed scenario pool across repeated runs.
 
     Parameters
     ----------
     full_data          : dict from instance_io.load_instance_json()
     D_real             : list[float] -- N realised travel times (h)
     E_real             : list[float] -- N realised energies (kWh)
-    scenarios_by_stop  : list[list[dict]] or None
-                         scenarios_by_stop[i] = scenario list at stop i.
-                         None => RO mode: sub-problem solved at delta=0.
-    n_scenarios        : how many scenarios to use per stop (first n taken)
+    n_scenarios        : how many scenarios to draw per stop
     horizon_hours      : look-ahead window length (h)
     delta              : uncertainty half-width passed to sub-problem (LA only)
     time_limit         : per-scenario MILP time limit (s)
@@ -1288,16 +1286,13 @@ def run_simulation_precomputed(
 
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
-    if scenarios_by_stop is not None:
-        assert len(scenarios_by_stop) == N, (
-            f"scenarios_by_stop length {len(scenarios_by_stop)} != N={N}")
 
     # ── Output dirs and paths ─────────────────────────────────────────────────
     for d in ("logs", "figures", "solutions"):
         _os.makedirs(d, exist_ok=True)
     ts    = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     title = full_data.get("title", "run")
-    alg   = "LA" if scenarios_by_stop is not None else "RO"
+    alg   = "LA"
     rid   = run_id or f"{title}_{alg}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths = dict(
         log = _os.path.join("logs",      f"{rid}.txt"),
@@ -1332,29 +1327,16 @@ def run_simulation_precomputed(
             nom_sol    = None
             score_list = [(action, 0.0, 0.0, 0, [])]
         else:
-            # Scenarios: use precomputed pool (LA) or empty list (RO, delta=0)
-            if scenarios_by_stop is not None:
-                stop_scens = scenarios_by_stop[stop][:n_scenarios]
-            else:
-                # RO: generate a single nominal scenario (delta=0)
-                end_ro, _ = find_horizon_end_stop(
-                    full_data, stop, horizon_hours, state=vehicle)
-                stop_scens = generate_scenarios(
-                    full_data   = full_data,
-                    start_stop  = stop,
-                    end_stop    = end_ro,
-                    n_scenarios = n_scenarios,
-                    delta       = 0.0,
-                    seed        = None,
-                )
-
+            # Scenarios are generated live inside select_best_action (no
+            # precomputed pool): it draws n_scenarios over [stop, horizon_end)
+            # via generate_scenarios() when precomputed_scenarios is left None.
             action, score_list, nom_sol = select_best_action(
                 full_data             = full_data,
                 stop                  = stop,
                 state                 = vehicle,
                 n_scenarios           = n_scenarios,
                 horizon_hours         = horizon_hours,
-                delta                 = delta if scenarios_by_stop is not None else 0.0,
+                delta                 = delta,
                 scenario_seed         = None,
                 time_limit            = time_limit,
                 verbose               = verbose,
@@ -1367,7 +1349,6 @@ def run_simulation_precomputed(
                 prev_nom_sol          = prev_sol,
                 log_fh                = log,
                 tracker               = tracker,
-                precomputed_scenarios = stop_scens,
                 ext_shift_used        = vehicle.ext_shift_used,
             )
 

@@ -8,7 +8,7 @@ Mathematical formulation
 ------------------------
 Uncertainty model:
     D̃_i = D_i · ξ_i,   E̊_i drawn from ECR(speed) model
-    Scenarios ω_1..ω_S taken from the precomputed pool in the instance JSON.
+    Scenarios ω_1..ω_S drawn live at solve time via scenarios.generate_scenarios().
 
 Stage decomposition:
     First stage  (here-and-now, binary):
@@ -51,16 +51,16 @@ overcharge — this uses observable vehicle state, not future D_real).
 
 Scenarios
 ---------
-Scenarios are drawn from the precomputed pool stored in the instance JSON file
-(scenarios_by_stop[0][:n_scenarios]).  No fresh scenario generation occurs at
-run time.
+Scenarios are generated live at solve time via scenarios.generate_scenarios()
+(start_stop=0, end_stop=N, delta=delta) — the same mechanism LA uses — rather
+than read from a precomputed pool.  Runs are therefore not tied to a fixed
+scenario sample across repeated calls; pass `scenario_seed` for reproducibility.
 
 Integration with the framework
 -------------------------------
   import importlib
   twosp = importlib.import_module("2SP")
-  results = twosp.run_2sp(full_data, D_real, E_real,
-                          scenarios_by_stop=scenarios_by_stop, n_scenarios=10)
+  results = twosp.run_2sp(full_data, D_real, E_real, n_scenarios=10)
 
   Or via runner_dispatch.py:
     python runner_dispatch.py instances/RmediumCfew_7.json 2SP
@@ -86,7 +86,7 @@ from MILP      import (
     _declare_common_params,
     _solve_quiet,
 )
-from scenarios import ScenarioTracker
+from scenarios import ScenarioTracker, generate_scenarios
 from runner    import finalize_run
 
 
@@ -102,7 +102,7 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     ----------
     data      : full route data dict from instances.make_data()
     scenarios : list of S scenario dicts, each with keys "D" and "E"
-                (global leg index → float), from the instance precomputed pool.
+                (global leg index → float), from generate_scenarios().
 
     Returns
     -------
@@ -628,9 +628,9 @@ def _simulate_2sp_schedule(full_data: dict,
 def run_2sp(full_data: dict,
             D_real: list,
             E_real: list,
-            scenarios_by_stop: list,
             n_scenarios: int  = 10,
             delta: float      = 0.20,
+            scenario_seed              = None,
             time_limit: int   = 2 * 3600,
             mip_gap: float    = 0.005,
             tee: bool         = True,
@@ -645,12 +645,9 @@ def run_2sp(full_data: dict,
     full_data         : instance dict (from instance_io.load_instance_json)
     D_real            : list[float] — precomputed realised travel times (h), length N
     E_real            : list[float] — precomputed realised energies (kWh), length N
-    scenarios_by_stop : list[list[dict]] from instance_io.load_instance_json —
-                        precomputed scenario pool; scenarios_by_stop[0][:n_scenarios]
-                        is used as full-route scenarios for the extensive form.
-    n_scenarios       : number of scenarios to draw from the pool (default 10)
-    delta             : travel-time uncertainty half-width (informational only;
-                        scenarios are precomputed, this is stored in method_meta)
+    n_scenarios       : number of full-route scenarios to draw (default 10)
+    delta             : travel-time uncertainty half-width used to draw scenarios
+    scenario_seed     : seed for scenario generation (None = unseeded/random)
     time_limit        : solver wall-clock limit in seconds (default 2h)
     mip_gap           : MIP relative gap tolerance (default 0.5%)
     tee               : show Gurobi solver output (default True)
@@ -670,8 +667,6 @@ def run_2sp(full_data: dict,
 
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
-    assert scenarios_by_stop is not None and len(scenarios_by_stop) >= 1, \
-        "scenarios_by_stop must be provided (from load_instance_json)"
 
     for d in ("logs", "figures", "solutions"):
         os.makedirs(d, exist_ok=True)
@@ -699,12 +694,18 @@ def run_2sp(full_data: dict,
        f"  time_limit={time_limit}s")
     _p("=" * 65)
 
-    # ── Step 1: Load precomputed full-route scenarios from stop 0 ─────────────
-    # scenarios_by_stop[0] contains full-route scenarios (legs 0..N-1).
-    # Take the first n_scenarios from the precomputed pool.
-    scenarios = scenarios_by_stop[0][:n_scenarios]
-    _p(f"\n  Loaded {len(scenarios)} precomputed full-route scenarios "
-       f"(δ={delta:.0%}, pool size={len(scenarios_by_stop[0])})")
+    # ── Step 1: Draw full-route scenarios live ─────────────────────────────────
+    scenarios = generate_scenarios(
+        full_data     = full_data,
+        start_stop    = 0,
+        end_stop      = N,
+        n_scenarios   = n_scenarios,
+        delta         = delta,
+        seed          = scenario_seed,
+        include_best  = False,
+        include_worst = False,
+    )
+    _p(f"\n  Drew {len(scenarios)} full-route scenarios (δ={delta:.0%})")
 
     # ── Step 2: Build and solve the extensive form ─────────────────────────────
     _p(f"\n  Building 2SP extensive form (S={len(scenarios)}, N={N})...")
@@ -793,14 +794,12 @@ if __name__ == "__main__":
         print("Usage: python 2SP.py <json_file> [n_scenarios] [time_limit_s]")
         sys.exit(1)
 
-    full_data, D_real, E_real, scenarios_by_stop, delta_file = load_instance_json(
-        json_file)
+    full_data, D_real, E_real, delta_file = load_instance_json(json_file)
 
     results = run_2sp(
         full_data         = full_data,
         D_real            = D_real,
         E_real            = E_real,
-        scenarios_by_stop = scenarios_by_stop,
         n_scenarios       = n_scenarios,
         delta             = delta_file,
         time_limit        = time_limit,

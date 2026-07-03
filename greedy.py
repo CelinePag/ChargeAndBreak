@@ -292,6 +292,59 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# NOMINAL ARRIVAL-TIME PASS (used to centre time windows before D_real is drawn)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_nominal_arrivals(full_data: dict) -> list[float]:
+    """
+    Run the greedy policy with nominal travel times/energies (full_data["D"],
+    full_data["E"]) and no time-window constraints, returning the absolute
+    arrival time (h) at every stop 0..N.
+
+    This is a stripped-down version of run_greedy's main loop: no file I/O,
+    no oracle validation, no plotting.  It exists so that instance_io.py can
+    obtain a realistic per-customer arrival estimate to centre time windows
+    on, without paying for a full simulation + MILP-oracle run per instance.
+
+    Returns
+    -------
+    list[float] -- vehicle.t_arr_history, length N+1 (index i = arrival at stop i)
+    """
+    N     = full_data["N"]
+    D_nom = full_data["D"]
+    E_nom = full_data["E"]
+
+    vehicle = BEHDV(full_data)
+    for stop in range(N):
+        action, _ = greedy_decision(full_data, stop, vehicle)
+        dur       = _greedy_durations(full_data, stop, action, vehicle)
+        brk       = action.get("break_type")
+        rst       = action.get("rest_type")
+        mock_sol  = dict(
+            feasible = True,
+            sol = [dict(
+                i    = 0,
+                taub = dur["taub"], tauc = dur["tauc"],
+                taur = dur["taur"], tauq = dur["tauq"],
+                y    = action.get("y", 0),
+                b45  = int(brk == "b45"), b15 = int(brk == "b15"),
+                b30  = int(brk == "b30"),
+                rho1 = int(rst == "r1"),  rho2 = int(rst == "r2"),
+                is_C = (stop in set(full_data["C"])),
+                is_K = (stop in set(full_data["K"])),
+            )],
+        )
+        vehicle.advance(
+            action   = action,
+            D_next   = float(D_nom.get(stop, 0.0)),
+            E_next   = float(E_nom.get(stop, 0.0)),
+            milp_sol = mock_sol,
+        )
+
+    return list(vehicle.t_arr_history)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN GREEDY SIMULATION LOOP
 # ══════════════════════════════════════════════════════════════════════════════
 

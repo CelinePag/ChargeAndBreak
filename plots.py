@@ -49,8 +49,13 @@ COL = dict(
     rest    = "#8E44AD",
     mstop   = "#95A5A6",   # maneuver/setup overhead at CS stop (v·Mstop)
     mseq    = "#5D6D7E",   # sequential reposition overhead (sigma·Mseq)
+    window  = "#17A2B8",   # customer arrival-time window [Wha, Whf]
 )
 EPS = 1e-3
+
+# Window widths above this (hours) are treated as unconstrained ("none" window
+# class, Whf ≈ Wha + 2e7) and are not drawn.
+WINDOW_MAX_DRAW_WIDTH_H = 100.0
 
 FIGURES_DIR = "figures"
 
@@ -62,16 +67,46 @@ def _ensure_fig_dir():
 # ── Low-level drawing primitives ─────────────────────────────────────────────
 
 def _bar(ax, start, dur, y, h, color, label=None, fontsize=7, text_color="white"):
-    """Draw one horizontal Gantt bar; skip if duration is negligible."""
+    """Draw one horizontal Gantt bar; skip if duration is negligible.
+
+    The label is drawn rotated 90° so it stays readable inside narrow bars
+    (adjacent short activities used to smear their horizontal labels into
+    each other, e.g. "→24→2526→27→setup").
+    """
     if dur < EPS:
         return
     ax.barh(y, dur, left=start, height=h, color=color,
             edgecolor="white", linewidth=0.3)
     if dur > 0.08 and label:
         ax.text(start + dur / 2, y, label,
-                ha="center", va="center",
+                ha="center", va="center", rotation=90,
                 fontsize=fontsize, color=text_color,
                 fontweight="bold", clip_on=True)
+
+
+def _draw_time_window(ax, wha, whf, y, h, color=None):
+    """
+    Visualise a customer's feasible arrival window [wha, whf] on a Gantt row:
+    a light shaded rectangle spanning the row behind its bars, plus a thin
+    bracket with end-ticks just below the row marking the exact bounds.
+
+    Skipped when the window is effectively unconstrained (width exceeds
+    WINDOW_MAX_DRAW_WIDTH_H, i.e. window_class="none").
+    """
+    if wha is None or whf is None:
+        return
+    color = color or COL["window"]
+    width = whf - wha
+    if width <= 0 or width > WINDOW_MAX_DRAW_WIDTH_H:
+        return
+    ax.add_patch(mpatches.Rectangle((wha, y - h / 2), width, h,
+                                    facecolor=color, edgecolor="none",
+                                    alpha=0.12, zorder=0.4))
+    y_line = y - h / 2 - 0.07
+    tick   = h * 0.16
+    ax.plot([wha, whf], [y_line, y_line], color=color, lw=1.4, alpha=0.85, zorder=6)
+    ax.plot([wha, wha], [y_line - tick, y_line + tick], color=color, lw=1.4, alpha=0.85, zorder=6)
+    ax.plot([whf, whf], [y_line - tick, y_line + tick], color=color, lw=1.4, alpha=0.85, zorder=6)
 
 
 def _shade_tod(ax, t_start, t_end):
@@ -180,6 +215,8 @@ def plot_solution(sol, data, title="solution"):
         mseq_t   = 0.0
 
         if is_C:
+            _draw_time_window(ax, data.get("Wha", {}).get(i),
+                              data.get("Whf", {}).get(i), Y, H)
             svc = data["S"].get(i, 0)
             _bar(ax, t, svc, Y, H, COL["service"], label=f"C{i}", fontsize=7)
             t += svc
@@ -230,11 +267,12 @@ def plot_solution(sol, data, title="solution"):
 
         typ = "●C" if is_C else ("▲K" if is_K else ("O" if i == 0 else "D"))
         ax.text(s["ta"], Y + H / 2 + 0.06, f"{typ}{i}",
-                ha="left", va="bottom", fontsize=6,
-                color="#444", rotation=45, clip_on=True)
+                ha="center", va="bottom", fontsize=6,
+                color="#444", rotation=90, clip_on=True)
 
     _draw_vlines(ax, vlines)
     ax.set_yticks([])
+    ax.set_ylim(0.0, 1.0)   # room for stop labels above bars, windows below
     ax.set_xlim(-0.2, tend * 1.02)
     patches = [mpatches.Patch(color=v, label=k.replace("_", "").title())
                for k, v in COL.items()]
@@ -407,6 +445,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         brk_drew = False
 
         if is_C:
+            _draw_time_window(ax1, full_data.get("Wha", {}).get(i),
+                              full_data.get("Whf", {}).get(i), Y, H)
             svc = full_data["S"].get(i, 0.0)
             _bar(ax1, t, svc, Y, H, COL["service"], f"C{i}", fontsize=7)
             t += svc
@@ -460,8 +500,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
 
         typ = "●" if is_C else ("▲" if is_K else "O")
         ax1.text(ta_i, Y + H / 2 + 0.06, f"{typ}{i}",
-                 ha="left", va="bottom", fontsize=6,
-                 color="#444", rotation=45, clip_on=True)
+                 ha="center", va="bottom", fontsize=6,
+                 color="#444", rotation=90, clip_on=True)
 
     # Shade look-ahead windows
     LA_PENALTY = INFEASIBLE_PENALTY / 2
@@ -475,6 +515,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
                         color="navy", zorder=0, lw=0)
 
     ax1.set_yticks([])
+    ax1.set_ylim(0.0, 1.0)   # room for stop labels above bars, windows below
     ax1.set_xlim(-0.1, tend_all * 1.04)
     patches = [mpatches.Patch(color=v, label=k.replace("_", " ").title())
                for k, v in COL.items()]
@@ -514,6 +555,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
             mseq_or  = 0.0
 
             if is_C:
+                _draw_time_window(ax_or, full_data.get("Wha", {}).get(i),
+                                  full_data.get("Whf", {}).get(i), Yo, Ho)
                 svc = full_data["S"].get(i, 0.0)
                 _bar(ax_or, t, svc, Yo, Ho, COL["service"], f"C{i}", fontsize=7)
                 t += svc
@@ -572,8 +615,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
 
             typ = "●" if is_C else ("▲" if is_K else "O")
             ax_or.text(ta_or, Yo + Ho / 2 + 0.06, f"{typ}{i}",
-                       ha="left", va="bottom", fontsize=6,
-                       color="#444", rotation=45, clip_on=True)
+                       ha="center", va="bottom", fontsize=6,
+                       color="#444", rotation=90, clip_on=True)
 
         ax_or.axvline(oracle_obj, color="green",  lw=2, ls="-",  alpha=0.9,
                       label=f"oracle arrival {oracle_obj:.2f}h")
@@ -585,6 +628,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
                    fontsize=12, color="grey")
 
     ax_or.set_yticks([])
+    ax_or.set_ylim(0.0, 1.0)   # room for stop labels above bars, windows below
     ax_or.legend(fontsize=8, loc="upper right")
 
     # ── Panel 3: SOC ─────────────────────────────────────────────────────
