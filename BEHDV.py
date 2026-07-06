@@ -311,6 +311,12 @@ class BEHDV:
         sw_prop constraints, evaluated with the ACTUAL travel time so that
         the simulation reflects true uncertainty.
 
+        If ``self.stop`` is a customer, the realized arrival is checked
+        against its time window [Wha, Whf]: arriving after Whf raises
+        ValueError (infeasible); arriving before Wha forces a wait that is
+        folded into taub_exec and, once long enough, counts as a qualifying
+        break/rest for HoS purposes (see step 1.5 / step 6 below).
+
         Parameters
         ----------
         action            : dict with keys y, break_type, rest_type
@@ -371,6 +377,28 @@ class BEHDV:
             taub_exec = (max(0, full_data["Tb45"] - tauc_exec) if brk == "b45" else
                          max(0, full_data["Tb15"] - tauc_exec) if brk == "b15" else
                          max(0, full_data["Tb30"] - tauc_exec) if brk == "b30" else 0.0)
+
+        # ── 1.5. Time-window compliance (customer stops only) ──────────────────
+        # Verify the REALIZED arrival (self.t_arr, computed with the actual
+        # travel time of the previous leg) satisfies [Wha, Whf].  Arriving
+        # after Whf is infeasible.  Arriving before Wha forces the driver to
+        # wait before service can start; that idle time is folded into
+        # taub_exec so it shows up in td, and — once it alone reaches a
+        # qualifying break/rest duration — it resets HoS accumulators the
+        # same way a scheduled break/rest would (see step 6).
+        forced_wait = 0.0
+        if is_cust:
+            Wha_stop = full_data.get("Wha", {}).get(stop)
+            Whf_stop = full_data.get("Whf", {}).get(stop)
+            if Whf_stop is not None and self.t_arr > Whf_stop + 1e-3:
+                raise ValueError(
+                    f"[BEHDV.advance] Time-window violation at stop {stop}: "
+                    f"arrival ta={self.t_arr:.3f}h > Whf={Whf_stop:.3f}h "
+                    f"— infeasible (too late)."
+                )
+            if Wha_stop is not None and self.t_arr < Wha_stop - 1e-3:
+                forced_wait = Wha_stop - self.t_arr
+                taub_exec += forced_wait
 
         # ── 2. Activity indicator (v) and sequential-mode indicator (sigma) ─────
         _brk_active = brk in ("b45", "b15", "b30")
@@ -436,8 +464,17 @@ class BEHDV:
         # ── 6. HoS accumulator update ─────────────────────────────────────────
         # ri  = True iff this stop resets consecutive-driving (b45, b30, or rest)
         # rho = True iff this stop resets shift accumulators (any rest)
-        ri  = (brk in ("b45", "b30")) or (rst in ("r1", "r2"))
-        rho = rst in ("r1", "r2")
+        # An unscheduled forced_wait (step 1.5) qualifies as a break/rest in
+        # its own right once it alone reaches the matching HoS threshold —
+        # EU 561/2006 doesn't require the interruption to be pre-planned.
+        _no_planned_activity = not (_brk_active or _rst_active)
+        _forced_break = (forced_wait > 0 and _no_planned_activity
+                         and taub_exec >= full_data["Tb45"] - 1e-3)
+        _forced_rest2 = (forced_wait > 0 and _no_planned_activity
+                         and taub_exec >= full_data["Tr2"] - 1e-3)
+
+        ri  = (brk in ("b45", "b30")) or (rst in ("r1", "r2")) or _forced_break or _forced_rest2
+        rho = (rst in ("r1", "r2")) or _forced_rest2
 
         cd_dep = 0.0 if ri  else self.cd
         sd_dep = 0.0 if rho else self.sd
@@ -469,7 +506,7 @@ class BEHDV:
         else:
             phi_new = self.phi
 
-        rho2_new = self.rho2_used + (1 if rst == "r2" else 0)
+        rho2_new = self.rho2_used + (1 if (rst == "r2" or _forced_rest2) else 0)
 
         # Extended shift driving exception (EU 561/2006, Art. 6(2)):
         # count shifts where sd at rest time exceeded the normal 9h limit.

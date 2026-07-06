@@ -128,6 +128,18 @@ def check_simulation_feasibility(results: dict, full_data: dict,
             issues.append(
                 f"stop {s:>2}: soc={state.e_arr:.1f}kWh < Emin={Emin}kWh")
 
+        if is_cust:
+            Wha_s = full_data.get("Wha", {}).get(s)
+            Whf_s = full_data.get("Whf", {}).get(s)
+            if Whf_s is not None and state.t_arr > Whf_s + tol:
+                issues.append(
+                    f"stop {s:>2}: arrival ta={state.t_arr:.3f}h > "
+                    f"Whf={Whf_s:.3f}h (time window — too late)")
+            if Wha_s is not None and state.t_arr < Wha_s - tol:
+                issues.append(
+                    f"stop {s:>2}: arrival ta={state.t_arr:.3f}h < "
+                    f"Wha={Wha_s:.3f}h (time window — too early, unhandled wait)")
+
         # Check departure energy using realized energy (derived from SOC history).
         # Using full_data["E"] (nominal) here would cause false positives when
         # realized energy differs from nominal — the BEHDV stores the realized
