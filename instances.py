@@ -82,9 +82,12 @@ from settings import (
     V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS, TBAR,
     Tb45, Tb15, Tb30, Tr1, Tr2,
     Tdrv_cons, Tdrv_sh1, Tdrv_sh2, Twrk_cons1, Twrk_cons2, Twrk_sh,
+    T_SPR1, T_SPR2, TWK_60, TWK_DRV, RHO_BAR, EXT_BAR, BETA_TW,
     QUEUE_WAIT_MEAN_MIN, QUEUE_WAIT_STD_MIN,
-    M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H,
+    M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H, M_LAYBY_H,
+    LAYBY_SPACING_KM, LAYBY_MIN_LEG_H,
     SERVICE_TIME_H, CS_SPACING_KM, T_START as _T_START,
+    CHARGER_POWER_BASE_KW, scale_tbar,
 )
 
 
@@ -141,12 +144,44 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# C1 — HORIZON BIG-M  H  (valid upper bound on any feasible arrival span)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1, delta_pad: float = 0.5) -> float:
+    """
+    C1 — a valid big-M H bounding the total route duration (arrival minus t0).
+
+    There is NO arrival deadline in the model; H is used ONLY as the big-M in
+    the window indicators (t_a ≥ W_a − H·δ, t_a ≤ W_f + H·δ) and the rest
+    bound (τ_r ≤ H·ρ).  It must genuinely upper-bound any feasible arrival:
+
+        H = Σ_i D_i·(1 + delta_pad)                (driving, worst-inflated)
+            + Σ_i S_i + Σ_i Q_i + Σ_i M_stop_i     (service, queue, maneuver)
+            + (N + 1)·T_rst_1                       (≤ one 11 h rest per stop)
+
+    The rest term is deliberately loose (each stop can host at most one
+    break/rest by (23), so N+1 rests of 11 h dominates every break too),
+    keeping H valid for every schedule the solver can produce — optimal or
+    not — which is what a big-M requires.  delta_pad = 0.5 covers travel
+    inflation well beyond the base δ = 0.15 support.
+    """
+    D_total = sum(D.get(i, 0.0) for i in range(N))
+    return (D_total * (1.0 + delta_pad)
+            + sum(S.values()) + sum(Q.values()) + sum(M_stop.values())
+            + (N + 1) * Tr1)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # make_data — CANONICAL DATA DICT CONSTRUCTOR
 # ══════════════════════════════════════════════════════════════════════════════
 
 def make_data(I, C, K, D, E, Wha, Whf, label, title,
               km=None, Bcap=BATTERY_CAPACITY, Q=None, M_man_h: float = M_MAN_DEFAULT_H,
-              rng: np.random.Generator | None = None) -> dict:
+              rng: np.random.Generator | None = None,
+              L=None, T_dead: float | None = None,
+              charger_power_kw: float | None = None,
+              hard_tw: bool = False,
+              beta_tw: float = BETA_TW) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -193,15 +228,41 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     -------
     dict — see module docstring for full key listing.
 
+    L     : list[int] or None
+            Layby (rest-area) stop indices (M8).  Break/rest-only stops:
+            no service, no charging.  Default None = no laybys.
+    T_dead : float or None
+            Hard deadline at the destination (absolute hours) — constraint
+            (R6).  None = no deadline.
+    charger_power_kw : float or None
+            Average charger power (kW) for the I2 sensitivity axis.  Rescales
+            the PWL time breakpoints; None keeps the 200 kW base curve.
+    hard_tw : bool
+            True → customer windows are hard (tight-slot sensitivity).
+            False (default) → soft windows with the fixed out-of-window
+            penalty delta (TW2).
+    beta_tw : float
+            Fixed out-of-window service penalty β (h-equivalent per missed
+            window, TW2).
+
     Raises
     ------
-    AssertionError if C and K are not disjoint or do not cover {1..N-1}.
+    AssertionError if C, K, L are not disjoint or do not cover {1..N-1}.
     """
     N    = max(I)
+    L    = list(L) if L is not None else []
 
-    assert set(C) | set(K) == set(I) - {0, N}, (
-        "C ∪ K must equal the intermediate stops {1..N-1}")
+    assert set(C) | set(K) | set(L) == set(I) - {0, N}, (
+        "C ∪ K ∪ L must equal the intermediate stops {1..N-1}")
     assert not (set(C) & set(K)), "C and K must be disjoint"
+    assert not ((set(C) | set(K)) & set(L)), "L must be disjoint from C and K"
+
+    # M9: instance-generation guard — each route must fit between two weekly
+    # rests, so weekly driving caps never bind (paper §3.4(a)).
+    _D_total = sum(D.get(i, 0.0) for i in range(N))
+    assert _D_total <= TWK_DRV + 1e-9, (
+        f"total nominal driving {_D_total:.1f}h exceeds the weekly cap "
+        f"{TWK_DRV}h — regenerate the instance (M9)")
 
     # Queue times at CS stops (lognormal distribution)
     mu    = np.log(QUEUE_WAIT_MEAN_MIN**2 / np.sqrt(QUEUE_WAIT_STD_MIN**2 + QUEUE_WAIT_MEAN_MIN**2))
@@ -218,13 +279,15 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     M_man  = {i: float(M_man_h) for i in range(N + 1)}   # kept for compat
     M_stop = {i: M_STOP_H for i in K}
     M_seq  = {i: M_SEQ_H  for i in K}
+    M_lay  = {i: M_LAYBY_H for i in L}   # parking overhead at layby stops (M8)
 
     S    = {c: SERVICE_TIME_H for c in C}
     E0   = Bcap
     Ecap = Bcap
     Emin = SOC_MIN_FRAC * Bcap
     Ebar = {r: EBAR_FRACS[r] * Bcap for r in EBAR_FRACS}
-    Tbar = dict(TBAR)
+    # I2: rescale the PWL charging-time breakpoints to the requested power class
+    Tbar = (scale_tbar(charger_power_kw) if charger_power_kw else dict(TBAR))
 
     R    = sorted(Ebar.keys())
     Rseg = R[1:]
@@ -243,14 +306,21 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     Wha_abs = {k: v + _T_START for k, v in Wha.items()}
     Whf_abs = {k: v + _T_START for k, v in Whf.items()}
 
-    return dict(
+    # C1 — horizon big-M (valid upper bound on the route-duration span)
+    H_bigM = compute_horizon_bigM(N, D, S, Q_nom, M_stop, Tr1)
+
+    data = dict(
         label=label, title=title,
-        N=N, I=I, C=C, K=K, R=R, Rseg=Rseg,
-        Q=Q_nom, M=M_man, M_stop=M_stop, M_seq=M_seq,
+        N=N, I=I, C=C, K=K, L=L, R=R, Rseg=Rseg,
+        Q=Q_nom, M=M_man, M_stop=M_stop, M_seq=M_seq, M_lay=M_lay,
         D=D, E=E, km=km_dict, S=S,
         E0=E0, Ecap=Ecap, Emin=Emin,
         Ebar=Ebar, Tbar=Tbar,
         Wha=Wha_abs, Whf=Whf_abs,
+        T_dead=T_dead,          # retained for I/O compatibility; NOT used as a
+                                # constraint (C1: there is no arrival deadline)
+        H=H_bigM,               # C1 window / rest big-M
+        hard_tw=bool(hard_tw), beta=float(beta_tw),
         T_hor=T_hor, T_START=_T_START,
         lb_t=lb_t, ub_t=ub_t,
         # Break / rest minimum durations (EU Regulation 561/2006)
@@ -259,9 +329,75 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
         # HoS accumulator limits
         Tdrv_cons=Tdrv_cons,   Tdrv_sh1=Tdrv_sh1,   Tdrv_sh2=Tdrv_sh2,
         Twrk_cons1=Twrk_cons1, Twrk_cons2=Twrk_cons2, Twrk_sh=Twrk_sh,
-        # Big-M constants for HoS linearisation (must be ≥ respective limit)
-        M_drv=Tdrv_cons, M_sd=Tdrv_sh1, M_sw=Twrk_sh, M_big=1000.0,
+        # M5 shift spread limits / M9 weekly caps and exception budgets
+        Tspr1=T_SPR1, Tspr2=T_SPR2, Twk60=TWK_60,
+        rho_bar=RHO_BAR, ext_bar=EXT_BAR,
+        # Big-M constants for HoS linearisation (must be ≥ respective limit).
+        # M_sd covers the extended 10 h shift (M6); M_sw and M_h cover the
+        # 15 h spread ceiling (M5) which bounds both sw and h.
+        M_drv=Tdrv_cons, M_sd=Tdrv_sh2, M_sw=T_SPR2, M_h=T_SPR2, M_big=1000.0,
     )
+    return data
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LAYBY INSERTION (M8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def insert_laybys(I, C, K, D, km,
+                  spacing_km: float = LAYBY_SPACING_KM,
+                  min_leg_h: float = LAYBY_MIN_LEG_H):
+    """
+    M8 — Insert layby (rest-area) nodes along long legs.
+
+    On every leg with nominal duration > `min_leg_h`, layby nodes are inserted
+    at (roughly) every `spacing_km` km, splitting the leg into equal segments.
+    Laybys allow breaks/rests but no charging and no service.
+
+    Parameters use the ORIGINAL indexing; the function reindexes everything.
+
+    Returns
+    -------
+    (I2, C2, K2, L2, D2, E2, km2) — reindexed stop sets and leg dicts.
+    Leg energies E2 are recomputed from the segment length at the leg's
+    implied nominal speed.
+    """
+    N     = max(I)
+    C_set = set(C)
+    K_set = set(K)
+
+    C2, K2, L2 = [], [], []
+    D2, E2, km2 = {}, {}, {}
+    idx = 0
+    for i in range(N):
+        # classify original stop i under the new numbering
+        if i in C_set:
+            C2.append(idx)
+        elif i in K_set:
+            K2.append(idx)
+
+        leg_km = km.get(i, D.get(i, 0.0) * V_NOM)
+        leg_h  = D.get(i, 0.0)
+        v_leg  = leg_km / leg_h if leg_h > 1e-9 else V_NOM
+
+        if leg_h > min_leg_h and leg_km > spacing_km:
+            n_lay  = max(1, int(math.ceil(leg_km / spacing_km)) - 1)
+            seg_km = leg_km / (n_lay + 1)
+            for j in range(n_lay + 1):
+                D2[idx]  = seg_km / v_leg
+                km2[idx] = seg_km
+                E2[idx]  = seg_km * _ecr(v_leg)
+                idx += 1
+                if j < n_lay:
+                    L2.append(idx)
+        else:
+            D2[idx]  = leg_h
+            km2[idx] = leg_km
+            E2[idx]  = leg_km * _ecr(v_leg)
+            idx += 1
+
+    I2 = list(range(idx + 1))
+    return I2, C2, K2, L2, D2, E2, km2
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,7 +407,11 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
 def instance_realistic(route_class: str = "medium",
                        clusters: int = 3,
                        customers_class: str = "few",
-                       rng: np.random.Generator | None = None) -> dict:
+                       rng: np.random.Generator | None = None,
+                       cs_spacing_km: float | None = None,
+                       charger_power_kw: float | None = None,
+                       add_laybys: bool = True,
+                       layby_spacing_km: float = LAYBY_SPACING_KM) -> dict:
     """
     Randomly generated long-haul route with realistic geometry.
 
@@ -296,7 +436,7 @@ def instance_realistic(route_class: str = "medium",
     distances = {"short": [800, 1200], "medium": [1500, 2500], "long": [3000, 4000]}
     customers = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
     average_speed    = V_NOM
-    CS_spacing       = CS_SPACING_KM
+    CS_spacing       = int(cs_spacing_km) if cs_spacing_km else CS_SPACING_KM
     Battery_capacity = BATTERY_CAPACITY
 
     nb_customers   = random.randint(*customers[customers_class])
@@ -348,13 +488,21 @@ def instance_realistic(route_class: str = "medium",
     I.append(I_nb)
 
     km = {i: average_speed * D[i] for i in D}
+
+    # M8 — optionally insert layby (rest-area) nodes along long legs
+    L = []
+    if add_laybys:
+        I, C, K, L, D, E, km = insert_laybys(
+            I, C, K, D, km, spacing_km=layby_spacing_km)
+
     return make_data(
-        I=I, C=C, K=K, D=D, E=E, km=km, Bcap=Battery_capacity,
+        I=I, C=C, K=K, L=L, D=D, E=E, km=km, Bcap=Battery_capacity,
         Wha={c: 0        for c in C},
         Whf={c: 20000000 for c in C},
         label="realistic — randomly generated long-haul route",
         title=f"realistic_{route_class}_{customers_class}_{clusters}",
         rng=rng,
+        charger_power_kw=charger_power_kw,
     )
 
 

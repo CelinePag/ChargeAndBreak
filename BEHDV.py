@@ -160,8 +160,8 @@ def _charging_time_needed(ea: float, full_data: dict) -> float:
 _Snapshot = namedtuple(
     "_Snapshot",
     ["stop", "t_arr", "e_arr", "cd", "sd", "sw", "phi", "rho2_used",
-     "ext_shift_used"],
-    defaults=(0,),   # ext_shift_used defaults to 0 for backward compatibility
+     "ext_shift_used", "h"],
+    defaults=(0, 0.0),   # ext_shift_used / h default for backward compatibility
 )
 """
 Immutable per-stop snapshot.  Returned by BEHDV.states and consumed by
@@ -206,6 +206,7 @@ class BEHDV:
         self.cd_history             : list[float] = [0.0]
         self.sd_history             : list[float] = [0.0]
         self.sw_history             : list[float] = [0.0]
+        self.h_history              : list[float] = [0.0]   # M5 shift spread
         self.phi_history            : list[int]   = [0]
         self.rho2_used_history      : list[int]   = [0]
         self.ext_shift_used_history : list[int]   = [0]
@@ -215,6 +216,17 @@ class BEHDV:
         self.durations     : list[dict]  = []   # {taub, tauc, taur, tauq}
         self.td_list       : list[float] = []   # departure times (h)
         self.D_actual_list : list[float] = []   # actual leg travel times (h)
+
+        # ── S2: violation semantics & metrics ─────────────────────────────────
+        # Because uncertainty is revealed only after departure, a leg may
+        # retroactively cause a violation that no stop-level action can
+        # repair.  The simulator RECORDS these (rather than raising) and the
+        # run is marked infeasible for the violating method.
+        self.violations    : list[dict]  = []   # {type, stop, amount, detail}
+        # TW2/SIM2: out-of-window service starts.  No waiting is ever
+        # inserted (SIM1): service starts at arrival; an early or late
+        # arrival records delta = 1 with the miss direction and magnitude.
+        self.tw_misses     : dict[int, dict] = {}  # {stop: {type, amount}}
 
     # ── Current-state scalar properties ──────────────────────────────────────
 
@@ -236,6 +248,8 @@ class BEHDV:
     def rho2_used(self) -> int:   return self.rho2_used_history[-1]
     @property
     def ext_shift_used(self) -> int: return self.ext_shift_used_history[-1]
+    @property
+    def h(self) -> float: return self.h_history[-1]
 
     # ── Derived properties ────────────────────────────────────────────────────
 
@@ -262,6 +276,7 @@ class BEHDV:
                 phi            = self.phi_history[k],
                 rho2_used      = self.rho2_used_history[k],
                 ext_shift_used = self.ext_shift_used_history[k],
+                h              = self.h_history[k],
             )
             for k in range(len(self.stop_history))
         ]
@@ -281,6 +296,7 @@ class BEHDV:
             cd  = self.cd,
             sd  = self.sd,
             sw  = self.sw,
+            h   = self.h,
             phi = self.phi,
         )
 
@@ -312,10 +328,10 @@ class BEHDV:
         the simulation reflects true uncertainty.
 
         If ``self.stop`` is a customer, the realized arrival is checked
-        against its time window [Wha, Whf]: arriving after Whf raises
-        ValueError (infeasible); arriving before Wha forces a wait that is
-        folded into taub_exec and, once long enough, counts as a qualifying
-        break/rest for HoS purposes (see step 1.5 / step 6 below).
+        against its time window [Wha, Whf]: service starts immediately at
+        arrival either way (SIM1 — no waiting is ever inserted); an arrival
+        outside the window records an early/late window miss (delta = 1,
+        fixed penalty) in ``self.tw_misses`` (see step 1.5 below).
 
         Parameters
         ----------
@@ -334,8 +350,10 @@ class BEHDV:
         N         = full_data["N"]
         C_set     = set(full_data["C"])
         K_set     = set(full_data["K"])
+        L_set     = set(full_data.get("L", []))
         is_CS     = stop in K_set
         is_cust   = stop in C_set
+        is_lay    = stop in L_set                 # M8: layby / rest-area node
         S_stop    = full_data["S"].get(stop, 0.0)
 
         # sequence of actions at a stop:
@@ -379,26 +397,27 @@ class BEHDV:
                          max(0, full_data["Tb30"] - tauc_exec) if brk == "b30" else 0.0)
 
         # ── 1.5. Time-window compliance (customer stops only) ──────────────────
-        # Verify the REALIZED arrival (self.t_arr, computed with the actual
-        # travel time of the previous leg) satisfies [Wha, Whf].  Arriving
-        # after Whf is infeasible.  Arriving before Wha forces the driver to
-        # wait before service can start; that idle time is folded into
-        # taub_exec so it shows up in td, and — once it alone reaches a
-        # qualifying break/rest duration — it resets HoS accumulators the
-        # same way a scheduled break/rest would (see step 6).
-        forced_wait = 0.0
+        # SIM1 (v3): NO waiting logic.  Service starts immediately at
+        # arrival, whether or not the window is open.  An arrival outside
+        # [Wha, Whf] — early or late — sets delta = 1 (fixed penalty in the
+        # objective) and is logged with its direction and magnitude (SIM2).
+        # Under data["hard_tw"]=True it is additionally recorded as a
+        # violation (hard-window sensitivity).
         if is_cust:
             Wha_stop = full_data.get("Wha", {}).get(stop)
             Whf_stop = full_data.get("Whf", {}).get(stop)
+            miss = None
             if Whf_stop is not None and self.t_arr > Whf_stop + 1e-3:
-                raise ValueError(
-                    f"[BEHDV.advance] Time-window violation at stop {stop}: "
-                    f"arrival ta={self.t_arr:.3f}h > Whf={Whf_stop:.3f}h "
-                    f"— infeasible (too late)."
-                )
-            if Wha_stop is not None and self.t_arr < Wha_stop - 1e-3:
-                forced_wait = Wha_stop - self.t_arr
-                taub_exec += forced_wait
+                miss = dict(type="late", amount=self.t_arr - Whf_stop)
+            elif Wha_stop is not None and self.t_arr < Wha_stop - 1e-3:
+                miss = dict(type="early", amount=Wha_stop - self.t_arr)
+            if miss is not None:
+                self.tw_misses[stop] = miss
+                if full_data.get("hard_tw", False):
+                    self.violations.append(dict(
+                        type="tw_miss", stop=stop, amount=miss["amount"],
+                        detail=(f"{miss['type']} arrival {self.t_arr:.3f}h "
+                                f"outside [{Wha_stop:.3f}, {Whf_stop:.3f}]h")))
 
         # ── 2. Activity indicator (v) and sequential-mode indicator (sigma) ─────
         _brk_active = brk in ("b45", "b15", "b30")
@@ -407,7 +426,9 @@ class BEHDV:
         if milp_sol is not None and milp_sol.get("sol"):
             sigma = int(s0.get("sigma", 0))
         else:
-            sigma = 0  # default concurrent mode
+            # M4: charging co-located with a REST is forced sequential; a
+            # break may run in parallel (concurrent) by default.
+            sigma = 1 if (y and _rst_active) else 0
 
         # v=1 whenever any activity (charging, break, rest) occurs at a CS stop
         v_val = int(is_CS and (bool(y) or _brk_active or _rst_active))
@@ -417,21 +438,31 @@ class BEHDV:
         mstop_time = v_val * M_stop_val
         mseq_time  = sigma * M_seq_val
 
+        # M8: layby parking overhead — charged once when any break/rest is
+        # taken at a layby (mirrors the model term M_lay·Σx, 2SP/MILP).
+        M_lay_val  = full_data.get("M_lay", {}).get(stop, 0.0) if is_lay else 0.0
+        lay_active = int(is_lay and (_brk_active or _rst_active))
+        mlay_time  = lay_active * M_lay_val
+
         # ── 3. Departure time ─────────────────────────────────────────────────
         # CS:       ta + v·Mstop + Q·y + tauc + taub + taur + sigma·Mseq
         # Customer: ta + S + taub + taur  (no maneuver overhead)
+        # Layby:    ta + Mlay·(brk|rst) + taub + taur  (no service, no charging)
         if is_CS:
             td = (self.t_arr + mstop_time + tauq_exec + tauc_exec
                   + taub_exec + taur_exec + mseq_time)
         elif is_cust:
             td = self.t_arr + S_stop + taub_exec + taur_exec
+        elif is_lay:
+            td = self.t_arr + mlay_time + taub_exec + taur_exec
         else:
             td = self.t_arr
 
         self.actions.append(action)
         self.durations.append(
             dict(taub=taub_exec, tauc=tauc_exec, taur=taur_exec, tauq=tauq_exec,
-                 sigma=sigma, v=v_val, mstop=mstop_time, mseq=mseq_time)
+                 sigma=sigma, v=v_val, mstop=mstop_time, mseq=mseq_time,
+                 mlay=mlay_time)
         )
         self.td_list.append(td)
 
@@ -454,27 +485,24 @@ class BEHDV:
 
         e_new_raw = e_dep - E_act
         if e_new_raw < full_data["Emin"] - 1e-3:
-            raise ValueError(
-                f"[BEHDV.advance] Energy violation on leg {stop}→{stop+1}: "
-                f"ed={e_dep:.2f} − E={E_act:.2f} = {e_new_raw:.2f} kWh "
-                f"< Emin={full_data['Emin']:.2f} kWh.  "
-                f"Clipping to Emin — check scenario feasibility."
-            )
+            # S2: stranding event — recorded, run marked infeasible; the SOC
+            # is clipped to Emin so the simulation can continue and the full
+            # trajectory / metrics remain observable.
+            self.violations.append(dict(
+                type="stranding", stop=stop + 1,
+                amount=full_data["Emin"] - e_new_raw,
+                detail=(f"leg {stop}->{stop+1}: ed={e_dep:.2f} - "
+                        f"E={E_act:.2f} = {e_new_raw:.2f} kWh "
+                        f"< Emin={full_data['Emin']:.2f} kWh")))
+            e_new_raw = full_data["Emin"]
 
         # ── 6. HoS accumulator update ─────────────────────────────────────────
         # ri  = True iff this stop resets consecutive-driving (b45, b30, or rest)
         # rho = True iff this stop resets shift accumulators (any rest)
-        # An unscheduled forced_wait (step 1.5) qualifies as a break/rest in
-        # its own right once it alone reaches the matching HoS threshold —
-        # EU 561/2006 doesn't require the interruption to be pre-planned.
-        _no_planned_activity = not (_brk_active or _rst_active)
-        _forced_break = (forced_wait > 0 and _no_planned_activity
-                         and taub_exec >= full_data["Tb45"] - 1e-3)
-        _forced_rest2 = (forced_wait > 0 and _no_planned_activity
-                         and taub_exec >= full_data["Tr2"] - 1e-3)
-
-        ri  = (brk in ("b45", "b30")) or (rst in ("r1", "r2")) or _forced_break or _forced_rest2
-        rho = (rst in ("r1", "r2")) or _forced_rest2
+        # (v3: the forced-wait qualifying-break logic is gone with SIM1 —
+        # only declared activities reset the accumulators.)
+        ri  = (brk in ("b45", "b30")) or (rst in ("r1", "r2"))
+        rho = rst in ("r1", "r2")
 
         cd_dep = 0.0 if ri  else self.cd
         sd_dep = 0.0 if rho else self.sd
@@ -489,6 +517,8 @@ class BEHDV:
             work_now = (mstop_time + tauq_exec + u_exec + mseq_time) if not rho else 0.0
         elif is_cust:
             work_now = S_stop if not rho else 0.0
+        elif is_lay:
+            work_now = mlay_time if not rho else 0.0   # M8 parking overhead is work
         else:
             work_now = 0.0
 
@@ -498,6 +528,32 @@ class BEHDV:
         sd_new = sd_dep + D_act
         sw_new = sw_dep + D_act   # driving to next stop (work_now already in sw_dep)
 
+        # ── 6.5. Shift spread h (M5/SP2): elapsed time since end of last rest ──
+        # o = on-duty dwell at this stop before the rest.  Single rest-last
+        # convention (v3): breaks/rests follow service at every stop type,
+        # so the rest is always the last activity; a rest resets the spread,
+        # which then accumulates the drive to the next stop.
+        o_dwell = max(0.0, td - self.t_arr - taur_exec)
+        h_new = (0.0 if rho else self.h + o_dwell) + D_act
+
+        # ── 6.6. S2 violation semantics: retroactive mid-leg violations ────────
+        _Tspr2   = full_data.get("Tspr2", 15.0)
+        _sd_lim  = (full_data.get("Tdrv_sh2", 10.0)
+                    if self.ext_shift_used < full_data.get("ext_bar", 2)
+                    else full_data.get("Tdrv_sh1", 9.0))
+        if cd_new > full_data["Tdrv_cons"] + 1e-3:
+            self.violations.append(dict(
+                type="hos_cd", stop=stop + 1, amount=cd_new - full_data["Tdrv_cons"],
+                detail=f"cd={cd_new:.3f}h > {full_data['Tdrv_cons']}h after leg {stop}"))
+        if sd_new > _sd_lim + 1e-3:
+            self.violations.append(dict(
+                type="hos_sd", stop=stop + 1, amount=sd_new - _sd_lim,
+                detail=f"sd={sd_new:.3f}h > {_sd_lim}h after leg {stop}"))
+        if h_new > _Tspr2 + 1e-3:
+            self.violations.append(dict(
+                type="hos_spread", stop=stop + 1, amount=h_new - _Tspr2,
+                detail=f"spread h={h_new:.3f}h > {_Tspr2}h after leg {stop}"))
+
         # ── 7. phi (split-break flag) and rho2_used ───────────────────────────
         if ri or rho:
             phi_new = 0
@@ -506,7 +562,7 @@ class BEHDV:
         else:
             phi_new = self.phi
 
-        rho2_new = self.rho2_used + (1 if (rst == "r2" or _forced_rest2) else 0)
+        rho2_new = self.rho2_used + (1 if rst == "r2" else 0)
 
         # Extended shift driving exception (EU 561/2006, Art. 6(2)):
         # count shifts where sd at rest time exceeded the normal 9h limit.
@@ -525,6 +581,7 @@ class BEHDV:
         self.cd_history.append(cd_new)
         self.sd_history.append(sd_new)
         self.sw_history.append(sw_new)
+        self.h_history.append(h_new)
         self.phi_history.append(phi_new)
         self.rho2_used_history.append(rho2_new)
         self.ext_shift_used_history.append(ext_new)

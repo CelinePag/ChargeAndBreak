@@ -64,6 +64,7 @@ import os
 from typing import Optional
 
 from oracle import oracle_solve, check_simulation_feasibility, \
+                   check_directive_compliance, \
                    print_simulation_log, print_oracle_log
 from plots import plot_simulation_results
 from scenarios import ScenarioTracker
@@ -81,6 +82,7 @@ def finalize_run(
     oracle_tee: bool     = True,
     scores_log: list     = None,
     method_meta: dict    = None,
+    events: dict         = None,
 ) -> dict:
     """
     Shared epilogue executed at the end of every simulation run.
@@ -101,14 +103,18 @@ def finalize_run(
     scores_log   : list — per-stop score lists; empty list for greedy
     method_meta  : dict — extra keys merged into the results JSON
                    (e.g. {"method": "greedy", "charge_frac": 0.4})
+    events       : dict — S1/S2/RH4 event records from the run loop:
+                   interventions, decision_times, cmp_log, repairs,
+                   plan_violations (all optional)
 
     Returns
     -------
     dict — canonical results dict (see module docstring for key listing)
     """
-    arr   = vehicle.t_arr
-    T0    = timing.get("T_START", full_data.get("T_START", 8.0))
-    wall  = timing["wall_clock"]
+    arr    = vehicle.t_arr
+    T0     = timing.get("T_START", full_data.get("T_START", 8.0))
+    wall   = timing["wall_clock"]
+    events = events or {}
 
     def _lp(msg: str):
         if verbose:
@@ -189,6 +195,92 @@ def finalize_run(
     _lp(f"  Scenarios: {scn_path}"
         + (f"  (coverage={coverage:.1%})" if coverage is not None else ""))
 
+    # ── 2.5. S2/S3 metrics block ──────────────────────────────────────────────
+    violations = list(getattr(vehicle, "violations", []))
+    tw_misses  = dict(getattr(vehicle, "tw_misses", {}))
+    dec_times  = list(events.get("decision_times", []))
+    cmp_log    = list(events.get("cmp_log", []))
+
+    # SIM2 — window hit rate and early/late miss split (replaces the v2
+    # lateness-hours metric; the penalty is a fixed indicator, TW2)
+    _n_cust    = len(full_data.get("C", []))
+    _n_early   = sum(1 for m_ in tw_misses.values() if m_.get("type") == "early")
+    _n_late    = sum(1 for m_ in tw_misses.values() if m_.get("type") == "late")
+    _n_miss    = len(tw_misses)
+    _hit_rate  = (1.0 - _n_miss / _n_cust) if _n_cust else None
+
+    _by_type = {}
+    for v in violations:
+        _by_type[v["type"]] = _by_type.get(v["type"], 0) + 1
+
+    # S3: ex-post Directive 2002/15/EC working-time compliance
+    _pre_results = dict(
+        states=vehicle.states, actions=vehicle.actions,
+        durations_list=vehicle.durations,
+        D_actual_list=vehicle.D_actual_list)
+    try:
+        compliance = check_directive_compliance(_pre_results, full_data)
+    except Exception as _ce:
+        compliance = dict(compliant=None, issues=[f"check failed: {_ce}"],
+                          n_shifts=0, max_consec_work=0.0)
+
+    # RH4: LP-vs-MIP agreement summary (only populated for solve_mode="both")
+    if cmp_log:
+        _agree = sum(1 for c in cmp_log if c.get("agree"))
+        _deltas = [c["mip_score_of_lp_choice"] - c["mip_score_of_mip_choice"]
+                   for c in cmp_log
+                   if c.get("mip_score_of_lp_choice") is not None
+                   and not c.get("agree")]
+        cmp_summary = dict(
+            n_stops=len(cmp_log),
+            agreement_rate=_agree / len(cmp_log),
+            mean_mip_delta_when_differ_h=(sum(_deltas) / len(_deltas)
+                                          if _deltas else 0.0))
+    else:
+        cmp_summary = None
+
+    metrics = dict(
+        run_infeasible        = len(violations) > 0,
+        n_violations          = len(violations),
+        violations_by_type    = _by_type,
+        violations            = violations,
+        n_stranding           = _by_type.get("stranding", 0),
+        n_hos_violations      = sum(v for k, v in _by_type.items()
+                                    if k.startswith("hos")),
+        tw_n_customers        = _n_cust,
+        tw_n_misses           = _n_miss,
+        tw_n_early            = _n_early,
+        tw_n_late             = _n_late,
+        tw_hit_rate           = _hit_rate,
+        tw_misses_by_stop     = tw_misses,
+        tw_penalty_h          = float(full_data.get("beta", 2.0)) * _n_miss,
+        n_interventions       = len(events.get("interventions", [])),
+        interventions         = events.get("interventions", []),
+        n_repairs             = len(events.get("repairs", [])),
+        repairs               = events.get("repairs", []),
+        n_plan_violations     = len(events.get("plan_violations", [])),
+        decision_time_mean_s  = (sum(dec_times) / len(dec_times)
+                                 if dec_times else 0.0),
+        decision_time_max_s   = max(dec_times) if dec_times else 0.0,
+        offline_solve_time_s  = (method_meta or {}).get("solve_time"),
+        directive_compliance  = compliance,
+        lp_vs_mip             = cmp_summary,
+    )
+
+    _lp(f"  Metrics  : violations={len(violations)} "
+        f"({', '.join(f'{k}:{v}' for k, v in _by_type.items()) or 'none'})"
+        + (f"  tw_hit={metrics['tw_hit_rate']:.0%}"
+           f" (early={_n_early}, late={_n_late})"
+           if metrics['tw_hit_rate'] is not None else "  tw_hit=n/a")
+        +
+        f"  interventions={metrics['n_interventions']}"
+        f"  repairs={metrics['n_repairs']}")
+    if compliance.get("compliant") is False:
+        _lp(f"  [!] Directive 2002/15/EC compliance issues "
+            f"({len(compliance['issues'])}):")
+        for iss in compliance["issues"][:5]:
+            _lp(f"      {iss}")
+
     # ── 3. Save results JSON ──────────────────────────────────────────────────
     def _ser(o):
         """JSON-safe serialiser for numpy scalars, dicts, lists."""
@@ -217,6 +309,7 @@ def finalize_run(
         ],
         actions          = [_ser(a) for a in vehicle.actions],
         scenario_summary = _ser(scn_summary),
+        metrics          = _ser(metrics),
     )
     if method_meta:
         payload.update(_ser(method_meta))
@@ -242,6 +335,8 @@ def finalize_run(
         total_time       = arr,
         wall_clock       = wall,
         oracle           = oracle,
+        metrics          = metrics,
+        events           = events,
         scenario_tracker = tracker,
         log_path         = paths["log"],
         fig_path         = paths["fig"],

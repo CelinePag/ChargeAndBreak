@@ -28,7 +28,9 @@ Stage decomposition:
         l1/l2/l4, u, p          — linearisation auxiliaries
 
 Objective:
-    min (1/S) Σ_s ta[N, s]    (expected arrival time at destination)
+    min (1/S) Σ_s ( ta[N, s] + β Σ_i delta[i, s] )
+    (expected arrival time + expected fixed window penalties; the
+    out-of-window indicators delta are scenario-indexed outcomes, TW5)
 
 Linking constraints:
     The second-stage break/rest durations are bounded below by the minimum
@@ -37,17 +39,18 @@ Linking constraints:
     HoS accumulator propagation uses scenario travel times D[i,s].
     Charging amount (tauc[i,s]) adapts per scenario via the PWL recourse.
 
-Simulation step (open-loop)
----------------------------
-After solving, a committed schedule is extracted:
-  - First-stage binaries (y, break/rest types) are taken as-is.
-  - Continuous durations (tauc, taub, taur) are averaged across all S scenarios.
-  - sigma is determined by majority vote across scenarios.
-This committed schedule is executed open-loop via BEHDV.advance() with the
-actual realised travel times.  No recourse or re-optimisation occurs; the plan
-does not use D_real at any point.  The only adaptation is clipping tauc to the
-physically feasible charge time given the actual SOC at each CS stop (cannot
-overcharge — this uses observable vehicle state, not future D_real).
+Execution (SP1 — online duration recourse)
+------------------------------------------
+After solving, only the FIRST-STAGE BINARY decisions are retained.  During
+simulation, at each stop the remaining binaries are held fixed and the
+continuous activity durations are re-optimised over [i, N] with the realized
+state and nominal remaining travel times; only the durations at the current
+stop are executed.  If this fixed-structure problem is infeasible, a repair
+MILP in which binary activities may be ADDED but never removed is solved
+(heavily penalising each addition); if repair also fails, the run is recorded
+as a plan violation and the safety supervisor takes over.  See recourse.py.
+The plan's structure is committed offline, its durations adapt online, and
+the repair frequency is itself a reported robustness metric (S2).
 
 Scenarios
 ---------
@@ -81,12 +84,12 @@ from typing import Optional
 
 import pyomo.environ as pyo
 
-from BEHDV     import BEHDV, _charging_time_needed
 from MILP      import (
     _declare_common_params,
     _solve_quiet,
 )
 from scenarios import ScenarioTracker, generate_scenarios
+from recourse  import run_plan_with_recourse
 from runner    import finalize_run
 
 
@@ -94,15 +97,38 @@ from runner    import finalize_run
 # PART 1 — EXTENSIVE FORM MODEL
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
+def build_2sp_model(data: dict, scenarios: list[dict],
+                    objective: str = "mean",
+                    share_durations: bool = False) -> pyo.ConcreteModel:
     """
     Build the extensive-form 2SP Pyomo model.
+
+    Incorporates the July-2026 model revision: g break-credit (M2), linear
+    charging-work tauc−g (M3), sequential-mode rules (M4), shift spread (M5),
+    10 h driving extension (M6), and the weekly working cap (M9) — all per
+    scenario where second-stage.  v3 windows (TW1/TW2/TW5): no idle waiting,
+    service starts at arrival; the out-of-window indicators delta^(k) are
+    SCENARIO-INDEXED binaries (an outcome, not a first-stage decision) and
+    each scenario's objective term is ta_N^(k) + beta·Σ delta^(k).
 
     Parameters
     ----------
     data      : full route data dict from instances.make_data()
     scenarios : list of S scenario dicts, each with keys "D" and "E"
                 (global leg index → float), from generate_scenarios().
+    objective : "mean" — expected objective over scenarios (2SP);
+                "max"  — epigraph min–max over scenarios (the STATIC robust
+                plan reuses this exact model with mean replaced by an
+                epigraph max; with a single worst-case scenario this reduces
+                to the deterministic MILP on the box worst case).
+    share_durations : C3 — when True, the second-stage activity durations
+                (tauc, taub, taur) are tied across all scenarios by
+                non-anticipativity constraints, so the plan commits a SINGLE
+                duration vector (in addition to the shared binaries).  This is
+                the static robust counterpart (no online recourse); the state
+                variables (ta, ea, cd, …) and the out-of-window indicators
+                delta remain scenario-indexed outcomes.  Default False (2-SP,
+                which adapts durations online — §5.5).
 
     Returns
     -------
@@ -118,12 +144,18 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
 
     K_set   = set(K)
     C_set   = set(C)
+    L_set   = set(data.get("L", []))
     I_list  = list(data["I"])
     S_svc   = data["S"]          # service times at customer stops (Python dict)
+    M_lay   = data.get("M_lay", {}) or {}
     M_big   = data["M_big"]
     M_drv   = data["M_drv"]
     M_sd    = data["M_sd"]
     M_sw    = data["M_sw"]
+    M_h     = data.get("M_h", data.get("Tspr2", 15.0))
+    hard_tw = bool(data.get("hard_tw", False))
+    rho_bar = int(data.get("rho_bar", 3))
+    ext_bar = int(data.get("ext_bar", 2))
 
     # ── Scenario set and per-scenario travel times / energies ─────────────────
     m.Scen = pyo.Set(initialize=S_list, ordered=True)
@@ -149,6 +181,9 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     m.rho1   = pyo.Var(m.I, domain=pyo.Binary)
     m.rho2   = pyo.Var(m.I, domain=pyo.Binary)
     m.phi    = pyo.Var(m.I, domain=pyo.Binary)
+    # M6 — extension declaration is structural (first-stage)
+    m.z      = pyo.Var(m.I, domain=pyo.Binary)
+    m.q_ext  = pyo.Var(m.I, domain=pyo.Binary)
 
     # Fix no activities at origin and destination
     for _v in [m.x_b45, m.x_b15, m.x_b30, m.rho1, m.rho2]:
@@ -177,14 +212,33 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     m.l1       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
     m.l2       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
     m.l4       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
-    m.u        = pyo.Var(m.Kset, m.Scen, domain=pyo.NonNegativeReals)
-    m.p        = pyo.Var(m.Kset, m.Scen, domain=pyo.NonNegativeReals)
+    # M2 — credited charging (replaces p and u)
+    m.g        = pyo.Var(m.Kset, m.Scen, domain=pyo.NonNegativeReals)
+    # M5 — shift spread
+    m.h        = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
+    m.l5       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
+    # TW5 — out-of-window indicators: SCENARIO-INDEXED binaries (an outcome,
+    # not a first-stage decision).  |C|·S extra binaries in the offline solve.
+    m.delta    = pyo.Var(m.Cset, m.Scen, domain=pyo.Binary)
 
-    # ── Objective: expected arrival time ──────────────────────────────────────
-    m.obj = pyo.Objective(
-        expr  = sum(m.ta[N, s] for s in S_list) / n_scen,
-        sense = pyo.minimize,
-    )
+    # ── Objective (TW2): arrival + fixed penalty per missed window ────────────
+    beta = float(data.get("beta", 2.0))
+
+    def _scen_obj(s):
+        return m.ta[N, s] + beta * sum(m.delta[i, s] for i in C)
+
+    if objective == "max":
+        # RO1: epigraph min–max over the (finite) scenario set — adjustable
+        # robust plan by constraint duplication, no dualization needed.
+        m.theta   = pyo.Var(domain=pyo.Reals)
+        m.epigraph = pyo.Constraint(m.Scen, rule=lambda m, s:
+            m.theta >= _scen_obj(s))
+        m.obj = pyo.Objective(expr=m.theta, sense=pyo.minimize)
+    else:
+        m.obj = pyo.Objective(
+            expr  = sum(_scen_obj(s) for s in S_list) / n_scen,
+            sense = pyo.minimize,
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
     # FIRST-STAGE CONSTRAINTS (no scenario index)
@@ -199,9 +253,21 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     # x_b30 requires a prior x_b15 (split-break logic)
     m.split_ord = pyo.Constraint(m.I, rule=lambda m, i: m.x_b30[i] <= m.phi[i])
 
-    # Reduced-rest budget: at most 3 per route
+    # Reduced-rest budget (M9: rho_bar = 3 between weekly rests)
     m.rst_lim = pyo.Constraint(
-        expr=sum(m.rho2[i] for i in I_list) <= 3)
+        expr=sum(m.rho2[i] for i in I_list) <= rho_bar)
+
+    # M6 — extension flag propagation and weekly budget (first-stage)
+    m.init_z = pyo.Constraint(expr=m.z[0] == 0)
+
+    def _z_persist(m, i):
+        if i >= N: return pyo.Constraint.Skip
+        return m.z[i+1] >= m.z[i] - m.rho1[i] - m.rho2[i]
+    m.z_persist = pyo.Constraint(m.I, rule=_z_persist)
+    m.q_ext_lb  = pyo.Constraint(m.I, rule=lambda m, i:
+        m.q_ext[i] >= m.z[i] + m.rho1[i] + m.rho2[i] - 1)
+    m.ext_budget = pyo.Constraint(
+        expr=sum(m.q_ext[i] for i in I_list) + m.z[N] <= ext_bar)
 
     # phi propagation — split-break credit tracker
     def _phi1(m, i):
@@ -225,12 +291,21 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     T_START = data.get("T_START", 0.0)
     E0      = data["E0"]
 
+    def _xsum_first(m, i):
+        """All first-stage break/rest binaries at stop i."""
+        return m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
+
+    def _xbrk_first(m, i):
+        """First-stage break-only binaries at stop i (excludes rests)."""
+        return m.x_b45[i] + m.x_b15[i] + m.x_b30[i]
+
     # ── Initial conditions per scenario ───────────────────────────────────────
     m.init_ta = pyo.Constraint(m.Scen, rule=lambda m, s: m.ta[0, s]  == T_START)
     m.init_ea = pyo.Constraint(m.Scen, rule=lambda m, s: m.ea[0, s]  == E0)
     m.init_cd = pyo.Constraint(m.Scen, rule=lambda m, s: m.cd[0, s]  == 0.0)
     m.init_sd = pyo.Constraint(m.Scen, rule=lambda m, s: m.sd[0, s]  == 0.0)
     m.init_sw = pyo.Constraint(m.Scen, rule=lambda m, s: m.sw[0, s]  == 0.0)
+    m.init_h  = pyo.Constraint(m.Scen, rule=lambda m, s: m.h[0, s]   == 0.0)
 
     # Origin: no activity, no charging
     m.td_orig = pyo.Constraint(m.Scen, rule=lambda m, s: m.td[0, s] == m.ta[0, s])
@@ -250,10 +325,12 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         return m.ta[i+1, s] == m.td[i, s] + m.D_sc[i, s]
     m.time_prop = pyo.Constraint(m.I, m.Scen, rule=_tp)
 
-    # Departure at customer stops: service + break + rest
+    # Departure at customer stops (depart_C, TW1): service starts at arrival;
+    # any break/rest is taken AFTER service — no waiting term
     C_S = [(i, s) for i in C for s in S_list]
     m.td_C = pyo.Constraint(C_S, rule=lambda m, i, s:
-        m.td[i, s] == m.ta[i, s] + m.S[i] + m.taub[i, s] + m.taur[i, s])
+        m.td[i, s] == (m.ta[i, s] + m.S[i]
+                       + m.taub[i, s] + m.taur[i, s]))
 
     # Departure at CS stops: overhead + queue + charging + break + rest
     m.td_K = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
@@ -263,9 +340,30 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
                        + m.tauc[i, s] + m.taub[i, s] + m.taur[i, s]
                        + m.sigma[i, s] * m.Mseq[i]))
 
-    # Time windows at customer stops
-    m.tw_hard = pyo.Constraint(C_S, rule=lambda m, i, s:
-        pyo.inequality(m.Wha[i], m.ta[i, s], m.Whf[i]))
+    # Departure at layby stops (M8): parking overhead + break/rest only
+    if L_set:
+        L_S = [(i, s) for i in sorted(L_set) for s in S_list]
+        m.td_L = pyo.Constraint(L_S, rule=lambda m, i, s:
+            m.td[i, s] == (m.ta[i, s]
+                           + M_lay.get(i, 0.0) * _xsum_first(m, i)
+                           + m.taub[i, s] + m.taur[i, s]))
+
+    # TW2/TW5 — fixed binary window indicator per scenario, eqs. (5)/(6).
+    # The single horizon big-M H (C1) upper-bounds any feasible arrival span,
+    # relieving both window sides when delta = 1.  There is no arrival
+    # deadline.
+    if hard_tw:
+        m.tw_early = pyo.Constraint(C_S, rule=lambda m, i, s:
+            m.ta[i, s] >= m.Wha[i])
+        m.tw_close = pyo.Constraint(C_S, rule=lambda m, i, s:
+            m.ta[i, s] <= m.Whf[i])
+        m.delta_zero = pyo.Constraint(C_S, rule=lambda m, i, s:
+            m.delta[i, s] == 0)
+    else:
+        m.tw_early = pyo.Constraint(C_S, rule=lambda m, i, s:
+            m.ta[i, s] >= m.Wha[i] - m.H * m.delta[i, s])
+        m.tw_late = pyo.Constraint(C_S, rule=lambda m, i, s:
+            m.ta[i, s] <= m.Whf[i] + m.H * m.delta[i, s])
 
     # ── SOC propagation ───────────────────────────────────────────────────────
     def _soc_prop(m, i, s):
@@ -273,6 +371,12 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         return m.ea[i+1, s] == m.ed[i, s] - m.E_sc[i, s]
     m.soc_prop   = pyo.Constraint(m.I, m.Scen, rule=_soc_prop)
     m.soc_nc_C   = pyo.Constraint(C_S, rule=lambda m, i, s: m.ed[i, s] == m.ea[i, s])
+    # M8 — laybys cannot charge: departure SOC == arrival SOC (otherwise the
+    # solver draws free energy at every layby and never plans a CS charge).
+    if L_set:
+        L_S_soc = [(i, s) for i in sorted(L_set) for s in S_list]
+        m.soc_nc_L = pyo.Constraint(L_S_soc,
+            rule=lambda m, i, s: m.ed[i, s] == m.ea[i, s])
     m.soc_mono_K = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s: m.ed[i, s] >= m.ea[i, s])
     m.soc_lb     = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s: m.ea[i, s] >= m.Emin)
     m.soc_ub     = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s: m.ed[i, s] <= m.Ecap)
@@ -317,8 +421,7 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         m.lam_d[i, k, s] <= m.mu_d[i, k, s] + m.mu_d[i, k+1, s])
 
     # ── v and sigma (second-stage binaries, bounded by first-stage decisions) ─
-    def _xsum(m, i):
-        return m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
+    _xsum = _xsum_first   # alias
 
     m.v_lb_y  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
         m.v[i, s] >= m.y[i])
@@ -326,35 +429,39 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         m.v[i, s] >= _xsum(m, i))
     m.v_ub    = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
         m.v[i, s] <= m.y[i] + _xsum(m, i))
+
+    # M4 (43)–(44): σ only with charging; charge+rest forced sequential
     m.sigma_ub_y  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
         m.sigma[i, s] <= m.y[i])
+    m.sigma_lb_r  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.sigma[i, s] >= m.y[i] + m.rho1[i] + m.rho2[i] - 1)
     m.sigma_ub_xr = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
         m.sigma[i, s] <= _xsum(m, i))
+    # (45) C2/Q1 — uncovered declared break forces sequential mode.  The break
+    # minimum b_i uses the first-stage break binaries; τ_c is the per-scenario
+    # charge, so σ is scenario-indexed (a short realized charge forces σ=1).
+    m.sigma_lb_brk = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.sigma[i, s] >= (m.Tb45 * m.x_b45[i] + m.Tb15 * m.x_b15[i]
+                          + m.Tb30 * m.x_b30[i] - m.tauc[i, s]) / m.Tb45
+                         - (1 - m.y[i]))
 
-    # Concurrent charging: if σ=0 and y=1, tauc must cover the declared break/rest
-    m.conc_b45 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.tauc[i, s] >= m.Tb45 * m.x_b45[i] - M_big * m.sigma[i, s] - M_big * (1 - m.y[i]))
-    m.conc_b15 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.tauc[i, s] >= m.Tb15 * m.x_b15[i] - M_big * m.sigma[i, s] - M_big * (1 - m.y[i]))
-    m.conc_b30 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.tauc[i, s] >= m.Tb30 * m.x_b30[i] - M_big * m.sigma[i, s] - M_big * (1 - m.y[i]))
-    m.conc_r1  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.tauc[i, s] >= m.Tr1 * m.rho1[i] - M_big * m.sigma[i, s] - M_big * (1 - m.y[i]))
-    m.conc_r2  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.tauc[i, s] >= m.Tr2 * m.rho2[i] - M_big * m.sigma[i, s] - M_big * (1 - m.y[i]))
+    # ── M2 (R7)–(R12): g = charging credited toward the break requirement ─────
+    # g = tauc only when a break is DECLARED and runs in parallel (σ=0);
+    # the old conc_* coverage constraints and the p machinery are deleted.
+    m.g_ub1 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.g[i, s] <= m.tauc[i, s])
+    m.g_ub2 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.g[i, s] <= m.TK * _xbrk_first(m, i))
+    m.g_ub3 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.g[i, s] <= m.TK * (1 - m.sigma[i, s]))
+    m.g_lb  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
+        m.g[i, s] >= (m.tauc[i, s] - m.TK * (1 - _xbrk_first(m, i))
+                      - m.TK * m.sigma[i, s]))
 
-    # ── p = tauc·(1−σ) at CS (concurrent charging credit toward break time) ───
-    m.p_ub1 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.p[i, s] <= m.tauc[i, s])
-    m.p_ub2 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.p[i, s] <= m.TK * (1 - m.sigma[i, s]))
-    m.p_lb  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.p[i, s] >= m.tauc[i, s] - m.TK * m.sigma[i, s])
-
-    # taub_hat = taub + p at CS stops, taub_hat = taub elsewhere
+    # taub_hat = taub + g at CS stops, taub_hat = taub elsewhere
     non_K_pairs = [(i, s) for i in I_list if i not in K_set for s in S_list]
     m.qb_K    = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.taub_hat[i, s] == m.taub[i, s] + m.p[i, s])
+        m.taub_hat[i, s] == m.taub[i, s] + m.g[i, s])
     m.qb_nonK = pyo.Constraint(non_K_pairs, rule=lambda m, i, s:
         m.taub_hat[i, s] == m.taub[i, s])
 
@@ -365,24 +472,20 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         m.taub_hat[i, s] >= m.Tb15 * m.x_b15[i])
     m.brk30  = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
         m.taub_hat[i, s] >= m.Tb30 * m.x_b30[i])
+    # Named tight big-M: a break lies within one shift spread (15 h)
     m.brk_ub = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
-        m.taub[i, s] <= M_big * (m.x_b45[i] + m.x_b15[i] + m.x_b30[i]))
+        m.taub[i, s] <= m.Tspr2 * (m.x_b45[i] + m.x_b15[i] + m.x_b30[i]))
     m.rst1   = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
         m.taur[i, s] >= m.Tr1 * m.rho1[i])
     m.rst2   = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
         m.taur[i, s] >= m.Tr2 * m.rho2[i])
+    # Named big-M (eq. 36): a rest is bounded by the horizon H
     m.rst_ub = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
-        m.taur[i, s] <= M_big * (m.rho1[i] + m.rho2[i]))
-
-    # ── u: charging work in shift-working accumulator (concurrent vs sequential)
-    m.u_ub1 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.u[i, s] <= m.TK * (1 - _xsum(m, i) + m.sigma[i, s]))
-    m.u_ub2 = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.u[i, s] <= m.tauc[i, s])
-    m.u_lb  = pyo.Constraint(m.Kset, m.Scen, rule=lambda m, i, s:
-        m.u[i, s] >= m.tauc[i, s] - m.TK * (_xsum(m, i) - m.sigma[i, s]))
+        m.taur[i, s] <= m.H * (m.rho1[i] + m.rho2[i]))
 
     # ── HoS accumulators (cd, sd, sw) using scenario-specific travel times ────
+    # (M3: the charging work contribution is the linear expression tauc − g;
+    #  the auxiliary u variable and its three constraints are deleted.)
     def _ri(m, i):
         return m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
     def _rho(m, i):
@@ -413,20 +516,28 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
         if i >= N: return pyo.Constraint.Skip
         return m.sd[i+1, s] == m.sd[i, s] + m.D_sc[i, s] - m.l2[i, s]
     m.sd_prop = pyo.Constraint(m.I, m.Scen, rule=_sd)
+    # M6 (R16): 9 h regular / 10 h when the shift is declared extended
     m.sd_ub   = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
-        m.sd[i, s] <= m.Tdrv_sh1)
+        m.sd[i, s] <= m.Tdrv_sh1 + (m.Tdrv_sh2 - m.Tdrv_sh1) * m.z[i])
 
     # sw: shift working (driving + service/charging overhead; reset by r1/r2)
     def _cs_work(m, j, s):
         return (m.v[j, s] * m.Mstop[j] + m.Q_nom[j] * m.y[j]
-                + m.u[j, s] + m.sigma[j, s] * m.Mseq[j])
+                + (m.tauc[j, s] - m.g[j, s]) + m.sigma[j, s] * m.Mseq[j])
+
+    def _work_at(m, j, s):
+        if j in K_set:
+            return _cs_work(m, j, s)
+        if j in C_set:
+            return S_svc.get(j, 0.0)
+        if j in L_set:
+            return M_lay.get(j, 0.0) * _xsum(m, j)
+        return 0.0
 
     def _sw(m, i, s):
         if i >= N: return pyo.Constraint.Skip
-        ip1 = i + 1
-        work_next = (_cs_work(m, ip1, s) if ip1 in K_set
-                     else (S_svc.get(ip1, 0.0) if ip1 in C_set else 0.0))
-        return m.sw[i+1, s] == m.sw[i, s] - m.l4[i, s] + m.D_sc[i, s] + work_next
+        return (m.sw[i+1, s] == m.sw[i, s] - m.l4[i, s] + m.D_sc[i, s]
+                + _work_at(m, i + 1, s))
 
     m.l4u1    = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
         m.l4[i, s] <= M_sw * _rho(m, i))
@@ -435,8 +546,57 @@ def build_2sp_model(data: dict, scenarios: list[dict]) -> pyo.ConcreteModel:
     m.l4lb    = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
         m.l4[i, s] >= m.sw[i, s] - M_sw * (1 - _rho(m, i)))
     m.sw_prop = pyo.Constraint(m.I, m.Scen, rule=_sw)
-    m.sw_ub   = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
-        m.sw[i, s] <= m.Twrk_sh)
+    # M5: the 13 h cap on sw is REPLACED by the shift-spread constraints below
+
+    # ── M5 (R22)–(R25): shift spread per scenario ─────────────────────────────
+    def _o(m, i, s):
+        return m.td[i, s] - m.ta[i, s] - m.taur[i, s]
+
+    def _h_prop(m, i, s):
+        if i >= N: return pyo.Constraint.Skip
+        return m.h[i+1, s] == m.h[i, s] + _o(m, i, s) + m.D_sc[i, s] - m.l5[i, s]
+    m.h_prop = pyo.Constraint(m.I, m.Scen, rule=_h_prop)
+
+    m.l5u1 = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
+        m.l5[i, s] <= M_h * _rho(m, i))
+    m.l5u2 = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
+        m.l5[i, s] <= m.h[i, s] + _o(m, i, s))
+    m.l5lb = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
+        m.l5[i, s] >= m.h[i, s] + _o(m, i, s) - M_h * (1 - _rho(m, i)))
+
+    Tspr1 = float(data.get("Tspr1", 13.0))
+    Tspr2 = float(data.get("Tspr2", 15.0))
+    m.spread_prerest = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
+        m.h[i, s] + _o(m, i, s) <= (Tspr1 + (Tspr2 - Tspr1) * m.rho2[i]
+                                    + Tspr2 * (1 - _rho(m, i))))
+    m.spread_ub = pyo.Constraint(m.I, m.Scen, rule=lambda m, i, s:
+        m.h[i, s] <= Tspr2)
+    # (h_term / eq. 70): terminal spread bounded by the regular-rest cap
+    m.spread_term = pyo.Constraint(m.Scen, rule=lambda m, s:
+        m.h[N, s] <= Tspr1)
+
+    # ── M9 (R21): weekly working-time cap per scenario ────────────────────────
+    Twk60 = float(data.get("Twk60", 60.0))
+    m.weekly_work = pyo.Constraint(m.Scen, rule=lambda m, s: (
+        sum(m.D_sc[i, s] for i in range(N))
+        + sum(S_svc.get(i, 0.0) for i in C)
+        + sum(_cs_work(m, i, s) for i in K)
+        + sum(M_lay.get(i, 0.0) * _xsum(m, i) for i in sorted(L_set))
+        <= Twk60))
+
+    # ── C3: non-anticipativity — one shared duration vector (static robust) ───
+    # Tie tauc/taub/taur across scenarios to the reference scenario 0; sigma,
+    # g and v then follow (their constraints become identical across
+    # duplicates).  The state variables and delta stay scenario-indexed.
+    if share_durations and n_scen > 1:
+        s0 = S_list[0]
+        rest = S_list[1:]
+        m.na_tauc = pyo.Constraint(m.Kset, rest, rule=lambda m, i, s:
+            m.tauc[i, s] == m.tauc[i, s0])
+        m.na_taub = pyo.Constraint(m.I, rest, rule=lambda m, i, s:
+            m.taub[i, s] == m.taub[i, s0])
+        m.na_taur = pyo.Constraint(m.I, rest, rule=lambda m, i, s:
+            m.taur[i, s] == m.taur[i, s0])
 
     return m
 
@@ -479,25 +639,22 @@ def solve_2sp(model: pyo.ConcreteModel,
 
 def extract_2sp_committed_schedule(model: pyo.ConcreteModel, data: dict) -> list[dict]:
     """
-    Extract a committed open-loop schedule from the solved 2SP model.
+    SP1 — Extract the committed PLAN STRUCTURE from the solved 2SP model.
 
-    First-stage binaries (y, break type, rest type) are taken as-is.
-    Continuous durations (tauc, taub, taur) are averaged across all S scenarios
-    to produce a single deterministic plan that is executed regardless of the
-    actual realization.
-
-    sigma (concurrent vs. sequential charging mode) is set to 1 only when the
-    majority of scenarios chose sequential; otherwise 0 (concurrent).
+    Only the first-stage binary decisions (y, break type, rest type) are
+    retained.  The old behaviour of executing scenario-AVERAGED durations was
+    removed: averaged durations satisfy no scenario's constraints in general
+    and do not constitute a well-defined policy.  Durations are re-optimised
+    ONLINE at each stop by recourse.run_plan_with_recourse (duration-only LP
+    with the realized state; restricted add-only repair MILP on
+    infeasibility).
 
     Returns
     -------
     list of dicts, one per stop 0..N, with keys:
-        i, y, break_type, rest_type, tauc, taub, taur, tauq, sigma, is_C, is_K
+        i, y, break_type, rest_type, is_C, is_K
     """
-    N      = data["N"]
     K_set  = set(data["K"])
-    S_list = list(model.Scen)
-    n_scen = len(S_list)
 
     schedule = []
     for i in data["I"]:
@@ -511,114 +668,69 @@ def extract_2sp_committed_schedule(model: pyo.ConcreteModel, data: dict) -> list
         brk = ("b45" if b45 else "b15" if b15 else "b30" if b30 else None)
         rst = ("r1"  if r1  else "r2"  if r2  else None)
 
-        if i in K_set:
-            tauc_avg  = sum(pyo.value(model.tauc[i, s])         for s in S_list) / n_scen
-            sigma_sum = sum(round(pyo.value(model.sigma[i, s])) for s in S_list)
-            sigma_val = 1 if sigma_sum >= n_scen / 2 else 0
-        else:
-            tauc_avg  = 0.0
-            sigma_val = 0
-
-        taub_avg = sum(pyo.value(model.taub[i, s]) for s in S_list) / n_scen
-        taur_avg = sum(pyo.value(model.taur[i, s]) for s in S_list) / n_scen
-        tauq     = data["Q"].get(i, 0.0) * y if i in K_set else 0.0
-
         schedule.append(dict(
             i          = i,
             y          = y,
             break_type = brk,
             rest_type  = rst,
-            tauc       = tauc_avg,
-            taub       = taub_avg,
-            taur       = taur_avg,
-            tauq       = tauq,
-            sigma      = sigma_val,
             is_C       = i in set(data["C"]),
             is_K       = i in K_set,
         ))
     return schedule
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PART 4 — OPEN-LOOP SIMULATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _simulate_2sp_schedule(full_data: dict,
-                            committed_schedule: list[dict],
-                            D_real: list,
-                            E_real: list,
-                            verbose: bool,
-                            log_fn) -> tuple[BEHDV, ScenarioTracker, list]:
+def extract_2sp_full_schedule(model: pyo.ConcreteModel, data: dict,
+                              scen: int = 0) -> list[dict]:
     """
-    Execute the committed 2SP schedule on the precomputed realisation.
+    C3 — Extract the committed plan STRUCTURE together with its fixed activity
+    DURATIONS from a solved static-robust model (share_durations=True), reading
+    the durations from reference scenario ``scen`` (they are tied across all
+    scenarios by non-anticipativity, so the choice is immaterial).
 
-    The schedule (binary decisions + scenario-averaged continuous durations)
-    is applied open-loop: no recourse or re-optimisation occurs and the plan
-    does not depend on D_real in any way.
-
-    The only adaptation is clipping tauc to physically feasible given the
-    actual SOC at each CS stop (cannot overcharge — physics, not D_real info).
+    Returns per-stop dicts carrying y / break_type / rest_type AND the fixed
+    tauc / taub / taur / tauq / sigma, for open-loop execution with no online
+    recourse.
     """
-    N       = full_data["N"]
-    vehicle = BEHDV(full_data)
-    tracker = ScenarioTracker(full_data)
-    K_set   = set(full_data["K"])
-    C_set   = set(full_data["C"])
+    K_set = set(data["K"])
+    Q_dict = data.get("Q", {})
 
-    for stop in range(N):
-        entry = committed_schedule[stop]
-        brk   = entry["break_type"]
-        rst   = entry["rest_type"]
-        y     = entry["y"]
+    schedule = []
+    for i in data["I"]:
+        y   = round(pyo.value(model.y[i]))    if i in K_set else 0
+        b45 = round(pyo.value(model.x_b45[i]))
+        b15 = round(pyo.value(model.x_b15[i]))
+        b30 = round(pyo.value(model.x_b30[i]))
+        r1  = round(pyo.value(model.rho1[i]))
+        r2  = round(pyo.value(model.rho2[i]))
+        brk = ("b45" if b45 else "b15" if b15 else "b30" if b30 else None)
+        rst = ("r1"  if r1  else "r2"  if r2  else None)
 
-        # Clip tauc to physically feasible given actual SOC at arrival.
-        # Cannot overcharge the battery — this is a physical constraint,
-        # NOT information about future travel times.
-        tauc_plan = entry["tauc"]
-        if stop in K_set and y and tauc_plan > 0:
-            tauc_exec = min(tauc_plan, _charging_time_needed(vehicle.e_arr, full_data))
-        else:
-            tauc_exec = 0.0
+        tauc  = float(pyo.value(model.tauc[i, scen])) if i in K_set else 0.0
+        taub  = float(pyo.value(model.taub[i, scen]))
+        taur  = float(pyo.value(model.taur[i, scen]))
+        sigma = round(pyo.value(model.sigma[i, scen])) if i in K_set else 0
+        tauq  = Q_dict.get(i, 0.0) * y if i in K_set else 0.0
 
-        stop_type = ("CS"   if stop in K_set else
-                     "CUST" if stop in C_set else
-                     "ORIG" if stop == 0 else "INT")
-        log_fn(f"\n  stop {stop:>3} ({stop_type})"
-               f"  t={vehicle.t_arr:.3f}h  soc={vehicle.e_arr:.0f}kWh"
-               f"  cd={vehicle.cd:.2f}  sd={vehicle.sd:.2f}  sw={vehicle.sw:.2f}")
-        log_fn(f"     -> y={y}  brk={brk or '---'}  rst={rst or '---'}"
-               f"  tauc={tauc_exec*60:.0f}m (plan={tauc_plan*60:.0f}m)"
-               f"  taub={entry['taub']*60:.0f}m"
-               f"  taur={entry['taur']*60:.0f}m"
-               f"  D_act={float(D_real[stop]):.3f}h  E_act={float(E_real[stop]):.1f}kWh")
+        schedule.append(dict(
+            i=i, y=y, break_type=brk, rest_type=rst,
+            b45=b45, b15=b15, b30=b30, rho1=r1, rho2=r2,
+            tauc=tauc, taub=taub, taur=taur, tauq=tauq, sigma=sigma,
+            is_C=i in set(data["C"]), is_K=i in K_set,
+        ))
+    return schedule
 
-        mock_sol = dict(
-            feasible = True,
-            sol      = [dict(
-                i     = 0,
-                taub  = entry["taub"],
-                tauc  = tauc_exec,
-                taur  = entry["taur"],
-                tauq  = entry["tauq"],
-                y     = y,
-                b45   = int(brk == "b45"),
-                b15   = int(brk == "b15"),
-                b30   = int(brk == "b30"),
-                rho1  = int(rst == "r1"),
-                rho2  = int(rst == "r2"),
-                sigma = entry.get("sigma", 0),
-                is_C  = stop in C_set,
-                is_K  = stop in K_set,
-            )],
-        )
 
-        action = dict(y=y, break_type=brk, rest_type=rst)
-        vehicle.advance(action=action, D_next=float(D_real[stop]),
-                        E_next=float(E_real[stop]), milp_sol=mock_sol)
-        tracker.record_realisation(stop, float(D_real[stop]),
-                                   E_actual=float(E_real[stop]))
-
-    return vehicle, tracker, []
+# ══════════════════════════════════════════════════════════════════════════════
+# PART 4 — ONLINE DURATION RECOURSE (SP1)
+# ══════════════════════════════════════════════════════════════════════════════
+# The old open-loop execution of scenario-averaged durations was removed
+# (SP1): averaged durations satisfy no scenario's constraints in general and
+# are not a well-defined policy.  Execution now goes through
+# recourse.run_plan_with_recourse: the plan's binary STRUCTURE is committed
+# offline, the continuous durations are re-optimised at every stop from the
+# realized state (tiny fixed-structure MIP), and an add-only repair MILP
+# handles trajectories that leave the region the structure was designed for.
+# Repair frequency and plan violations are reported as robustness metrics (S2).
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -636,9 +748,20 @@ def run_2sp(full_data: dict,
             tee: bool         = True,
             verbose: bool     = True,
             run_id: str       = None,
-            oracle_tee: bool  = True) -> dict:
+            oracle_tee: bool  = True,
+            supervised: bool  = True,
+            prune_quantile: float = 1.0) -> dict:
     """
-    Solve the two-stage stochastic program and simulate on D_real/E_real.
+    Solve the two-stage stochastic program, then execute the first-stage
+    structure with online duration recourse (SP1) on D_real/E_real.
+
+    Information structure (SP2 caveat): the two-stage model assumes all
+    travel times are revealed after the first stage — an approximation of
+    the true multi-stage information process; the rolling-horizon policy
+    is the corresponding multi-stage heuristic.
+
+    Scenario budget (SP3): use the same n_scenarios as the LA policy (or
+    justify any difference) so the comparison is scenario-budget fair.
 
     Parameters
     ----------
@@ -654,6 +777,8 @@ def run_2sp(full_data: dict,
     verbose           : print per-stop trajectory to stdout
     run_id            : override auto-generated run identifier
     oracle_tee        : show Gurobi output in oracle solve
+    supervised        : apply the S1 safety supervisor during execution
+    prune_quantile    : supervisor worst-case quantile (RH2)
 
     Returns
     -------
@@ -727,20 +852,32 @@ def run_2sp(full_data: dict,
 
     _p(f"  2SP objective (E[arrival]) : {info['obj']:.3f} h")
 
-    # ── Step 3: Extract committed schedule (binary + scenario-averaged durations)
+    # ── Step 3: Extract committed plan STRUCTURE (first-stage binaries) ────────
     committed = extract_2sp_committed_schedule(model, full_data)
     n_chg = sum(1 for e in committed if e["y"])
     n_brk = sum(1 for e in committed if e["break_type"])
     n_rst = sum(1 for e in committed if e["rest_type"])
     _p(f"  Committed  : {n_chg} charge(s),  {n_brk} break(s),  {n_rst} rest(s)")
-    _p(f"  (durations are scenario averages over S={len(scenarios)} scenarios)")
+    _p(f"  (structure only — durations re-optimised online, SP1)")
 
-    # ── Step 4: Execute committed plan open-loop on actual realisation ─────────
-    _p(f"\n  Executing committed 2SP schedule (open-loop, no recourse)...")
-    vehicle, tracker, scores_log = _simulate_2sp_schedule(
-        full_data, committed, D_real, E_real,
-        verbose=verbose, log_fn=_p,
+    # ── Step 4: Execute plan with online duration recourse (SP1) ──────────────
+    _p(f"\n  Executing 2SP structure with online duration recourse...")
+    vehicle, tracker, events = run_plan_with_recourse(
+        full_data      = full_data,
+        plan           = committed,
+        D_real         = D_real,
+        E_real         = E_real,
+        method_name    = "2SP",
+        log_fn         = _p,
+        delta          = delta,
+        supervised     = supervised,
+        prune_quantile = prune_quantile,
+        verbose        = verbose,
     )
+    scores_log = []
+    _p(f"  Recourse   : {len(events['repairs'])} repair(s), "
+       f"{len(events['plan_violations'])} plan violation(s), "
+       f"{len(events['interventions'])} supervisor intervention(s)")
 
     wall_elapsed = time.perf_counter() - t_wall_start
     arr_h = vehicle.t_arr
@@ -765,6 +902,7 @@ def run_2sp(full_data: dict,
         verbose     = verbose,
         oracle_tee  = oracle_tee,
         scores_log  = scores_log,
+        events      = events,
         method_meta = dict(
             method        = "2SP",
             n_scenarios   = len(scenarios),
@@ -773,6 +911,8 @@ def run_2sp(full_data: dict,
             twosp_status  = status,
             twosp_optimal = info["optimal"],
             solve_time    = t_solve,
+            supervised    = supervised,
+            prune_quantile= prune_quantile,
         ),
     )
     return results

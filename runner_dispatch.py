@@ -151,8 +151,8 @@ def run_algorithm(
     ro_time_limit: int     = 7200,
     ro_mip_gap: float      = 0.005,
     # greedy options
-    safety_buffer: float             = 0.10,
-    queue_threshold: Optional[float] = None,
+    safety_buffer: float             = 0.0,
+    queue_threshold: Optional[float] = None,   # deprecated, ignored
     # 2SP options
     twosp_time_limit: int  = 7200,
     twosp_mip_gap: float   = 0.005,
@@ -162,6 +162,8 @@ def run_algorithm(
     run_id: Optional[str]  = None,
     m_man_h: Optional[float] = None,   # override stored M values (h); None = keep JSON value
     diesel_mode: bool      = False,    # treat vehicle as diesel (HoS only, no charging)
+    supervised: bool       = True,     # S1: safety supervisor on (False = raw mode)
+    prune_quantile: float  = 1.0,      # RH2: worst-case quantile for guard/pruning
 ) -> dict:
     """
     Load a precomputed instance JSON file and run the specified algorithm.
@@ -257,6 +259,8 @@ def run_algorithm(
             verbose           = verbose,
             run_id            = run_id,
             oracle_tee        = oracle_tee,
+            supervised        = supervised,
+            prune_quantile    = prune_quantile,
         )
 
     elif alg == "GREEDY":
@@ -265,11 +269,13 @@ def run_algorithm(
             full_data       = full_data,
             D_real          = D_real,
             E_real          = E_real,
+            delta           = delta,
             safety_buffer   = safety_buffer,
-            queue_threshold = queue_threshold,
             verbose         = verbose,
             run_id          = run_id,
             oracle_tee      = oracle_tee,
+            supervised      = supervised,
+            prune_quantile  = prune_quantile,
         )
 
     elif alg == "RO":
@@ -285,6 +291,8 @@ def run_algorithm(
             verbose    = verbose,
             run_id     = run_id,
             oracle_tee = oracle_tee,
+            supervised = supervised,
+            prune_quantile = prune_quantile,
         )
 
     else:  # LA
@@ -306,6 +314,8 @@ def run_algorithm(
             include_worst      = include_worst,
             run_id             = run_id,
             oracle_tee         = oracle_tee,
+            supervised         = supervised,
+            prune_quantile     = prune_quantile,
         )
 
 
@@ -515,7 +525,17 @@ if __name__ == "__main__":
                         choices=["lp", "mip", "both"])
     parser.add_argument("--charge_only", action="store_true", default=False)
     parser.add_argument("--criterion",   type=str,   default="mean",
-                        choices=["mean", "worst", "best"])
+                        choices=["mean", "worst", "best", "cvar_0.8"],
+                        help="RH3: scenario aggregation for LA scoring; "
+                             "cvar_0.8 = mean of the worst 20 percent.")
+    parser.add_argument("--raw",          action="store_true", default=True,
+                        help="S1: disable the safety supervisor (raw mode) "
+                             "to expose each method's intrinsic feasibility "
+                             "risk; default is unsupervised.")
+    parser.add_argument("--prune_quantile", type=float, default=1.0,
+                        help="RH2: worst-case quantile used by the "
+                             "supervisor/pruning guard (1.0 = full support; "
+                             "below 1 for unbounded distributions).")
 
     # RO
     parser.add_argument("--ro_time_limit",type=int,   default=7200)
@@ -559,6 +579,8 @@ if __name__ == "__main__":
         oracle_tee       = args.oracle_tee,
         m_man_h          = args.m_man,
         diesel_mode      = args.diesel,
+        supervised       = not args.raw,
+        prune_quantile   = args.prune_quantile,
     )
 
     if len(json_files) == 1 and len(algorithms) == 1:

@@ -18,13 +18,7 @@ The greedy driver operates without planning tools and follows three rules:
      Charging at a CS that is not a mandatory stop is also triggered when
      the energy to reach the next CS (worst-case) falls below Emin + buffer.
 
-  3. AVOID BUSY STATIONS
-     If a CS stop has a queue time above `queue_threshold`, skip charging
-     there unless charging is mandatory (energy constraint forces a stop).
-     When `queue_threshold` is not given, it defaults to 80% of the
-     instance's maximum CS queue time (0.8 * max(full_data["Q"].values())).
-
-  4. FREE BREAK WITHIN CHARGE
+  3. FREE BREAK WITHIN CHARGE
      If the driver must stop at a CS and charging takes at least Tb45 hours,
      the mandatory break is scheduled inside the charge window at no extra
      time cost (parallel model: dwell = max(tauc, Tb45)).  Similarly for
@@ -52,12 +46,15 @@ because charging during a mandatory dwell is free (parallel model).
 When the stop is mandatory only for charging, a break is inserted for free
 only if tauc (time to charge to full) ≥ the required break duration.
 
-Queue avoidance
+Information set
 ---------------
-A CS stop with queue_time > queue_threshold is skipped (y=0, no break)
-UNLESS one of the following mandatory conditions holds:
-  - must_rest or must_break (HoS violation imminent)
-  - must_charge (energy infeasibility imminent)
+The greedy uses the same information as every other method: the vehicle
+state, the travel-time distribution support (worst-case checks via
+supervisor.compute_flags), and the expected charger queue delays Q_i.  Q_i
+is a shared MODEL parameter (it enters the departure-time and working-time
+constraints of the MILP used by all methods), so greedy's queue-avoidance
+rule (C4) is not privileged knowledge — it is restored as legitimate driver
+behavior.
 
 Uncertainty
 -----------
@@ -90,10 +87,11 @@ import sys
 import time
 from typing import Optional
 
-from BEHDV     import BEHDV, _energy_after_charging, _charging_time_needed
-from scenarios import ScenarioTracker
-from runner    import finalize_run
-from plots     import plot_simulation_results   # re-exported for callers
+from BEHDV      import BEHDV, _energy_after_charging, _charging_time_needed
+from scenarios  import ScenarioTracker
+from supervisor import compute_flags, supervise_action
+from runner     import finalize_run
+from plots      import plot_simulation_results   # re-exported for callers
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -171,29 +169,49 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
-                    safety_buffer_frac: float    = 0.10,
+                    delta: float = 0.15,
+                    safety_buffer_frac: float = 0.0,
                     queue_threshold: Optional[float] = None,
-                    verbose: bool                 = False) -> tuple[dict, str]:
+                    verbose: bool = False) -> tuple[dict, str]:
     """
-    Make a greedy action decision at ``stop_global``.
+    Make a greedy action decision at ``stop_global`` (paper §5.3).
 
-    The driver stops only when forced by HoS regulations or energy constraints.
-    Before each leg, it checks whether driving that leg would violate cd, sd,
-    or sw limits, and if so takes a break/rest at the current stop.  When
-    stopping at a CS for any mandatory reason, the driver always charges to
-    full (parallel model: charging is free during mandatory dwell).
+    Fixed priority rule, evaluated once per stop:
+      (i)   if the remaining SOC does not cover the WORST-CASE energy demand
+            to the next charging station, charge to full;
+      (ii)  if the consecutive-driving budget does not cover the next leg,
+            take the cheapest qualifying break — in parallel with charging
+            when a charge is already planned and long enough;
+      (iii) if the spread or shift-driving budget does not cover the next
+            leg, take a daily rest (reduced if the budget allows, regular
+            otherwise);
+      (iv)  otherwise, continue.
+
+    The greedy policy solves no optimization problem and uses the SAME
+    information as every other method: the vehicle state, the distribution
+    support (via supervisor.compute_flags), and the expected charger queue
+    delays Q_i.  Q_i is a shared MODEL parameter — it already enters the
+    departure-time and working-time constraints of the MILP used by every
+    method — so greedy consulting it is NOT privileged knowledge (C4).
+
+    Queue avoidance (C4): when a stop at a CS is discretionary (a break/rest
+    dwell rather than an energy-forced charge), the driver skips charging at a
+    station whose expected queue delay Q_i exceeds a threshold, preferring a
+    lower-queue station downstream.  An energy-forced charge (must_charge) is
+    never skipped.
 
     Parameters
     ----------
+    delta : float
+        Travel-time uncertainty half-width (distribution support) used for
+        the worst-case checks — same value as the simulator draws from.
     safety_buffer_frac : float [0, 1]
-        Extra SOC buffer above Emin when assessing mandatory charges.
-        Charge if  e_arr - e_to_next  <  Emin + safety_buffer_frac * usable.
-        Default 0.10 (10% of usable capacity).
+        OPTIONAL extra SOC buffer on top of the worst-case energy check
+        (default 0.0 — the worst case is already conservative).
     queue_threshold : float (hours) or None
-        CS stops with queue_time > queue_threshold are not charged at unless
-        a mandatory energy condition (must_charge) forces a stop there.
-        When None (default), computed adaptively as 80% of the instance's
-        maximum CS queue time: 0.8 * max(full_data["Q"].values()).
+        CS stops with queue delay Q_i above this are not charged at unless a
+        mandatory energy condition (must_charge) forces it.  None (default)
+        → adaptive 80% of the instance's maximum CS queue delay.
 
     Returns
     -------
@@ -206,31 +224,25 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     Ecap   = full_data["Ecap"]
     Emin   = full_data["Emin"]
     usable = Ecap - Emin
-    Tdrv   = full_data["Tdrv_cons"]    # 4.5 h max consecutive driving
-    Tsd    = full_data["Tdrv_sh1"]     # 9.0 h max shift driving
-    Tsw    = full_data["Twrk_sh"]      # 13.0 h max shift working
     Tb45   = full_data["Tb45"]         # 0.75 h
     Tb30   = full_data["Tb30"]         # 0.50 h
-    # Nominal duration of the leg departing this stop (used for look-ahead).
-    # The greedy checks whether driving the next leg would violate HoS limits,
-    # and if so forces a break/rest NOW at this stop.  This is not planning —
-    # it is simply what any driver does before starting a leg.
-    D_next_nom = full_data["D"].get(stop_global, 0.0)
 
-    # ── Mandatory condition flags (proactive: would next leg cause violation?) ──
-    must_rest  = ((state.sd + D_next_nom >= Tsd) or
-                  (state.sw + D_next_nom >= Tsw))
-    must_break = (state.cd + D_next_nom >= Tdrv) and not must_rest
-    # Split-break: phi==1 means a b15 was already taken; b30 completes the pair
-    must_b30   = (state.phi == 1) and must_break
+    # One-step feasibility checks — single source of truth shared with the
+    # rolling-horizon pruning and the S1 safety supervisor.
+    flags = compute_flags(full_data, stop_global, state, delta)
 
-    e_to_next   = _energy_to_next_cs(full_data, stop_global)
-    safety_buf  = safety_buffer_frac * usable
-    must_charge = is_CS and (state.e_arr - e_to_next < Emin + safety_buf)
+    must_rest   = flags["must_rest"]
+    must_break  = flags["must_reset_cd"] and not must_rest
+    must_b30    = (state.phi == 1) and must_break
+    must_charge = (flags["must_charge"]
+                   or (is_CS and state.e_arr - flags["e_needed"]
+                       < Emin + safety_buffer_frac * usable))
 
     batt_full = (state.e_arr >= Ecap - 1.0)
 
-    # ── Queue avoidance: skip charging at busy CS unless energy forces it ──────
+    # ── C4: queue avoidance — skip a discretionary charge at a busy station ────
+    # Q_i is a shared model parameter (no information asymmetry); an
+    # energy-forced charge (must_charge) is never skipped.
     Q_all = full_data.get("Q", {})
     if queue_threshold is None:
         queue_threshold = 0.8 * max(Q_all.values()) if Q_all else float("inf")
@@ -241,27 +253,27 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     brk = None
     rst = None
 
-    # ── Priority 1: MUST-REST ──────────────────────────────────────────────────
+    # ── Priority (iii): MUST-REST (spread or shift-driving budget) ─────────────
     if must_rest:
-        rst = "r2" if state.rho2_used < 3 else "r1"
-        # Charging is free during rest dwell at a CS, unless the station is busy
+        rst = ("r2" if state.rho2_used < int(full_data.get("rho_bar", 3))
+               else "r1")
+        # Charge for free during the pre-rest dwell at a CS, unless it is busy
         y      = 1 if (is_CS and not batt_full and not avoid_queue) else 0
         reason = f"MUST-REST ({rst.upper()})"
         if avoid_queue:
             reason += "  [queue busy, no charge]"
 
-    # ── Priority 2: MUST-BREAK ────────────────────────────────────────────────
+    # ── Priority (ii): MUST-BREAK ─────────────────────────────────────────────
     elif must_break:
         brk = "b30" if must_b30 else "b45"
-        # Charging is free during break dwell at a CS, unless the station is busy
+        # Break runs in parallel with charging at a CS, unless it is busy
         y      = 1 if (is_CS and not batt_full and not avoid_queue) else 0
         reason = f"MUST-BREAK ({brk.upper()})"
         if avoid_queue:
             reason += "  [queue busy, no charge]"
 
-    # ── Priority 3: MUST-CHARGE ───────────────────────────────────────────────
-    elif must_charge:
-        # must_charge implies is_CS already
+    # ── Priority (i): MUST-CHARGE ─────────────────────────────────────────────
+    elif must_charge and is_CS:
         y        = 1
         tauc_est = _charging_time_needed(state.e_arr, full_data)
         # Insert a break for free only if the charge is long enough to cover it
@@ -274,9 +286,36 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
         else:
             reason = "MUST-CHARGE"
 
-    # ── Priority 4: PASS — no forced condition, do nothing ──────────────────────
+    # ── Priority (iv): PASS — no forced condition, do nothing ──────────────────
     else:
         reason = "PASS"
+
+    # ── SP2: spread-aware escalation ───────────────────────────────────────────
+    # compute_flags' spread check uses o(a)=0, so `must_rest` misses the on-duty
+    # dwell (queue + charge + break + service + setup) that THIS action adds —
+    # all of which counts toward the 15 h spread ceiling (BEHDV: h_new = h +
+    # o_dwell + D_act).  A long dwell (e.g. a full charge with a parallel break)
+    # can therefore breach the ceiling before the next stop without any rest
+    # being triggered.  A daily rest is the only reset, so when the action we are
+    # about to execute would bust the ceiling, escalate it to a rest here (any
+    # planned charge still runs for free in parallel with the rest).
+    if rst is None:
+        _tent   = {"y": y, "break_type": brk, "rest_type": None}
+        _d      = _greedy_durations(full_data, stop_global, _tent, state)
+        o_dwell = _d["tauq"] + _d["tauc"] + _d["taub"]
+        if is_CS and (y or brk):
+            o_dwell += full_data.get("M_stop", {}).get(stop_global, 0.0)
+        if stop_global in set(full_data.get("C", [])):
+            o_dwell += full_data["S"].get(stop_global, 0.0)
+        Tspr2 = flags.get("Tspr2", full_data.get("Tspr2", 15.0))
+        D_wc  = flags.get("D_next_wc", 0.0)
+        if state.h + o_dwell + D_wc > Tspr2 + 1e-9:
+            rst = ("r2" if state.rho2_used < int(full_data.get("rho_bar", 3))
+                   else "r1")
+            brk    = None    # a rest supersedes the break and resets cd + spread
+            reason = (f"MUST-REST ({rst.upper()}) "
+                      f"[spread {state.h + o_dwell + D_wc:.2f}h > {Tspr2:.0f}h"
+                      + (", +charge" if y else "") + "]")
 
 
     # ── Safety guards ──────────────────────────────────────────────────────────
@@ -316,7 +355,8 @@ def compute_nominal_arrivals(full_data: dict) -> list[float]:
 
     vehicle = BEHDV(full_data)
     for stop in range(N):
-        action, _ = greedy_decision(full_data, stop, vehicle)
+        # nominal pass: no uncertainty margin (delta=0)
+        action, _ = greedy_decision(full_data, stop, vehicle, delta=0.0)
         dur       = _greedy_durations(full_data, stop, action, vehicle)
         brk       = action.get("break_type")
         rst       = action.get("rest_type")
@@ -351,11 +391,14 @@ def compute_nominal_arrivals(full_data: dict) -> list[float]:
 def run_greedy(full_data: dict,
                D_real: list,
                E_real: list,
-               safety_buffer: float             = 0.10,
-               queue_threshold: Optional[float] = None,
+               delta: float                     = 0.15,
+               safety_buffer: float             = 0.0,
+               queue_threshold: Optional[float] = None,   # deprecated, ignored
                verbose: bool                    = True,
                run_id: str                      = None,
-               oracle_tee: bool                 = True) -> dict:
+               oracle_tee: bool                 = True,
+               supervised: bool                 = True,
+               prune_quantile: float            = 1.0) -> dict:
     """
     Run the greedy benchmark simulation from stop 0 to stop N.
 
@@ -393,10 +436,6 @@ def run_greedy(full_data: dict,
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
 
-    Q_all = full_data.get("Q", {})
-    if queue_threshold is None:
-        queue_threshold = 0.8 * max(Q_all.values()) if Q_all else float("inf")
-
     # ── Output directories and file paths ─────────────────────────────────────
     for d in ("logs", "figures", "solutions"):
         os.makedirs(d, exist_ok=True)
@@ -420,30 +459,48 @@ def run_greedy(full_data: dict,
     _p(f"  GREEDY SIMULATION START   ({datetime.datetime.now():%Y-%m-%d %H:%M:%S})")
     _p(f"  Instance : {label}   run_id={run_id}")
     _p(f"  Route    : {N} stops  departure={T_START:.0f}:00")
-    _p(f"  Settings : safety={safety_buffer:.0%}  queue_thresh={queue_threshold:.2f}h")
+    _p(f"  Settings : delta={delta:.0%}  safety={safety_buffer:.0%}  "
+       f"supervised={supervised}")
     _p("=" * 65)
 
     vehicle    = BEHDV(full_data)
     tracker    = ScenarioTracker(full_data)   # records realisations only
     scores_log = []                           # empty -- greedy has no look-ahead
+    events     = dict(interventions=[], decision_times=[], cmp_log=[],
+                      repairs=[], plan_violations=[])
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     for stop in range(N):
+        t_dec = time.perf_counter()
         action, reason = greedy_decision(
             full_data,
             stop,
             vehicle,
+            delta              = delta,
             safety_buffer_frac = safety_buffer,
-            queue_threshold    = queue_threshold,
         )
+
+        # S1: identical safety-supervisor layer as every other policy.
+        # greedy_decision already uses the same compute_flags checks, so
+        # interventions should be rare; the call keeps the guarantee uniform.
+        if supervised and stop > 0:
+            action, itv = supervise_action(full_data, stop, vehicle, action,
+                                           delta=delta,
+                                           quantile=prune_quantile)
+            if itv is not None:
+                events["interventions"].append(itv)
+                _p(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
+                   f"({', '.join(itv['checks'])})")
+        events["decision_times"].append(time.perf_counter() - t_dec)
 
         y   = action.get("y", 0)
         brk = action.get("break_type") or "---"
         rst = action.get("rest_type")  or "---"
 
-        stop_type = ("CS"   if stop in set(full_data["K"]) else
-                     "CUST" if stop in set(full_data["C"]) else
-                     "ORIG" if stop == 0 else "INT")
+        stop_type = ("CS"    if stop in set(full_data["K"]) else
+                     "CUST"  if stop in set(full_data["C"]) else
+                     "LAYBY" if stop in set(full_data.get("L", [])) else
+                     "ORIG"  if stop == 0 else "INT")
 
         _p(f"\n  stop {stop:>3} ({stop_type})"
            f"  t={vehicle.t_arr:.3f}h  soc={vehicle.e_arr:.0f}kWh"
@@ -524,10 +581,13 @@ def run_greedy(full_data: dict,
         verbose     = verbose,
         oracle_tee  = oracle_tee,
         scores_log  = scores_log,
+        events      = events,
         method_meta = dict(
             method          = "greedy",
+            delta           = delta,
             safety_buffer   = safety_buffer,
-            queue_threshold = queue_threshold,
+            supervised      = supervised,
+            prune_quantile  = prune_quantile,
         ),
     )
     return results

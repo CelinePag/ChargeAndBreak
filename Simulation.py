@@ -54,12 +54,16 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 
-from BEHDV     import BEHDV
-from MILP      import solve_horizon, INFEASIBLE_PENALTY
-from scenarios import generate_scenarios, ScenarioTracker
-from settings  import LOWER_PCT, V_NOM, ecr, sample_travel_time
-from runner    import finalize_run
-from plots     import plot_simulation_results   # re-exported for callers
+from BEHDV      import BEHDV
+from MILP       import solve_horizon, INFEASIBLE_PENALTY
+from scenarios  import generate_scenarios, ScenarioTracker
+from settings   import LOWER_PCT, V_NOM, ecr, sample_travel_time
+from supervisor import compute_flags, action_passes, supervise_action
+from runner     import finalize_run
+from plots      import plot_simulation_results   # re-exported for callers
+
+# RH3: named constant for the infeasible-scenario penalty used in scoring
+T_PEN = INFEASIBLE_PENALTY
 
 
 
@@ -76,10 +80,10 @@ def _solve_one_scenario(args):
     with picklable arguments, and named arguments add no serialisation benefit.
 
     args tuple: (full_data, start_stop, end_stop, init_state,
-                 action, scenario, rho2_rem, time_limit, solve_mode)
+                 action, scenario, rho2_rem, ext_rem, time_limit, solve_mode)
     """
     (full_data, start_stop, end_stop, init_state,
-     action, scenario, rho2_rem, time_limit, solve_mode) = args
+     action, scenario, rho2_rem, ext_rem, time_limit, solve_mode) = args
     return solve_horizon(
         full_data      = full_data,
         start_stop     = start_stop,
@@ -89,6 +93,7 @@ def _solve_one_scenario(args):
         D_override     = scenario["D"],
         E_override     = scenario.get("E"),
         rho2_remaining = rho2_rem,
+        ext_remaining  = ext_rem,
         tee            = False,
         time_limit     = time_limit,
         relax          = (solve_mode != "mip"),
@@ -105,13 +110,26 @@ def find_horizon_end_stop(full_data: dict, start_stop: int,
                           state=None) -> tuple[int, int]:
     """
     Return (end_stop, n_mandatory_rests) for a look-ahead window of
-    ``horizon_hours`` hours starting at ``start_stop``.
+    ``horizon_hours`` hours starting at ``start_stop``  (RH6 — this is the
+    horizon end-stop algorithm referenced in paper §5.2; appendix pseudocode).
 
-    The horizon is extended automatically to cover any mandatory rest event
-    (consecutive driving or shift driving limit) that falls within the nominal
-    travel window.  This ensures the sub-problem always contains at least one
-    complete shift cycle, so the MILP is never forced to leave an
-    unconstrained tail.
+    Algorithm
+    ---------
+    Walk the route forward from `start_stop`, consuming a time budget
+    initialised to `horizon_hours`:
+      1. accumulate each leg's nominal duration into the consecutive-driving
+         (cd) and shift-driving (sd) counters, seeded from the current
+         vehicle state when provided;
+      2. whenever cd would exceed 4.5 h, deduct a 45-min break from the
+         budget and reset cd (a mandatory break fits inside the window);
+      3. whenever sd would exceed the shift limit, deduct a full daily rest
+         (11 h) from the budget, count it, and reset cd and sd;
+      4. stop when the budget is exhausted or the destination is reached;
+      5. finally, extend past any trailing customer stops so the window
+         never ends immediately before a hard service commitment.
+
+    This guarantees the sub-problem always contains at least one complete
+    shift cycle, so the MILP is never forced to leave an unconstrained tail.
 
     Parameters
     ----------
@@ -212,7 +230,7 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
     if state.phi == 1:# and is_CS:
         break_opts.append("b30")
     rest_opts = ["0", "r1"]
-    if state.rho2_used < 3:
+    if state.rho2_used < int(full_data.get("rho_bar", 3)):
         rest_opts.append("r2")
 
     actions = []
@@ -230,20 +248,25 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
 
 
 def _prune_actions(actions: list, stop: int, state, full_data: dict,
-                   delta: float, charge_only: bool = False, horizon: int = 48) -> tuple[list, int]:
+                   delta: float, charge_only: bool = False, horizon: int = 48,
+                   prune_quantile: float = 1.0,
+                   verbose: bool = False) -> tuple[list, int]:
     """
-    Drop structurally dominated or infeasible actions before evaluation.
+    Drop structurally dominated or infeasible actions before evaluation (RH2).
 
-    Pruning rules
-    -------------
-    must_charge  : energy to next CS (worst-case) falls below Emin + buffer
-                   → drop y=0 actions at CS stops
-    must_reset_cd: cd + worst-case next leg exceeds Tdrv_cons
-                   → drop actions with no break or rest
-    must_rest    : sd or sw + worst-case next leg exceeds their limits
-                   → drop actions with no rest
-    batt_full    : drop pure-charge actions when SOC is already ≥ Ecap−1 kWh
-    b15+phi=1    : b15 is invalid when phi=1 (would require phi=2)
+    The one-step feasibility checks (must_charge / must_reset_cd / must_rest)
+    are delegated to supervisor.compute_flags — the SAME function used by the
+    S1 safety supervisor for every policy, so pruning and supervision are a
+    single source of truth.  Under the bounded uniform support with
+    prune_quantile=1.0 this pruning is exact: it removes no action that is
+    feasible under all realizations.  For unbounded distributions pass
+    prune_quantile < 1 and report the residual risk alpha.
+
+    Additional structural rules (not safety-related):
+      batt_full    : drop pure-charge actions when SOC is already ≥ Ecap−1 kWh
+      b15+phi=1    : b15 is invalid when phi=1 (would require phi=2)
+      r1 dominance : with a short horizon and reduced-rest budget left,
+                     r2 dominates r1
 
     In charge_only mode, HoS rules are skipped because break_type=None means
     the sub-problem is free to insert breaks/rests as needed.
@@ -260,45 +283,17 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     if stop >= N:
         return actions, 0
 
-    D_next_wc = full_data["D"].get(stop, 0.0) * (1.0 + delta)
+    flags = compute_flags(full_data, stop, state, delta, prune_quantile)
 
-    must_charge = False
-    must_reset_cd = False
-    must_rest = False
-
-    e_needed, cur = 0.0, stop
-    while cur < N:
-        d_nom = full_data["D"].get(cur, 0.0)
-        L_km  = full_data.get("km", {}).get(cur, d_nom * V_NOM)
-        d_min = max(d_nom * (1.0 - delta), 1e-9)
-        v_wc  = L_km / d_min   # fastest speed → most energy (consistent with RO)
-        e_needed += L_km * ecr(v_wc)
-        cur += 1
-        if cur in K_set or cur == N:
-            break
-
-    if state.e_arr - e_needed < full_data["Emin"] and stop in K_set:
-        must_charge = True   # must charge to reach next CS, so no point enumerating y=0
-
-    if state.cd + D_next_wc > full_data["Tdrv_cons"]:
-        must_reset_cd = True
-
-    if state.sd + D_next_wc > full_data["Tdrv_sh2"] and state.ext_shift_used < 2:
-        must_rest = True
-    elif state.sd + D_next_wc > full_data["Tdrv_sh1"] and state.ext_shift_used >= 2:
-        must_rest = True
-    elif state.sw + D_next_wc > full_data["Twrk_sh"]:
-        must_rest = True
+    if verbose:
+        print(f"     [PRUNE] stop={stop}  must_charge={flags['must_charge']} "
+              f"(e_arr={state.e_arr:.1f}, e_needed={flags['e_needed']:.1f})  "
+              f"must_reset_cd={flags['must_reset_cd']} (cd={state.cd:.2f})  "
+              f"must_rest={flags['must_rest']} (sd={state.sd:.2f}, "
+              f"h={getattr(state, 'h', 0.0):.2f}, "
+              f"D_wc={flags['D_next_wc']:.2f})")
 
     pruned = []
-
-
-    print()
-    print(f"     [PRUNE] stop={stop}  must_charge={must_charge} (e_arr={state.e_arr:.1f}, e_needed={e_needed:.1f}) ")
-    print(f"             must_reset_cd={must_reset_cd} (cd={state.cd:.2f}, D_next_wc={D_next_wc:.2f})  ")
-    print(f"             must_rest={must_rest}   (sd={state.sd:.2f}, sw={state.sw:.2f}, D_next_wc={D_next_wc:.2f}, ext_shift_used={state.ext_shift_used})  ")
-
-
     for a in actions:
         y, brk, rst = a["y"], a["break_type"], a["rest_type"]
         if not charge_only and brk == "b15" and state.phi == 1:
@@ -306,10 +301,17 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
         if y and stop in K_set and state.e_arr > full_data["Ecap"] - 1.0 \
                 and brk in (None, "0") and rst in (None, "0"):
             continue   # pure charge on full battery: queue cost, negligible gain
-        if must_charge   and not y and stop in K_set: continue
-        if must_reset_cd and brk in (None, "0") and rst in (None, "0"): continue
-        if must_rest     and rst in (None, "0"):                       continue
-        if horizon <= 48 and rst == "r1" and state.rho2_used < 2: continue  # will always choose reduced rest anyway
+        # normalise "0" placeholders to None for the shared check
+        a_norm = dict(y=y,
+                      break_type=None if brk in (None, "0") else brk,
+                      rest_type=None if rst in (None, "0") else rst)
+        if not charge_only and not action_passes(full_data, stop, state,
+                                                 a_norm, flags):
+            continue
+        if flags["must_charge"] and not y and stop in K_set:
+            continue   # applies in charge_only mode too
+        if horizon <= 48 and rst == "r1" and state.rho2_used < 2:
+            continue   # will always choose reduced rest anyway
         pruned.append(a)
 
     if not pruned:
@@ -529,12 +531,14 @@ def evaluate_action(full_data, start_stop, end_stop, state,
     -------
     (score, std, n_feasible, first_feas_result, raw_objs)
     """
-    rho2_rem = 3 - state.rho2_used
+    rho2_rem = int(full_data.get("rho_bar", 3)) - state.rho2_used
+    ext_rem  = int(full_data.get("ext_bar", 2)) - getattr(state,
+                                                          "ext_shift_used", 0)
     init_st  = state.as_init_state()
 
     arg_list = [
         (full_data, start_stop, end_stop, init_st,
-         action, scen, rho2_rem, time_limit, solve_mode)
+         action, scen, rho2_rem, ext_rem, time_limit, solve_mode)
         for scen in scenarios
     ]
 
@@ -568,9 +572,23 @@ def evaluate_action(full_data, start_stop, end_stop, state,
     feas_objs = [o for o in objs if o < INFEASIBLE_PENALTY / 2]
     std       = float(np.std(feas_objs))
 
-    if criterion == "worst":  score = float(max(objs))
-    elif criterion == "best": score = float(min(feas_objs))
-    else:                     score = float(np.mean(objs))   # default: mean
+    # RH3 — scenario aggregation: mean (default, infeasible penalised at
+    # T_PEN), worst, best, or CVaR_0.8 (mean of the worst 20% of scenarios;
+    # trades mean duration against tail risk).
+    if criterion == "worst":
+        score = float(max(objs))
+    elif criterion == "best":
+        score = float(min(feas_objs))
+    elif criterion.startswith("cvar"):
+        try:
+            alpha = float(criterion.split("_", 1)[1]) if "_" in criterion else 0.8
+        except ValueError:
+            alpha = 0.8
+        srt   = sorted(objs)                       # penalties included in tail
+        k     = max(1, int(round((1.0 - alpha) * len(srt))))
+        score = float(np.mean(srt[-k:]))
+    else:
+        score = float(np.mean(objs))               # default: mean
 
     return score, std, n_feas, first_feas, objs, results
 
@@ -588,7 +606,9 @@ def select_best_action(full_data, stop: int, state,
                        prev_nom_sol=None, log_fh=None,
                        tracker: ScenarioTracker = None,
                        precomputed_scenarios=None,
-                       ext_shift_used: int = 0) -> tuple:
+                       ext_shift_used: int = 0,
+                       prune_quantile: float = 1.0,
+                       cmp_log: list = None) -> tuple:
     """
     Enumerate, prune, score, and select the best action at ``stop``.
 
@@ -622,29 +642,26 @@ def select_best_action(full_data, stop: int, state,
             try: print(msg, file=log_fh)
             except Exception: pass
 
-    # ── Extended shift driving exception (EU Reg 561/2006, Art. 6(2)) ─────────
-    # Tdrv_sh2 (10h) is allowed instead of the normal Tdrv_sh1 (9h) at most
-    # twice per week.  When the budget is not yet exhausted, pass 10h as the
-    # effective shift-driving limit to every MILP/LP sub-problem built in this
-    # call.  A shallow copy of full_data is sufficient since only a scalar changes.
-    _tdrv_sh2 = full_data.get("Tdrv_sh2", full_data["Tdrv_sh1"])
-    if ext_shift_used < 2 and _tdrv_sh2 > full_data["Tdrv_sh1"]:
-        # M_sd is the big-M for the shift-driving linearisation (l2 = sd·ρ).
-        # It must be ≥ max(sd), i.e. ≥ Tdrv_sh1.  If we raise Tdrv_sh1 to 10h
-        # but leave M_sd=9h, the big-M constraints make sd>9h infeasible even
-        # though sd_ub allows 10h.
-        full_data = dict(full_data, Tdrv_sh1=_tdrv_sh2, M_sd=_tdrv_sh2)
+    # ── Extended shift driving exception (EU Reg 561/2006, Art. 6(1)) ─────────
+    # M6: the 10 h allowance is now modelled EXPLICITLY inside the MILP via
+    # the z / q_ext budget mechanism (R16)–(R19); the old shallow-copy hack
+    # that raised Tdrv_sh1 for every sub-problem is gone.  Here we only
+    # compute the remaining budget and pass it to every sub-problem solve.
+    ext_rem = int(full_data.get("ext_bar", 2)) - ext_shift_used
 
     # ── 1. Enumerate + prune ─────────────────────────────────────────────────
     actions, n_pruned = _prune_actions(
         enumerate_actions(stop, state, full_data, charge_only=charge_only),
-        stop, state, full_data, delta, charge_only=charge_only, horizon = horizon_hours)
+        stop, state, full_data, delta, charge_only=charge_only,
+        horizon=horizon_hours, prune_quantile=prune_quantile, verbose=verbose)
 
     end_stop, n_rests = find_horizon_end_stop(
         full_data, stop, horizon_hours, state=state)
 
     K_set = set(full_data["K"]); C_set = set(full_data["C"])
-    stype    = "CS" if stop in K_set else "CUST" if stop in C_set else "ORIG"
+    L_set = set(full_data.get("L", []))
+    stype    = ("CS" if stop in K_set else "CUST" if stop in C_set else
+                "LAYBY" if stop in L_set else "ORIG")
     travel_h = sum(full_data["D"].get(j, 0) for j in range(stop, end_stop))
     mode_tag = solve_mode + (",co" if charge_only else "")
 
@@ -689,7 +706,8 @@ def select_best_action(full_data, stop: int, state,
             end_stop       = end_stop,
             init_state     = state.as_init_state(),
             fixed_action   = None,
-            rho2_remaining = 3 - state.rho2_used,
+            rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
+                ext_remaining  = ext_rem,
             tee            = False,
             time_limit     = max(time_limit, 15),
             relax          = free_relax,
@@ -706,7 +724,8 @@ def select_best_action(full_data, stop: int, state,
                 end_stop       = end_stop,
                 init_state     = state.as_init_state(),
                 fixed_action   = None,
-                rho2_remaining = 3 - state.rho2_used,
+                rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
+                ext_remaining  = ext_rem,
                 tee            = True,          # ← dumps debug_stop23.lp
                 time_limit     = 30,
                 relax          = free_relax,
@@ -863,7 +882,8 @@ def select_best_action(full_data, stop: int, state,
             end_stop       = end_stop,
             init_state     = state.as_init_state(),
             fixed_action   = best_action,
-            rho2_remaining = 3 - state.rho2_used,
+            rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
+                ext_remaining  = ext_rem,
             tee            = False,
             time_limit     = time_limit * 4,
             relax          = False,
@@ -877,7 +897,8 @@ def select_best_action(full_data, stop: int, state,
                 end_stop       = end_stop,
                 init_state     = state.as_init_state(),
                 fixed_action   = None,
-                rho2_remaining = 3 - state.rho2_used,
+                rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
+                ext_remaining  = ext_rem,
                 tee            = False,
                 time_limit     = time_limit * 4,
                 relax          = False,
@@ -895,7 +916,8 @@ def select_best_action(full_data, stop: int, state,
             end_stop       = end_stop,
             init_state     = state.as_init_state(),
             fixed_action   = best_action,
-            rho2_remaining = 3 - state.rho2_used,
+            rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
+                ext_remaining  = ext_rem,
             tee            = False,
             time_limit     = time_limit * 4,
             relax          = False,
@@ -953,7 +975,11 @@ def select_best_action(full_data, stop: int, state,
             _brk = "b30"
             _p(f"     [POST-HOC] tauc={_tc_patch*60:.0f}m >= 30m → b30 injected (free, concurrent)")
 
-    # ── LP vs MIP comparison log ──────────────────────────────────────────────
+    # ── RH4: LP vs MIP action-selection agreement ─────────────────────────────
+    # With solve_mode="both", record per-stop whether the LP-scored and
+    # MIP-scored winners agree, plus the MIP-score delta induced by executing
+    # the LP choice.  Aggregated by run_simulation* into the agreement-rate
+    # summary (paper §5.2, Table lp-vs-milp).
     if solve_mode == "both":
         lp_w  = min(lp_det,  key=lambda s: s[1])[0]
         mip_w = best_action
@@ -963,12 +989,28 @@ def select_best_action(full_data, stop: int, state,
         match = (lp_w["y"] == mip_w["y"]
                  and lp_w["break_type"] == mip_w["break_type"]
                  and lp_w["rest_type"]  == mip_w["rest_type"])
+        _lp_choice_mip_score = next(
+            (s[1] for s in scored
+             if s[0]["y"] == lp_w["y"]
+             and s[0]["break_type"] == lp_w["break_type"]
+             and s[0]["rest_type"]  == lp_w["rest_type"]), None)
+        if cmp_log is not None:
+            cmp_log.append(dict(
+                stop=stop, agree=bool(match),
+                lp_action=_astr(lp_w), mip_action=_astr(mip_w),
+                mip_score_of_mip_choice=float(best_score),
+                mip_score_of_lp_choice=(float(_lp_choice_mip_score)
+                                        if _lp_choice_mip_score is not None
+                                        else None)))
         if match:
             _p(f"     [CMP] LP=MIP OK  {_astr(mip_w)}")
         else:
+            _dstr = (f"  (MIP-score delta "
+                     f"{(_lp_choice_mip_score - best_score)*60:.1f} min)"
+                     if _lp_choice_mip_score is not None else "")
             _p(f"     [CMP] LP  {_astr(lp_w)}")
             _p(f"     [CMP] MIP {_astr(mip_w)}  <- executed")
-            _p(f"     [CMP] DIFFER")
+            _p(f"     [CMP] DIFFER{_dstr}")
 
     # ── CHOSEN line ───────────────────────────────────────────────────────────
     # Compute ta and td at the current stop from the nominal solution.
@@ -1036,7 +1078,9 @@ def run_simulation(full_data: dict,
                    criterion: str      = "mean",
                    include_best: bool  = False,
                    include_worst: bool = False,
-                   run_id: str         = None) -> dict:
+                   run_id: str         = None,
+                   supervised: bool    = True,
+                   prune_quantile: float = 1.0) -> dict:
     """
     Run the rolling-horizon look-ahead simulation from stop 0 to stop N.
 
@@ -1080,6 +1124,9 @@ def run_simulation(full_data: dict,
     tracker    = ScenarioTracker(full_data)
     scores_log = []
     prev_sol   = None
+    # S1/S2/RH4 event records
+    events     = dict(interventions=[], decision_times=[], cmp_log=[],
+                      repairs=[], plan_violations=[])
 
     # ── Output directories and file paths ─────────────────────────────────────
     for d in ("logs", "figures", "solutions"):
@@ -1114,6 +1161,7 @@ def run_simulation(full_data: dict,
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     for stop in range(N):
+        t_dec = time.perf_counter()
         if stop == 0:
             # Origin: no decision needed (no activity allowed at stop 0)
             action     = dict(y=0, break_type=None, rest_type=None)
@@ -1140,13 +1188,16 @@ def run_simulation(full_data: dict,
                 log_fh         = log,
                 tracker        = tracker,
                 ext_shift_used = vehicle.ext_shift_used,
+                prune_quantile = prune_quantile,
+                cmp_log        = events["cmp_log"],
             )
 
         # ── Forced-rest safety net ────────────────────────────────────────────
         # If ALL scored actions are infeasible, the horizon was too short to
         # plan a mandatory rest.  Insert a minimum corrective rest.
         if stop > 0 and all(s[1] >= INFEASIBLE_PENALTY / 2 for s in score_list):
-            rst_type = "r2" if vehicle.rho2_used < 3 else "r1"
+            rst_type = ("r2" if vehicle.rho2_used < int(full_data.get("rho_bar", 3))
+                        else "r1")
             action   = dict(y=1 if stop in set(full_data["K"]) else 0,
                             break_type=None, rest_type=rst_type)
             _lp(f"  [!] FORCED REST ({rst_type}) at stop {stop}")
@@ -1157,7 +1208,8 @@ def run_simulation(full_data: dict,
                 end_stop       = end_fr,
                 init_state     = vehicle.as_init_state(),
                 fixed_action   = action,
-                rho2_remaining = 3 - vehicle.rho2_used,
+                rho2_remaining = int(full_data.get("rho_bar", 3)) - vehicle.rho2_used,
+                ext_remaining  = int(full_data.get("ext_bar", 2)) - vehicle.ext_shift_used,
                 tee            = False,
                 time_limit     = 30,
                 relax          = False,
@@ -1165,11 +1217,24 @@ def run_simulation(full_data: dict,
             nom_sol    = forced if forced["feasible"] else None
             score_list = [(action, INFEASIBLE_PENALTY, 0.0, 0, [])]
 
+        # ── S1: safety supervisor (identical layer for every policy) ──────────
+        if supervised and stop > 0:
+            action, itv = supervise_action(full_data, stop, vehicle, action,
+                                           delta=delta, quantile=prune_quantile)
+            if itv is not None:
+                events["interventions"].append(itv)
+                _lp(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
+                    f"({', '.join(itv['checks'])})")
+                nom_sol = None   # planned durations no longer match
+
+        events["decision_times"].append(time.perf_counter() - t_dec)
+
         scores_log.append(score_list)
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
 
         # Draw actual travel time and energy from the uncertainty distribution.
         # This is the simulation realisation — NOT used in any decision above.
+        # RH2: the pruning/supervisor use the SAME delta as this draw.
         d_nom = full_data["D"].get(stop, 0.0)
         D_next = sample_travel_time(d_nom, rng, lower_pct=delta, upper_pct=delta)
         km_leg = full_data.get("km", {}).get(stop, d_nom * V_NOM)
@@ -1205,6 +1270,7 @@ def run_simulation(full_data: dict,
         verbose     = verbose,
         oracle_tee  = True,
         scores_log  = scores_log,
+        events      = events,
         method_meta = dict(
             method        = "simulation",
             n_scenarios   = n_scenarios,
@@ -1213,6 +1279,8 @@ def run_simulation(full_data: dict,
             criterion     = criterion,
             solve_mode    = solve_mode,
             charge_only   = charge_only,
+            supervised    = supervised,
+            prune_quantile= prune_quantile,
             seed          = seed,
         ),
     )
@@ -1240,6 +1308,8 @@ def run_simulation_precomputed(
     include_worst: bool          = False,
     run_id: str                  = None,
     oracle_tee: bool             = False,
+    supervised: bool             = True,
+    prune_quantile: float        = 1.0,
 ) -> dict:
     """
     Run the rolling-horizon look-ahead (LA) simulation using a precomputed
@@ -1283,6 +1353,8 @@ def run_simulation_precomputed(
     tracker = ScenarioTracker(full_data)
     scores_log = []
     prev_sol   = None
+    events     = dict(interventions=[], decision_times=[], cmp_log=[],
+                      repairs=[], plan_violations=[])
 
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
@@ -1322,6 +1394,7 @@ def run_simulation_precomputed(
 
     # ── Main loop ─────────────────────────────────────────────────────────────
     for stop in range(N):
+        t_dec = time.perf_counter()
         if stop == 0:
             action     = dict(y=0, break_type=None, rest_type=None)
             nom_sol    = None
@@ -1350,11 +1423,14 @@ def run_simulation_precomputed(
                 log_fh                = log,
                 tracker               = tracker,
                 ext_shift_used        = vehicle.ext_shift_used,
+                prune_quantile        = prune_quantile,
+                cmp_log               = events["cmp_log"],
             )
 
         # ── Forced-rest safety net ────────────────────────────────────────────
         if stop > 0 and all(s[1] >= INFEASIBLE_PENALTY / 2 for s in score_list):
-            rst_type = "r2" if vehicle.rho2_used < 3 else "r1"
+            rst_type = ("r2" if vehicle.rho2_used < int(full_data.get("rho_bar", 3))
+                        else "r1")
             action   = dict(y=1 if stop in set(full_data["K"]) else 0,
                             break_type=None, rest_type=rst_type)
             _lp(f"  [!] FORCED REST ({rst_type}) at stop {stop}")
@@ -1365,13 +1441,26 @@ def run_simulation_precomputed(
                 end_stop       = end_fr,
                 init_state     = vehicle.as_init_state(),
                 fixed_action   = action,
-                rho2_remaining = 3 - vehicle.rho2_used,
+                rho2_remaining = int(full_data.get("rho_bar", 3)) - vehicle.rho2_used,
+                ext_remaining  = int(full_data.get("ext_bar", 2)) - vehicle.ext_shift_used,
                 tee            = False,
                 time_limit     = 30,
                 relax          = False,
             )
             nom_sol    = forced if forced["feasible"] else None
             score_list = [(action, INFEASIBLE_PENALTY, 0.0, 0, [])]
+
+        # ── S1: safety supervisor (identical layer for every policy) ──────────
+        if supervised and stop > 0:
+            action, itv = supervise_action(full_data, stop, vehicle, action,
+                                           delta=delta, quantile=prune_quantile)
+            if itv is not None:
+                events["interventions"].append(itv)
+                _lp(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
+                    f"({', '.join(itv['checks'])})")
+                nom_sol = None   # planned durations no longer match
+
+        events["decision_times"].append(time.perf_counter() - t_dec)
 
         scores_log.append(score_list)
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
@@ -1409,6 +1498,7 @@ def run_simulation_precomputed(
         verbose     = verbose,
         oracle_tee  = oracle_tee,
         scores_log  = scores_log,
+        events      = events,
         method_meta = dict(
             method        = alg,
             n_scenarios   = n_scenarios,
@@ -1417,6 +1507,8 @@ def run_simulation_precomputed(
             criterion     = criterion,
             solve_mode    = solve_mode,
             charge_only   = charge_only,
+            supervised    = supervised,
+            prune_quantile= prune_quantile,
         ),
     )
     return results

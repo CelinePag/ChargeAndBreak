@@ -26,20 +26,24 @@ Time windows
   each customer's arrival-time window [Wha, Whf]:
 
     none    : unconstrained (Wha=T_START, Whf=T_START+2e7) -- today's behaviour
-    tight   : half-width ~ Uniform(1h, 2h)  per customer
-    medium  : half-width ~ Uniform(3h, 6h)  per customer
-    large   : half-width ~ Uniform(6h, 12h) per customer
+    tight   : half-width ~ Uniform(0.5h, 1.0h) per customer
+    medium  : half-width ~ Uniform(1.0h, 3.0h) per customer
+    large   : half-width ~ Uniform(3.0h, 6.0h) per customer
 
-  The window is centred on the arrival time the GREEDY policy reaches that
-  customer at, running with nominal (undisturbed) travel times and no time
-  windows (see greedy.compute_nominal_arrivals).  Concretely:
+  Each customer on a route draws its OWN half-width independently, so
+  customers on the same route generally have DIFFERENT window widths.  The
+  window is centred on the nominal service start from the deterministic MILP
+  solve of the uncapacitated-window instance (greedy warm start, greedy
+  fallback on timeout — see _nominal_milp_arrivals).  Concretely, with a small
+  ±10% centre jitter j:
 
-    Wha[c] = max(T_START, t_nominal[c] - half_width)
-    Whf[c] = t_nominal[c] + half_width
+    Wha[c] = max(T_START, t_nominal[c] + j - half_width_c)
+    Whf[c] = t_nominal[c] + j + half_width_c
 
-  Route geometry and D_real/E_real are IDENTICAL across window classes for
-  the same seed -- only Wha/Whf differ -- because the half-width draws
-  happen last, after every other rng-consuming step.
+  Each window class is an INDEPENDENT random instance: window_class is folded
+  into the geometry seed (see _geometry_seed), so the four window classes of a
+  given seed have DIFFERENT routes, customer placements, and D_real/E_real --
+  not merely different Wha/Whf.
 
 Generating all files
 --------------------
@@ -84,6 +88,7 @@ Import chain
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -95,7 +100,8 @@ import numpy as np
 
 from instances import instance_realistic
 from scenarios import _ecr
-from settings  import V_NOM, sample_travel_time
+from settings  import (V_NOM, sample_travel_time, sample_multipliers,
+                       LOWER_PCT, TRAVEL_TIME_DIST, TRAVEL_TIME_AR1_RHO)
 from greedy    import compute_nominal_arrivals
 
 
@@ -119,12 +125,18 @@ _CUST_TAG   = {"few":   "Cfew",   "medium": "Cmedium", "many": "Cmany"}
 _WINDOW_TAG = {"none": "Tnone", "tight": "Ttight", "medium": "Tmedium", "large": "Tlarge"}
 
 # Per-customer half-width sampling range (hours) for each window class.
-# "none" is unconstrained and draws no half-widths.
+# Every customer on a route draws its OWN half-width independently, uniformly
+# from the class range — so customers on the same route have different window
+# widths.  "none" is unconstrained and draws no half-widths.
 _WINDOW_HALF_WIDTH_RANGE: dict[str, tuple[float, float]] = {
     "tight":  (0.5, 1.0),
     "medium": (1.0, 3.0),
     "large":  (3.0, 6.0),
 }
+
+# Destination deadline (R6) slack relative to the nominal arrival
+_DEADLINE_KAPPA = 0.20
+_DEADLINE_DMIN  = 2.0
 
 
 def instance_filename(route_class: str, customers_class: str,
@@ -134,43 +146,126 @@ def instance_filename(route_class: str, customers_class: str,
             f"{_WINDOW_TAG[window_class]}_{seed}.json")
 
 
-def generate_time_windows(full_data: dict, window_class: str,
-                          rng: np.random.Generator) -> dict:
+def _geometry_seed(route_class: str, customers_class: str,
+                   window_class: str, seed: int, attempt: int) -> int:
+    """Deterministic geometry seed for one instance, folding in ALL axes.
+
+    Every (route_class, customers_class, window_class, seed) is an INDEPENDENT
+    random instance — the window class is mixed into the seed so the four
+    window classes of a given seed draw DIFFERENT routes and customer
+    placements (not just different windows).  ``attempt`` advances the seed on
+    M9-rejection regeneration.  SHA-256-based so the axes vary independently
+    with no structured collisions; the filename still encodes the requested
+    ``seed``, and the derived value is recorded in the JSON meta for
+    traceability.  Returns a 32-bit int accepted by both random.seed and
+    np.random.default_rng.
     """
-    Draw per-customer time windows and write them into full_data["Wha"] /
-    full_data["Whf"] (absolute hours, in place).
+    key = f"{route_class}|{customers_class}|{window_class}|{seed}|{attempt}"
+    return int.from_bytes(hashlib.sha256(key.encode()).digest()[:4], "big")
 
-    The window is centred on the arrival time the greedy policy reaches that
-    customer at under nominal (undisturbed) travel times and no time-window
-    constraints.  A half-width is drawn independently per customer from
-    Uniform(*_WINDOW_HALF_WIDTH_RANGE[window_class]) using ``rng``, so this
-    must be called AFTER every other rng-consuming step (D_real, scenarios)
-    for a given instance file, to keep the underlying instance identical
-    across window classes for the same seed.
 
-    Parameters
-    ----------
-    full_data     : dict from instances.make_data() -- Wha/Whf mutated in place
-    window_class  : "tight" | "medium" | "large"  ("none" should not call this)
-    rng           : np.random.Generator -- shared instance rng
+def _nominal_milp_arrivals(full_data: dict,
+                           solver_time_limit: int = 120,
+                           mip_gap: float = 0.05) -> tuple:
+    """
+    I1 — Solve the DETERMINISTIC MILP of the uncapacitated-window instance
+    (nominal travel times, unconstrained windows) and return the per-stop
+    nominal arrival times used to centre the customer time windows.
+
+    Warm-started by the greedy nominal pass; on timeout / infeasibility the
+    greedy schedule itself is used and flagged.
+
+    The extracted arrival times (``model.ta``) come from the INCUMBENT, which
+    on these instances stabilises within a few seconds — nearly all remaining
+    solve time is spent closing the (loose) lower bound to prove optimality,
+    which does not change ``ta`` at all.  Since the arrival times only set
+    window CENTRES (which then get a ±10% jitter, see generate_time_windows),
+    a loose gap (default 5%) plus a short time limit gives essentially the
+    same centres as a 1% gap while avoiding the bound-proving cost that made
+    medium/long routes take up to the full time limit per instance.
 
     Returns
     -------
-    dict {customer_stop: half_width_h} -- the draws made, for the JSON meta
+    (t_nominal, source) — list of absolute arrival hours per stop 0..N and
+    the string "milp" or "greedy" identifying which schedule produced it.
     """
-    lo, hi  = _WINDOW_HALF_WIDTH_RANGE[window_class]
-    T_START = full_data["T_START"]
+    import contextlib as _ctx
+    import io as _io
 
-    t_nominal = compute_nominal_arrivals(full_data)
+    import pyomo.environ as pyo
+    from MILP import build_model
+
+    t_greedy = compute_nominal_arrivals(full_data)
+
+    try:
+        model  = build_model(full_data)
+        solver = pyo.SolverFactory("gurobi")
+        solver.options["MIPGap"]    = mip_gap
+        solver.options["TimeLimit"] = solver_time_limit
+        _sink = _io.StringIO()
+        with _ctx.redirect_stdout(_sink), _ctx.redirect_stderr(_sink):
+            res = solver.solve(model, tee=False)
+        status = str(res.solver.termination_condition)
+        if status in ("optimal", "feasible", "maxTimeLimit"):
+            obj = pyo.value(model.obj)
+            if obj is not None and obj < 1e8:
+                t_nom = [float(pyo.value(model.ta[i]))
+                         for i in full_data["I"]]
+                return t_nom, "milp"
+    except Exception:
+        pass
+    return list(t_greedy), "greedy"
+
+
+def generate_time_windows(full_data: dict, window_class: str,
+                          rng: np.random.Generator,
+                          solver_time_limit: int = 120,
+                          mip_gap: float = 0.05) -> dict:
+    """
+    I1 — Generate per-customer time windows and the destination deadline,
+    writing them into full_data["Wha"] / full_data["Whf"] / full_data["T_dead"]
+    (absolute hours, in place).
+
+    Windows are centred on the NOMINAL SERVICE START from the deterministic
+    MILP solution of the uncapacitated-window instance (greedy warm start,
+    time limit; greedy fallback flagged via the returned meta).  Each customer
+    draws its OWN half-width independently,
+
+        Delta_c ~ Uniform(lo, hi),   (lo, hi) = _WINDOW_HALF_WIDTH_RANGE[class]
+
+    so customers on the same route generally have DIFFERENT window widths.
+
+    ``rng`` is consumed twice per customer (the half-width draw, then a small
+    jitter on the window CENTRE, uniform ±10% of that half-width) so the draw
+    order contract with generate_instance_file is preserved.
+
+    Returns
+    -------
+    dict {customer_stop: half_width_h} plus keys "_source" ("milp"|"greedy")
+    and "_deadline" — for the JSON meta.
+    """
+    T_START  = full_data["T_START"]
+    lo, hi   = _WINDOW_HALF_WIDTH_RANGE[window_class]
+
+    t_nominal, source = _nominal_milp_arrivals(
+        full_data, solver_time_limit=solver_time_limit, mip_gap=mip_gap)
 
     half_widths = {}
     for c in sorted(full_data["C"]):
-        hw = float(rng.uniform(lo, hi))
-        half_widths[c] = hw
         t_c = t_nominal[c]
-        full_data["Wha"][c] = max(T_START, t_c - hw)
-        full_data["Whf"][c] = t_c + hw
+        hw  = float(rng.uniform(lo, hi))  # each customer draws its own width
+        jit = float(rng.uniform(-0.1, 0.1)) * hw
+        half_widths[c] = hw
+        full_data["Wha"][c] = max(T_START, t_c + jit - hw)
+        full_data["Whf"][c] = t_c + jit + hw
 
+    # Destination deadline (R6)
+    t_N = t_nominal[full_data["N"]]
+    full_data["T_dead"] = t_N + max(_DEADLINE_DMIN,
+                                    _DEADLINE_KAPPA * (t_N - T_START))
+
+    half_widths["_source"]   = source
+    half_widths["_deadline"] = full_data["T_dead"]
     return half_widths
 
 
@@ -215,21 +310,29 @@ def generate_instance_file(route_class: str,
                            window_class: str,
                            seed: int,
                            output_dir: str  = "instances",
-                           delta: float     = 0.20,
-                           verbose: bool    = True) -> str:
+                           delta: float     = LOWER_PCT,
+                           verbose: bool    = True,
+                           dist: str        = TRAVEL_TIME_DIST,
+                           ar1_rho: float   = TRAVEL_TIME_AR1_RHO,
+                           cs_spacing_km: float | None = None,
+                           charger_power_kw: float | None = None,
+                           add_laybys: bool = True,
+                           max_attempts: int = 5) -> str:
     """
     Generate one precomputed instance JSON file.
 
-    The seed controls everything:
-      - random.seed(seed)  fixes the route geometry (via instance_realistic)
-      - numpy RNG seeded from seed fixes CS queue-time draws (via
+    The (route_class, customers_class, window_class, seed) tuple controls
+    everything via a single derived geometry seed (see _geometry_seed):
+      - random.seed(geo_seed)  fixes the route geometry (via instance_realistic)
+      - numpy RNG seeded from geo_seed fixes CS queue-time draws (via
         instance_realistic -> make_data), the uncertainty realisation
         (D_real, E_real), and (when window_class != "none") the per-customer
         time-window half-widths.
 
-    Because the half-width draws happen LAST (after D_real), route geometry
-    and D_real/E_real are bit-identical across window classes for the same
-    seed -- only Wha/Whf differ.
+    Because window_class is folded into geo_seed, each window class is an
+    INDEPENDENT random instance: the four window classes of a given seed have
+    DIFFERENT routes, customer placements, and D_real / E_real — not merely
+    different Wha/Whf.
 
     No scenario pool is generated or stored here — 2SP and LA draw scenarios
     live at solve/decision time (see scenarios.generate_scenarios).
@@ -253,14 +356,37 @@ def generate_instance_file(route_class: str,
     filepath = os.path.join(output_dir, filename)
 
     # ── 1. Generate route geometry ─────────────────────────────────────────────
-    random.seed(seed)
-    rng = np.random.default_rng(seed)
-    full_data = instance_realistic(
-        route_class     = route_class,
-        customers_class = customers_class,
-        clusters        = 3,
-        rng             = rng,
-    )
+    # I1: instances whose deterministic model is infeasible under nominal data
+    # (e.g. the weekly 56 h driving guard, M9) are discarded and regenerated
+    # with an advanced attempt seed; the filename keeps the REQUESTED seed.
+    full_data = None
+    geo_seed  = None
+    for attempt in range(max_attempts):
+        geo_seed = _geometry_seed(route_class, customers_class,
+                                  window_class, seed, attempt)
+        random.seed(geo_seed)
+        rng = np.random.default_rng(geo_seed)
+        try:
+            full_data = instance_realistic(
+                route_class      = route_class,
+                customers_class  = customers_class,
+                clusters         = 3,
+                rng              = rng,
+                cs_spacing_km    = cs_spacing_km,
+                charger_power_kw = charger_power_kw,
+                add_laybys       = add_laybys,
+            )
+            break
+        except AssertionError as e:
+            if verbose:
+                print(f"  {filename}: geometry rejected "
+                      f"(attempt {attempt+1}: {e}); regenerating")
+            full_data = None
+    if full_data is None:
+        raise RuntimeError(
+            f"could not generate a feasible instance for {filename} "
+            f"after {max_attempts} attempts")
+
     # Override title/label with the canonical seed-based name so that all
     # output files (logs, figures, solutions) are named after the instance.
     stem = instance_filename(route_class, customers_class, window_class, seed).replace(".json", "")
@@ -277,25 +403,28 @@ def generate_instance_file(route_class: str,
         print(f"  {filename}  N={N}  |C|={len(full_data['C'])}"
               f"  |K|={len(full_data['K'])}", end="  ")
 
-    # ── 2. Draw uncertainty realisation ───────────────────────────────────────
+    # ── 2. Draw uncertainty realisation (S5: distribution + correlation) ──────
+    mults  = sample_multipliers(N, rng, delta=delta, dist=dist,
+                                ar1_rho=ar1_rho)
     D_real = []
     E_real = []
     for leg in range(N):
         d_nom = D_nom.get(leg, 0.0)
-        d_act = sample_travel_time(D_nom.get(leg, 0.0), rng, lower_pct = delta, upper_pct = delta)
+        d_act = d_nom * float(mults[leg])
         L_km  = km.get(leg, d_nom * V_NOM)
         v_act = L_km / d_act if d_act > 0 else V_NOM
         e_act = L_km * _ecr(v_act)
         D_real.append(round(d_act, 6))
         E_real.append(round(e_act, 4))
 
-    # ── 3. Draw time windows (nominal greedy arrival ± random half-width) ─────
+    # ── 3. Time windows (I1: MILP nominal service starts, exposure-scaled) ────
     half_widths = {}
     if window_class != "none":
         half_widths = generate_time_windows(full_data, window_class, rng)
         if verbose:
-            print(f"  [{window_class} windows: "
-                  f"{min(half_widths.values()):.1f}-{max(half_widths.values()):.1f}h half-width]",
+            _hw = [v for k, v in half_widths.items() if not str(k).startswith("_")]
+            print(f"  [{window_class} windows ({half_widths.get('_source')}): "
+                  f"{min(_hw):.1f}-{max(_hw):.1f}h half-width]",
                   end="  ")
 
     # ── 4. Write JSON ──────────────────────────────────────────────────────────
@@ -305,7 +434,13 @@ def generate_instance_file(route_class: str,
             customers_class    = customers_class,
             window_class       = window_class,
             seed               = seed,
+            geometry_seed      = geo_seed,
             delta              = delta,
+            dist               = dist,
+            ar1_rho            = ar1_rho,
+            cs_spacing_km      = cs_spacing_km,
+            charger_power_kw   = charger_power_kw,
+            add_laybys         = add_laybys,
             created_at         = datetime.now().isoformat(timespec="seconds"),
             window_half_widths = _to_json_safe(half_widths),
         ),
@@ -330,7 +465,7 @@ def generate_instance_file(route_class: str,
 
 def generate_all(output_dir: str  = "instances",
                  n_seeds: int     = 50,
-                 delta: float     = 0.20,
+                 delta: float     = LOWER_PCT,
                  first_seed: int  = 1,
                  combos           = None,
                  verbose: bool    = True) -> list[str]:
@@ -339,9 +474,11 @@ def generate_all(output_dir: str  = "instances",
 
     For each (route_class, customers_class, window_class) combination and
     each seed in [first_seed, first_seed + n_seeds), one JSON file is written.
-    The same seed is reused across all 4 window classes of a given
-    (route_class, customers_class) pair, so those 4 files share identical
-    route geometry / D_real / E_real and differ only in Wha/Whf.
+    Each (route_class, customers_class, window_class) combination is an
+    INDEPENDENT random instance: the window class is folded into the geometry
+    seed (see _geometry_seed), so the four window classes of a given seed have
+    DIFFERENT routes, customer placements, and D_real / E_real — not just
+    different Wha/Whf.
 
     Total files: len(combos) * n_seeds  (default: 9*4 * 50 = 1800 files)
 
@@ -432,6 +569,31 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
         K_set = set(full_data.get("K", []))
         full_data["M_seq"] = {k: 5.0 / 60 for k in K_set}
 
+    # Back-fill keys introduced by the July-2026 model revision (M2–M9) so
+    # that JSON files generated before it still load and solve.
+    _defaults = dict(
+        L=[], M_lay={},
+        T_dead=None, hard_tw=False, beta=2.0,
+        Tspr1=13.0, Tspr2=15.0, Twk60=60.0,
+        rho_bar=3, ext_bar=2,
+        Tdrv_sh2=10.0,
+    )
+    for k, v in _defaults.items():
+        full_data.setdefault(k, v)
+    # Big-Ms must cover the extended limits (M5/M6)
+    full_data["M_sd"] = max(full_data.get("M_sd", 0.0), full_data["Tdrv_sh2"])
+    full_data["M_sw"] = max(full_data.get("M_sw", 0.0), full_data["Tspr2"])
+    full_data.setdefault("M_h", full_data["Tspr2"])
+
+    # C1 — backfill the horizon big-M H for JSON files generated before it.
+    if "H" not in full_data:
+        from instances import compute_horizon_bigM
+        N = full_data["N"]
+        full_data["H"] = compute_horizon_bigM(
+            N, full_data["D"], full_data.get("S", {}),
+            full_data.get("Q", {}), full_data.get("M_stop", {}),
+            full_data.get("Tr1", 11.0))
+
     return full_data, D_real, E_real, delta_file
 
 
@@ -466,8 +628,8 @@ def describe_file(filepath: str) -> dict:
 if __name__ == "__main__":
     # Usage: python instance_io.py [output_dir] [n_seeds] [delta] [first_seed]
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else "instances"
-    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 10
-    delta        = float(sys.argv[3]) if len(sys.argv) > 3 else 0.25
+    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 5
+    delta        = float(sys.argv[3]) if len(sys.argv) > 3 else 0.15
     first_seed   = int(sys.argv[4])   if len(sys.argv) > 4 else 1
 
     print("=" * 60)

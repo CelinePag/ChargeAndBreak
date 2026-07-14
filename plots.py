@@ -38,6 +38,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.ticker import FuncFormatter
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
 COL = dict(
@@ -50,6 +51,7 @@ COL = dict(
     mstop   = "#95A5A6",   # maneuver/setup overhead at CS stop (v·Mstop)
     mseq    = "#5D6D7E",   # sequential reposition overhead (sigma·Mseq)
     window  = "#17A2B8",   # customer arrival-time window [Wha, Whf]
+    layby   = "#935116",   # layby / rest-area node (M8, break/rest-only stop)
 )
 EPS = 1e-3
 
@@ -109,18 +111,79 @@ def _draw_time_window(ax, wha, whf, y, h, color=None):
     ax.plot([whf, whf], [y_line - tick, y_line + tick], color=color, lw=1.4, alpha=0.85, zorder=6)
 
 
-def _shade_tod(ax, t_start, t_end):
-    """Shade time-of-day bands (night / day / evening) across the full x-axis."""
-    bands = [(0, 6, "#D6EAF8"), (6, 20, "#FEF9E7"), (20, 24, "#E8DAEF")]
-    t = 0
+# Night-only shading: a clean, saturated blue at full strength across the core
+# night (within ``_NIGHT_CORE_H`` of midnight) that fades out with soft
+# shoulders by ``_NIGHT_EDGE_H`` (dawn/dusk).  Daytime is left clear.  A
+# saturated mid-navy (not near-black) is used so it reads as blue rather than
+# desaturating to grey at partial opacity.  Keyed on absolute hour-of-day so
+# it tiles seamlessly across days.
+_NIGHT_COLOR     = "#3a5c92"   # clean, slightly muted deep blue
+_NIGHT_ALPHA_MAX = 0.30        # opacity across the core night
+_NIGHT_CORE_H    = 3.0         # full-strength within this many hours of midnight
+_NIGHT_EDGE_H    = 5.5         # faded fully out this many hours from midnight
+
+
+def _shade_tod(ax, t_start, t_end, step=0.25):
+    """Shade the night hours across the full x-axis.
+
+    Only the night is shaded — a clean deep blue at full strength across the
+    core night, fading out with soft cosine shoulders by dawn/dusk; daytime is
+    left clear.  Drawn as adjacent (non-overlapping) strips of width ``step``
+    hours, so the alpha never accumulates.
+    """
+    t = t_start
     while t < t_end:
-        day = int(t) // 24
-        for h0, h1, col in bands:
-            s = max(day * 24 + h0, t_start)
-            e = min(day * 24 + h1, t_end)
-            if e > s:
-                ax.axvspan(s, e, color=col, alpha=0.25, zorder=0, lw=0)
-        t += 24
+        e   = min(t + step, t_end)
+        hod = ((t + e) / 2.0) % 24.0
+        m   = min(hod, 24.0 - hod)          # hours from midnight, in [0, 12]
+        if m < _NIGHT_CORE_H:
+            night = 1.0
+        elif m < _NIGHT_EDGE_H:
+            # soft cosine shoulder from full strength → 0
+            night = (1.0 + np.cos(np.pi * (m - _NIGHT_CORE_H)
+                                  / (_NIGHT_EDGE_H - _NIGHT_CORE_H))) / 2.0
+        else:
+            night = 0.0
+        if night > 0.0:
+            ax.axvspan(t, e, color=_NIGHT_COLOR,
+                       alpha=night * _NIGHT_ALPHA_MAX, zorder=0, lw=0)
+        t += step
+
+
+def _dual_time_axis(axes_list, t_end, T_START=8.0, minor_step=1.0):
+    """Label the shared x-axis of every panel with hour-of-day AND elapsed time.
+
+    Minor ticks (and a faint grid) every ``minor_step`` hours; labelled major
+    ticks roughly every 3 h — widened to 6/12 h only if 3 h spacing would crowd
+    the labels.  Each labelled tick shows two lines: the clock hour-of-day
+    (absolute time mod 24) on top and the time elapsed since the route start
+    (absolute − T_START) below.  Applied to *every* axis in ``axes_list``.
+    """
+    # Label spacing: a divisor of 24 (so ticks fall on clean clock hours),
+    # aiming for ~3 h but backing off if that would produce too many labels.
+    label_step = 24.0
+    for cand in (3, 6, 12, 24):
+        if t_end / cand <= 28:
+            label_step = float(cand)
+            break
+    major = np.arange(0.0, t_end + 1e-6, label_step)
+    minor = np.arange(0.0, t_end + 1e-6, minor_step)
+
+    def _fmt(x, _pos):
+        hod = int(round(x)) % 24
+        el  = x - T_START
+        return f"{hod:02d}:00\n{el:+.0f}h"
+
+    for ax in axes_list:
+        ax.set_xticks(major)
+        ax.set_xticks(minor, minor=True)
+        ax.xaxis.set_major_formatter(FuncFormatter(_fmt))
+        ax.tick_params(axis="x", which="major", labelbottom=True,
+                       labelsize=6.5, length=4)
+        ax.tick_params(axis="x", which="minor", length=2)
+        ax.grid(axis="x", which="major", color="0.5",  alpha=0.28, lw=0.6)
+        ax.grid(axis="x", which="minor", color="0.6",  alpha=0.12, lw=0.4)
+        ax.set_axisbelow(True)
 
 
 def _draw_vlines(ax, vlines):
@@ -151,8 +214,9 @@ def plot_solution(sol, data, title="solution"):
     data  : instance data dict (from instances.make_data())
     title : string used in the figure suptitle and the saved filename
     """
-    N    = data["N"]
-    tend = sol[-1]["ta"]
+    N     = data["N"]
+    tend  = sol[-1]["ta"]
+    L_set = set(data.get("L", []))          # layby / rest-area nodes (M8)
 
     fig, axes = plt.subplots(3, 1, figsize=(17, 11), sharex=True,
                              gridspec_kw={"height_ratios": [3, 2, 2]})
@@ -201,7 +265,7 @@ def plot_solution(sol, data, title="solution"):
 
     for s in sol:
         i         = s["i"]
-        is_K      = s["is_K"]; is_C = s["is_C"]
+        is_K      = s["is_K"]; is_C = s["is_C"]; is_L = i in L_set
         brk_type  = ("b45" if s["b45"] else "b15" if s["b15"] else
                      "b30" if s["b30"] else None)
         rst_type  = "r1" if s["rho1"] else ("r2" if s["rho2"] else None)
@@ -252,6 +316,13 @@ def plot_solution(sol, data, title="solution"):
                          label=f"CHG\n{s['ea']:.0f}→{s['ed']:.0f}", fontsize=6.5)
                     t += tauc
 
+        if is_L:
+            mlay_t = data.get("M_lay", {}).get(i, 0.0) * bool(brk_type or rst_type)
+            if mlay_t > EPS:
+                _bar(ax, t, mlay_t, Y, H, COL["layby"],
+                     label="park", fontsize=7, text_color="#fff")
+                t += mlay_t
+
         if brk_type and s["taub"] > EPS and not brk_drew:
             _bar(ax, t, s["taub"], Y, H, COL["brk"],
                  label=brk_type.upper(), fontsize=7, text_color="#333")
@@ -265,10 +336,13 @@ def plot_solution(sol, data, title="solution"):
         if is_K and mseq_t > EPS:
             _bar(ax, t, mseq_t, Y, H, COL["mseq"], label="repos", fontsize=7)
 
-        typ = "●C" if is_C else ("▲K" if is_K else ("O" if i == 0 else "D"))
+        is_L = i in L_set
+        typ  = ("●C" if is_C else "▲K" if is_K else "◆L" if is_L
+                else "O" if i == 0 else "D")
         ax.text(s["ta"], Y + H / 2 + 0.06, f"{typ}{i}",
                 ha="center", va="bottom", fontsize=6,
-                color="#444", rotation=90, clip_on=True)
+                color=COL["layby"] if is_L else "#444",
+                rotation=90, clip_on=True)
 
     _draw_vlines(ax, vlines)
     ax.set_yticks([])
@@ -277,9 +351,7 @@ def plot_solution(sol, data, title="solution"):
     patches = [mpatches.Patch(color=v, label=k.replace("_", "").title())
                for k, v in COL.items()]
     patches += [
-        mpatches.Patch(color="#D6EAF8", alpha=0.6, label="night 0-6h"),
-        mpatches.Patch(color="#FEF9E7", alpha=0.6, label="day 6-20h"),
-        mpatches.Patch(color="#E8DAEF", alpha=0.6, label="evening 20-24h"),
+        mpatches.Patch(color=_NIGHT_COLOR, alpha=_NIGHT_ALPHA_MAX, label="night"),
     ]
     ax.legend(handles=patches, loc="upper left", fontsize=7, ncol=5)
 
@@ -353,8 +425,10 @@ def plot_solution(sol, data, title="solution"):
                 label=f"max shift wk {data['Twrk_sh']}h")
     _draw_vlines(ax3, vlines)
     ax3.set_ylabel("Hours")
-    ax3.set_xlabel("Time (h)")
     ax3.legend(fontsize=7, ncol=3, loc="upper left")
+
+    _dual_time_axis(axes, tend, T_START=data.get("T_START", 8.0))
+    ax3.set_xlabel("hour of day  /  +elapsed since start")
 
     plt.tight_layout()
     _ensure_fig_dir()
@@ -401,30 +475,82 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     N     = full_data["N"]
     C_set = set(full_data["C"])
     K_set = set(full_data["K"])
+    L_set = set(full_data.get("L", []))     # layby / rest-area nodes (M8)
 
-    tend        = states[-1].t_arr
+    tend        = states[-1].t_arr          # physical arrival at N, NO penalty
     oracle      = results.get("oracle", {})
     oracle_sol  = oracle.get("sol",      [])
-    oracle_obj  = oracle.get("obj",      None)
+    oracle_obj  = oracle.get("obj",      None)   # includes beta·Σdelta (MILP obj)
     oracle_feas = oracle.get("feasible", False)
-    tend_all    = max(tend, oracle_obj) if (oracle_feas and oracle_obj) else tend
+
+    # ── Window-penalty accounting (TW2) ──────────────────────────────────
+    # The objective everywhere is  arrival + beta·(#missed windows).  tend is
+    # the penalty-FREE physical arrival; the oracle obj already bakes the
+    # penalty in — so a like-for-like gap needs both split out consistently.
+    beta   = float(full_data.get("beta", 2.0))
+    Wha    = full_data.get("Wha", {})
+    Whf    = full_data.get("Whf", {})
+    _n_miss_sim = 0                              # same rule as BEHDV.step (1e-3 tol)
+    for i in C_set:
+        ta_i = states[i].t_arr
+        whf_i, wha_i = Whf.get(i), Wha.get(i)
+        if   whf_i is not None and ta_i > whf_i + 1e-3: _n_miss_sim += 1
+        elif wha_i is not None and ta_i < wha_i - 1e-3: _n_miss_sim += 1
+    sim_pen  = beta * _n_miss_sim
+    tend_pen = tend + sim_pen                    # arrival WITH penalty
+
+    oracle_pen = beta * sum(int(s.get("delta", 0)) for s in oracle_sol
+                            if s.get("is_C")) if (oracle_feas and oracle_sol) else 0.0
+
+    # xlim reference uses penalty-free arrivals (physical timeline)
+    oracle_arr = (oracle_obj - oracle_pen) if (oracle_feas and oracle_obj) else None
+    tend_all   = max(tend, oracle_arr) if oracle_arr is not None else tend
+
+    # ── Feasibility breaches (recorded by BEHDV, even with the supervisor off) ─
+    # Each violation is {type, stop, amount, detail}; `stop` is the node where
+    # the breach materialised.  We flag the run and mark the earliest breach.
+    _vio = results.get("metrics", {}).get("violations")
+    if _vio is None:
+        _vio = list(getattr(results.get("vehicle", None), "violations", []) or [])
+    _vio = [v for v in _vio if isinstance(v, dict)
+            and v.get("stop") is not None
+            and 0 <= int(v["stop"]) < len(states)]
+    first_break_stop = min((int(v["stop"]) for v in _vio), default=None)
+    t_break = states[first_break_stop].t_arr if first_break_stop is not None else None
 
     # ── Figure setup ─────────────────────────────────────────────────────
+    arr_str = f"arrival {tend:.2f}h"
+    if sim_pen > 0:
+        arr_str += f" / {tend_pen:.2f}h +pen"
+
     gap_str = ""
     if oracle_feas and oracle_obj:
-        gap = tend - oracle_obj
-        gap_str = (f"  |  oracle {oracle_obj:.2f}h"
-                   f"  |  gap {gap:+.2f}h ({100 * gap / oracle_obj:.1f}%)")
+        gap     = tend - oracle_arr              # penalty-free vs penalty-free
+        gap_pen = tend_pen - oracle_obj          # penalty-incl vs penalty-incl
+        ora_txt = f"oracle {oracle_arr:.2f}h"
+        if oracle_pen > 0:
+            ora_txt += f" / {oracle_obj:.2f}h +pen"
+        gap_txt = f"gap {gap:+.2f}h ({100 * gap / oracle_arr:.1f}%)"
+        if sim_pen > 0 or oracle_pen > 0:
+            gap_txt += f"  /  +pen {gap_pen:+.2f}h"
+        gap_str = f"  |  {ora_txt}  |  {gap_txt}"
+
+    infeas_str = ""
+    if _vio:
+        _vtypes = ", ".join(sorted({v.get("type", "?") for v in _vio}))
+        infeas_str = (f"    ⚠ INFEASIBLE — {len(_vio)} violation(s) "
+                      f"from stop {first_break_stop} [{_vtypes}]")
 
     fig, axes = plt.subplots(5, 1, figsize=(16, 17), sharex=True,
                              gridspec_kw={"height_ratios": [2.5, 2.5, 2, 2, 2.5]})
-    fig.suptitle(f"Simulation — {title}  (arrival {tend:.2f}h){gap_str}",
-                 fontsize=11, fontweight="bold")
+    fig.suptitle(f"Simulation — {title}  ({arr_str}){gap_str}{infeas_str}",
+                 fontsize=11, fontweight="bold",
+                 color=("crimson" if _vio else "black"))
 
     # ── Panel 1: Simulation Gantt ─────────────────────────────────────────
     ax1 = axes[0]
     ax1.set_title("Simulation — actual realisation", fontsize=10)
-    _shade_tod(ax1, 0, tend)
+    _shade_tod(ax1, 0, tend_all)
     Y, H = 0.5, 0.40
 
     for i in range(N):
@@ -435,12 +561,14 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         td_i  = td_list[i]        if i < len(td_list)        else ta_i
         is_K  = (i in K_set)
         is_C  = (i in C_set)
+        is_L  = (i in L_set)
         y_val = int(act.get("y", 0))
         brk   = act.get("break_type")
         rst   = act.get("rest_type")
         sigma = int(dur.get("sigma", 0))
         mstop = dur.get("mstop", 0.0)
         mseq  = dur.get("mseq",  0.0)
+        mlay  = dur.get("mlay",  0.0)
         t     = ta_i
         brk_drew = False
 
@@ -454,6 +582,10 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         if is_K and mstop > EPS:
             _bar(ax1, t, mstop, Y, H, COL["mstop"], "setup", fontsize=7, text_color="#333")
             t += mstop
+
+        if is_L and mlay > EPS:
+            _bar(ax1, t, mlay, Y, H, COL["layby"], "park", fontsize=7, text_color="#fff")
+            t += mlay
 
         if is_K and y_val:
             tauq = dur.get("tauq", 0.0)
@@ -498,21 +630,16 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
             _bar(ax1, td_i, D_actual_list[i], Y, H, COL["drive"],
                  f"→{i + 1}", fontsize=6)
 
-        typ = "●" if is_C else ("▲" if is_K else "O")
+        typ  = "●" if is_C else ("▲" if is_K else ("◆" if is_L else "O"))
         ax1.text(ta_i, Y + H / 2 + 0.06, f"{typ}{i}",
                  ha="center", va="bottom", fontsize=6,
-                 color="#444", rotation=90, clip_on=True)
+                 color=COL["layby"] if is_L else "#444",
+                 rotation=90, clip_on=True)
 
-    # Shade look-ahead windows
-    LA_PENALTY = INFEASIBLE_PENALTY / 2
-    for stp, sc_list in enumerate(results["scores_log"]):
-        if stp == 0 or not sc_list:
-            continue
-        mean_horizon = sc_list[0][1]
-        if mean_horizon < LA_PENALTY:
-            t_la = states[stp].t_arr
-            ax1.axvspan(t_la, mean_horizon, alpha=0.055,
-                        color="navy", zorder=0, lw=0)
+    # (Removed the per-stop navy look-ahead-window shading: one filled axvspan
+    # per decision stop accumulated into an opaque wash that buried the
+    # day/night gradient on long routes.  The look-ahead horizon arrivals are
+    # already visualised in Panel 5.)
 
     ax1.set_yticks([])
     ax1.set_ylim(0.0, 1.0)   # room for stop labels above bars, windows below
@@ -520,9 +647,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     patches = [mpatches.Patch(color=v, label=k.replace("_", " ").title())
                for k, v in COL.items()]
     patches += [
-        mpatches.Patch(color="#D6EAF8", alpha=0.6, label="night 0-6h"),
-        mpatches.Patch(color="#FEF9E7", alpha=0.6, label="day 6-20h"),
-        mpatches.Patch(color="#E8DAEF", alpha=0.6, label="eve 20-24h"),
+        mpatches.Patch(color=_NIGHT_COLOR, alpha=_NIGHT_ALPHA_MAX, label="night"),
     ]
     ax1.legend(handles=patches, loc="upper left", fontsize=7, ncol=5)
 
@@ -545,6 +670,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
             t        = ta_or
             is_K     = i in K_set
             is_C     = i in C_set
+            is_L     = i in L_set
             y_or     = s_or.get("y", 0)
             sigma_or = int(s_or.get("sigma", 0))
             brk_or   = ("b45" if s_or.get("b45") else
@@ -570,6 +696,14 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
                     _bar(ax_or, t, mstop_or, Yo, Ho, COL["mstop"],
                          "setup", fontsize=7, text_color="#333")
                     t += mstop_or
+
+            if is_L:
+                mlay_or = (full_data.get("M_lay", {}).get(i, 0.0)
+                           * bool(brk_or or rst_or))
+                if mlay_or > EPS:
+                    _bar(ax_or, t, mlay_or, Yo, Ho, COL["layby"],
+                         "park", fontsize=7, text_color="#fff")
+                    t += mlay_or
 
             if is_K and y_or:
                 tauq_or = s_or.get("tauq", 0.0)
@@ -613,13 +747,14 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
                 _bar(ax_or, td_or, D_actual_list[i], Yo, Ho,
                      COL["drive"], f"→{i + 1}", fontsize=6)
 
-            typ = "●" if is_C else ("▲" if is_K else "O")
+            typ  = "●" if is_C else ("▲" if is_K else ("◆" if is_L else "O"))
             ax_or.text(ta_or, Yo + Ho / 2 + 0.06, f"{typ}{i}",
                        ha="center", va="bottom", fontsize=6,
-                       color="#444", rotation=90, clip_on=True)
+                       color=COL["layby"] if is_L else "#444",
+                       rotation=90, clip_on=True)
 
-        ax_or.axvline(oracle_obj, color="green",  lw=2, ls="-",  alpha=0.9,
-                      label=f"oracle arrival {oracle_obj:.2f}h")
+        ax_or.axvline(oracle_arr, color="green",  lw=2, ls="-",  alpha=0.9,
+                      label=f"oracle arrival {oracle_arr:.2f}h")
         ax_or.axvline(tend,       color="crimson", lw=2, ls="--", alpha=0.9,
                       label=f"simulation arrival {tend:.2f}h")
     else:
@@ -634,7 +769,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     # ── Panel 3: SOC ─────────────────────────────────────────────────────
     ax2 = axes[2]
     ax2.set_title("Battery state of charge (at arrival)", fontsize=10)
-    _shade_tod(ax2, 0, tend)
+    _shade_tod(ax2, 0, tend_all)
 
     t_pts = [s.t_arr for s in states]
     e_pts = [s.e_arr for s in states]
@@ -670,7 +805,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     # ── Panel 4: HoS accumulators ─────────────────────────────────────────
     ax3 = axes[3]
     ax3.set_title("HoS accumulators at arrival", fontsize=10)
-    _shade_tod(ax3, 0, tend)
+    _shade_tod(ax3, 0, tend_all)
 
     ta_vals = [s.t_arr for s in states]
     cd_vals = [s.cd    for s in states]
@@ -733,7 +868,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         return "#2C6FAC"
 
     rng_jit = np.random.default_rng(0)
-    _shade_tod(ax4, 0, tend)
+    _shade_tod(ax4, 0, tend_all)
     line_x, line_y = [], []
 
     for stp, sc_list in enumerate(results["scores_log"]):
@@ -775,9 +910,37 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         ax4.fill_between([0, tend_all], oracle_obj, states[-1].t_arr,
                          alpha=0.08, color="red", label="suboptimality gap")
 
-    ax4.set_xlabel("Time (h)")
     ax4.set_ylabel("Horizon arrival time (h)")
     ax4.legend(fontsize=7, loc="upper left", ncol=3)
+
+    # ── Infeasibility overlay: show WHERE and from which point it broke ────
+    # A red curtain from the first breach to the end of the timeline (drawn on
+    # every time-aligned panel), plus a per-breach ✗ marker with its criterion.
+    if _vio and t_break is not None:
+        from collections import defaultdict as _dd
+        x_hi = tend_all * 1.04
+        for _ax in (ax1, ax_or, ax2, ax3, ax4):
+            _ax.axvspan(t_break, x_hi, color="red", alpha=0.06, zorder=0.5)
+            _ax.axvline(t_break, color="crimson", lw=1.6, alpha=0.85, zorder=8)
+        ax1.text(t_break, 0.99, f" ✗ INFEASIBLE from stop {first_break_stop}",
+                 ha="left", va="top", fontsize=8.5, fontweight="bold",
+                 color="crimson", zorder=9, clip_on=True)
+
+        # Group breaches by stop so co-located criteria share one marker.
+        _by_stop = _dd(list)
+        for v in _vio:
+            _by_stop[int(v["stop"])].append(v.get("type", "?"))
+        for s, types in _by_stop.items():
+            t_v = states[s].t_arr
+            ax1.scatter([t_v], [0.15], marker="X", s=80, color="crimson",
+                        edgecolor="black", lw=0.6, zorder=9, clip_on=True)
+            ax1.text(t_v, 0.02, "\n".join(sorted(set(types))),
+                     ha="center", va="bottom", fontsize=6, color="crimson",
+                     zorder=9, clip_on=True)
+
+    _dual_time_axis((ax1, ax_or, ax2, ax3, ax4), tend_all,
+                    T_START=full_data.get("T_START", 8.0))
+    ax4.set_xlabel("hour of day  /  +elapsed since start")
 
     plt.tight_layout()
 

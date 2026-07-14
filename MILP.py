@@ -80,6 +80,10 @@ def _model_xsum(m, i):
     """All binary break/rest decisions at stop i."""
     return m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
 
+def _model_xbrk(m, i):
+    """Break-only indicator at stop i (excludes rests)."""
+    return m.x_b45[i] + m.x_b15[i] + m.x_b30[i]
+
 def _model_ri(m, i):
     """Consecutive-driving reset indicator (b45, b30, or any rest)."""
     return m.x_b45[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i]
@@ -94,7 +98,18 @@ def _model_rho(m, i):
 def _declare_common_vars(m):
     """
     Declare all shared decision variables on model m.
-    Precondition: m.I, m.Cset, m.Kset, m.Rset, m.RsegS must already exist.
+    Precondition: m.I, m.Cset, m.Kset, m.Lset, m.Rset, m.RsegS must already exist.
+
+    Model revision (paper rewrite, July 2026):
+      M2 — g (credited charging) replaces the orphaned p variable.
+      M3 — u deleted: the work contribution of charging is the linear
+           expression tauc − g.
+      M5 — h (elapsed shift spread) + l5 replace the 13 h cap on sw.
+      M6 — z / q_ext implement the 10 h extended-driving allowance.
+      TW1/TW2 (v3) — no idle waiting; service starts at arrival.  The
+           out-of-window penalty is the FIXED binary delta (early = late =
+           same cost); the v2 waiting (w) and lateness (ell) variables are
+           deleted.
     """
     m.ta  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.td  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
@@ -124,8 +139,21 @@ def _declare_common_vars(m):
     m.l1 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.l2 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.l4 = pyo.Var(m.I, domain=pyo.NonNegativeReals)
-    m.u     = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
-    m.p     = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)  # charging credited to break
+
+    # M5 — shift spread (elapsed on-duty time since end of last daily rest)
+    m.h  = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+    m.l5 = pyo.Var(m.I, domain=pyo.NonNegativeReals)   # rho·(h+o) linearisation
+
+    # M6 — extended-driving allowance flags
+    m.z     = pyo.Var(m.I, domain=pyo.Binary)   # 1 = current shift extended (10 h)
+    m.q_ext = pyo.Var(m.I, domain=pyo.Binary)   # 1 = extension consumed at this rest
+
+    # TW2 — fixed binary out-of-window penalty: delta_i = 1 iff service at
+    # customer i starts outside its window (early OR late — one indicator).
+    m.delta = pyo.Var(m.Cset, domain=pyo.Binary)
+
+    # M2 — charging time credited toward the break requirement (parallel break)
+    m.g     = pyo.Var(m.Kset, domain=pyo.NonNegativeReals)
     m.v     = pyo.Var(m.Kset, domain=pyo.Binary)            # any activity at CS stop
     m.sigma = pyo.Var(m.Kset, domain=pyo.Binary)            # sequential mode at CS stop
 
@@ -142,10 +170,13 @@ def _declare_common_params(m, data):
     lb_t  = data["lb_t"]
     ub_t  = data["ub_t"]
 
+    # TK is the 0–100% full-charge time T_R: the natural big-M for every
+    # charging-related linearisation (M9: replaces any other charging big-M).
     m.TK    = pyo.Param(initialize=data["Tbar"][max(R)])
     m.M_drv = pyo.Param(initialize=data["M_drv"])
     m.M_sd  = pyo.Param(initialize=data["M_sd"])
     m.M_sw  = pyo.Param(initialize=data["M_sw"])
+    m.M_h   = pyo.Param(initialize=data.get("M_h", data.get("Tspr2", 15.0)))
     m.M_big = pyo.Param(initialize=data["M_big"])
 
 
@@ -153,6 +184,7 @@ def _declare_common_params(m, data):
     m.I     = pyo.Set(initialize=data["I"], ordered=True)
     m.Cset  = pyo.Set(initialize=C)
     m.Kset  = pyo.Set(initialize=K)
+    m.Lset  = pyo.Set(initialize=data.get("L", []))   # layby stops (M8)
     m.Rset  = pyo.Set(initialize=R,    ordered=True)
     m.RsegS = pyo.Set(initialize=Rseg, ordered=True)
     m.Legs  = pyo.Set(initialize=list(range(N)), ordered=True)
@@ -171,6 +203,7 @@ def _declare_common_params(m, data):
     m.Tbar  = pyo.Param(m.Rset, initialize=data["Tbar"])
     m.Wha   = pyo.Param(m.Cset, initialize=data["Wha"], default=0)
     m.Whf   = pyo.Param(m.Cset, initialize=data["Whf"], default=1e6)
+    m.Mlay  = pyo.Param(m.Lset, initialize=data.get("M_lay", {}), default=0)
     m.Tb45  = pyo.Param(initialize=data["Tb45"])
     m.Tb15  = pyo.Param(initialize=data["Tb15"])
     m.Tb30  = pyo.Param(initialize=data["Tb30"])
@@ -178,7 +211,24 @@ def _declare_common_params(m, data):
     m.Tr2   = pyo.Param(initialize=data["Tr2"])
     m.Tdrv_cons = pyo.Param(initialize=data["Tdrv_cons"])
     m.Tdrv_sh1  = pyo.Param(initialize=data["Tdrv_sh1"])
+    m.Tdrv_sh2  = pyo.Param(initialize=data.get("Tdrv_sh2", 10.0))
     m.Twrk_sh   = pyo.Param(initialize=data["Twrk_sh"])
+    # M5 — shift spread limits (13 h regular / 15 h reduced rest)
+    m.Tspr1 = pyo.Param(initialize=data.get("Tspr1", 13.0))
+    m.Tspr2 = pyo.Param(initialize=data.get("Tspr2", 15.0))
+    # M9 — weekly working-time cap (Directive 2002/15/EC)
+    m.Twk60 = pyo.Param(initialize=data.get("Twk60", 60.0))
+    # TW2 — fixed out-of-window service penalty (h-equivalent per missed window)
+    m.beta  = pyo.Param(initialize=data.get("beta", 2.0))
+    # C1 — horizon big-M H: a valid upper bound on any feasible arrival span.
+    # There is NO arrival deadline; H is used ONLY as the big-M in the window
+    # indicators (eqs. 5–6) and the rest bound (eq. 36).  Computed per instance
+    # by instances.compute_horizon_bigM; fall back to the weekly horizon span.
+    _t0    = data.get("t0", data.get("T_START", lb_t.get(0, 0.0)))
+    _Hbig  = data.get("H")
+    if _Hbig is None:
+        _Hbig = data.get("T_hor", _t0 + 7 * 24) - _t0
+    m.H    = pyo.Param(initialize=max(1e-3, float(_Hbig)))
 
     return N, C, K, R, Rseg, lb_t, ub_t
 
@@ -237,17 +287,23 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
     """
     non_K = [i for i in I_list if i not in K_set]
 
-    # (33)–(34): taub_hat = p + taub at CS; taub_hat = taub elsewhere
-    # p = tauc in concurrent mode (σ=0), 0 in sequential mode (σ=1) — see (35)–(37)
+    # M2 (R7)–(R12): charging time is credited toward the break requirement
+    # only when a break is DECLARED (x=1) and runs in parallel with charging
+    # (σ=0).  g_i linearises tauc·x·(1−σ); charging with no declared break
+    # earns no break credit.  Replaces the orphaned p machinery (o.23–o.27).
+    m.g_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i: m.g[i] <= m.tauc[i])
+    m.g_ub2 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.g[i] <= m.TK * _model_xbrk(m, i))
+    m.g_ub3 = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.g[i] <= m.TK * (1 - m.sigma[i]))
+    m.g_lb  = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.g[i] >= m.tauc[i] - m.TK * (1 - _model_xbrk(m, i)) - m.TK * m.sigma[i])
+
+    # (R11)–(R12): effective break duration
     m.qb_K    = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.taub_hat[i] == m.taub[i] + m.p[i])
+        m.taub_hat[i] == m.taub[i] + m.g[i])
     m.qb_nonK = pyo.Constraint(non_K,  rule=lambda m, i:
         m.taub_hat[i] == m.taub[i])
-
-    # (35)–(37): linearise p_i = (1 − σ_i) · τ_c_i
-    m.p_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] <= m.tauc[i])
-    m.p_ub2 = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] <= m.TK * (1 - m.sigma[i]))
-    m.p_lb  = pyo.Constraint(m.Kset, rule=lambda m, i: m.p[i] >= m.tauc[i] - m.TK * m.sigma[i])
 
     m.one_brk = pyo.Constraint(m.I, rule=lambda m, i:
         m.x_b45[i] + m.x_b15[i] + m.x_b30[i] + m.rho1[i] + m.rho2[i] <= 1)
@@ -258,8 +314,9 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
         m.taub_hat[i] >= m.Tb15 * m.x_b15[i])
     m.brk30  = pyo.Constraint(m.I, rule=lambda m, i:
         m.taub_hat[i] >= m.Tb30 * m.x_b30[i])
+    # Named tight big-M (Appendix B): a break lies within one shift spread
     m.brk_ub = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taub[i] <= M_big * (m.x_b45[i] + m.x_b15[i] + m.x_b30[i]))
+        m.taub[i] <= m.Tspr2 * (m.x_b45[i] + m.x_b15[i] + m.x_b30[i]))
 
     m.split_ord = pyo.Constraint(m.I, rule=lambda m, i: m.x_b30[i] <= m.phi[i])
 
@@ -279,8 +336,9 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
 
     m.rst1   = pyo.Constraint(m.I, rule=lambda m, i: m.taur[i] >= m.Tr1 * m.rho1[i])
     m.rst2   = pyo.Constraint(m.I, rule=lambda m, i: m.taur[i] >= m.Tr2 * m.rho2[i])
+    # Named big-M (Appendix B, eq. 36): a rest is bounded by the horizon H
     m.rst_ub = pyo.Constraint(m.I, rule=lambda m, i:
-        m.taur[i] <= M_big * (m.rho1[i] + m.rho2[i]))
+        m.taur[i] <= m.H * (m.rho1[i] + m.rho2[i]))
     m.rst_lim = pyo.Constraint(
         expr=sum(m.rho2[i] for i in I_list) <= rho2_limit)
 
@@ -288,9 +346,25 @@ def _add_break_rest_constraints(m, N, I_list, K_set, M_big, rho2_limit=3):
 def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
                                      S_dict, M_drv, M_sd, M_sw, TK,
                                      is_subproblem: bool = False,
-                                     D_wc: dict = None):
+                                     D_wc: dict = None,
+                                     ext_budget: int = 2,
+                                     M_lay_dict: dict = None):
     """
-    Hours-of-Service accumulator propagation: cd, sd, sw.
+    Hours-of-Service accumulator propagation: cd, sd, sw + shift spread h.
+
+    Model revision (paper rewrite):
+      M3 — charging work contribution is the linear expression tauc − g
+           (no auxiliary u variable).
+      M5 — the 13 h cap on sw is replaced by the elapsed shift-spread h:
+           (R22) o_i := td_i − ta_i − taur_i        (pre-rest on-duty dwell)
+           (R23) h_{i+1} = h_i + o_i + D_i − l5_i,  l5 = ρ·(h+o) linearised
+           (R24) h_i + o_i ≤ 13 + 2·ρ2_i + 15·(1−ρ_i)   (pre-rest spread cap)
+           (R25) h_i ≤ 15                               (global spread ceiling)
+      M6 — 10 h extended-driving allowance:
+           (R16) sd_i ≤ 9 + 1·z_i
+           (R17) z_{i+1} ≥ z_i − ρ_i                (flag persists within shift)
+           (R18) q_i ≥ z_i + ρ_i − 1                (budget unit consumed at rest)
+           (R19) Σ q_i + z_N ≤ ext_budget           (incl. unfinished final shift)
 
     Big-M linearisation: l_k[i] = accumulator_k[i] if reset at stop i, else 0.
 
@@ -354,18 +428,24 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
         if i >= N: return pyo.Constraint.Skip
         return m.sd[i+1] == m.sd[i] + _d(i) - m.l2[i]
     m.sd_prop = pyo.Constraint(m.I, rule=_sd)
-    m.sd_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sd[i] <= m.Tdrv_sh1)
 
-    # --- Shift working (reset by any rest; charge counts as work unless concurrent break) ---
-    # u linearises τ_c·(1 − x_i − ρ_i + σ_i): u=τ_c when no break/rest or sequential;
-    # u=0 when concurrent break/rest (σ=0) — charging overlaps with break, not work.
-    m.u_ub1 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] <= TK * (1 - _model_xsum(m, i) + m.sigma[i]))
-    m.u_ub2 = pyo.Constraint(m.Kset,
-        rule=lambda m, i: m.u[i] <= m.tauc[i])
-    m.u_lb  = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.u[i] >= m.tauc[i] - TK * (_model_xsum(m, i) - m.sigma[i]))
+    # ── M6: extended-driving allowance (R16)–(R19) — replaces sd ≤ 9 h ────────
+    m.sd_ub = pyo.Constraint(m.I, rule=lambda m, i:
+        m.sd[i] <= m.Tdrv_sh1 + (m.Tdrv_sh2 - m.Tdrv_sh1) * m.z[i])
 
+    def _z_persist(m, i):
+        if i >= N: return pyo.Constraint.Skip
+        return m.z[i+1] >= m.z[i] - _model_rho(m, i)
+    m.z_persist = pyo.Constraint(m.I, rule=_z_persist)
+    m.q_ext_lb  = pyo.Constraint(m.I, rule=lambda m, i:
+        m.q_ext[i] >= m.z[i] + _model_rho(m, i) - 1)
+    m.ext_budget = pyo.Constraint(
+        expr=sum(m.q_ext[i] for i in I_list) + m.z[N] <= ext_budget)
+
+    # ── M3: shift working (reset by any rest) ─────────────────────────────────
+    # The work contribution of charging is the LINEAR expression tauc − g:
+    # tauc when no parallel break covers it (g=0), zero when fully credited.
+    # No auxiliary u variable is needed.
     m.l4u1 = pyo.Constraint(m.I,
         rule=lambda m, i: m.l4[i] <= M_sw * _model_rho(m, i))
     m.l4u2 = pyo.Constraint(m.I,
@@ -373,87 +453,123 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
     m.l4lb  = pyo.Constraint(m.I,
         rule=lambda m, i: m.l4[i] >= m.sw[i] - M_sw * (1 - _model_rho(m, i)))
 
+    _M_lay = M_lay_dict or {}
+
     def _cs_work(m, j):
-        """Working activities at CS stop j before any break/rest: (66)."""
+        """Working activities at CS stop j before any break/rest (R20)."""
         return (m.v[j]*m.Mstop[j] + m.Q_nom[j]*m.y[j]
-                + m.u[j] + m.sigma[j]*m.Mseq[j])
+                + (m.tauc[j] - m.g[j]) + m.sigma[j]*m.Mseq[j])
+
+    def _work_at(m, j):
+        """Working activities performed at stop j (any stop type)."""
+        if j in K_set:
+            return _cs_work(m, j)
+        if j in C_set:
+            return S_dict.get(j, 0.0)
+        if j in _M_lay:   # layby: parking overhead counts as other work (M8)
+            return _M_lay[j] * _model_xsum(m, j)
+        return 0.0
 
     def _sw(m, i):
         if i >= N: return pyo.Constraint.Skip
-        ip1 = i + 1
-        # Working activities at stop i+1 that precede any break/rest
-        if ip1 in K_set:
-            work_next = _cs_work(m, ip1)
-        elif ip1 in C_set:
-            work_next = S_dict.get(ip1, 0)
-        else:
-            work_next = 0
-
         # ── Subproblem correction ─────────────────────────────────────────────
         # init_state["sw"] is the arrival value at local stop 0 (before any
         # work there). For i=0 there is no i-1 step, so inject work at stop 0
         # explicitly into sw[1].
-        if i == 0 and is_subproblem:
-            if 0 in K_set:
-                work_here = _cs_work(m, 0)
-            elif 0 in C_set:
-                work_here = S_dict.get(0, 0.0)
-            else:
-                work_here = 0.0
-        else:
-            work_here = 0.0
-
-        return m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + _d(i) + work_next
+        work_here = _work_at(m, 0) if (i == 0 and is_subproblem) else 0.0
+        return (m.sw[i+1] == m.sw[i] - m.l4[i] + work_here + _d(i)
+                + _work_at(m, i + 1))
     m.sw_prop = pyo.Constraint(m.I, rule=_sw)
-    m.sw_ub   = pyo.Constraint(m.I, rule=lambda m, i: m.sw[i] <= m.Twrk_sh)
+    # M5: the old daily cap sw ≤ 13 h (o.62) had no legal basis and is
+    # REPLACED by the shift-spread constraints below.  sw is retained for the
+    # weekly cap, reporting, and the ex-post Directive verification (S3).
 
-    # ── Direct sw upper-bound at stop 0 for subproblem ────────────────────────
-    if is_subproblem and N >= 1:
-        if 0 in K_set:
-            m.sw_stop0_ub = pyo.Constraint(
-                expr=m.sw[0] + _cs_work(m, 0) <= m.Twrk_sh)
-        elif 0 in C_set:
-            S0 = S_dict.get(0, 0.0)
-            if S0 > 0:
-                m.sw_stop0_ub = pyo.Constraint(
-                    expr=m.sw[0] + S0 <= m.Twrk_sh)
+    # ── M5/SP2: shift spread h, eqs. (h_prop)–(h_term) ────────────────────────
+    # o_i = td_i − ta_i − taur_i: on-duty dwell at stop i before the rest.
+    # Single rest-last convention (v3): with no idle waiting, a rest at ANY
+    # stop type — customer included, since breaks/rests follow service — is
+    # the last activity, so pre-rest elapsed = h + o exactly and the
+    # post-reset spread starts at the outgoing leg.  Uniform for all i ∈ I.
+    def _o(m, i):
+        return m.td[i] - m.ta[i] - m.taur[i]
+
+    M_h = float(pyo.value(m.M_h))
+
+    def _h_prop(m, i):
+        if i >= N: return pyo.Constraint.Skip
+        return m.h[i+1] == m.h[i] + _o(m, i) + _d(i) - m.l5[i]
+    m.h_prop = pyo.Constraint(m.I, rule=_h_prop)
+
+    # l5 = rho·(h + o) linearisation (Appendix)
+    m.l5u1 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l5[i] <= M_h * _model_rho(m, i))
+    m.l5u2 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l5[i] <= m.h[i] + _o(m, i))
+    m.l5lb = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l5[i] >= m.h[i] + _o(m, i) - M_h * (1 - _model_rho(m, i)))
+
+    # (R24): pre-rest spread cap — 13 h before a regular rest, 15 h before a
+    # reduced rest; inactive (RHS ≥ 28) when no rest is taken at the stop.
+    m.spread_prerest = pyo.Constraint(m.I, rule=lambda m, i:
+        m.h[i] + _o(m, i) <= m.Tspr1
+                             + (m.Tspr2 - m.Tspr1) * m.rho2[i]
+                             + m.Tspr2 * (1 - _model_rho(m, i)))
+    # (R25): global spread ceiling
+    m.spread_ub = pyo.Constraint(m.I, rule=lambda m, i: m.h[i] <= m.Tspr2)
 
 
 def _add_v_sigma_constraints(m, M_big):
     """
-    Constraints (5)–(14) from the model.
+    Activity / sequential-mode indicators (M4, rewrite R13–R15).
 
     v_i  ∈ {0,1}: = 1 if any activity occurs at CS stop i (charging, break, or rest).
-    σ_i  ∈ {0,1}: = 1 if sequential mode: charging completes before the break begins.
+    σ_i  ∈ {0,1}: = 1 if sequential mode: charging completes before the
+                  break/rest begins (truck vacates the charging bay, M_seq).
 
-    Concurrent (σ=0): break runs in parallel with charging; charging is credited toward
-      the break duration via p_i = τ_c_i.  Charging must be long enough to cover the
-      declared break/rest (constraints 10–14).
-    Sequential (σ=1): charging first, then break; p_i = 0, extra M_seq overhead applies.
+    (43) σ ≤ y           — sequential mode only possible when charging occurs.
+    (44) σ ≥ y + ρ − 1   — charging co-located with a REST is forced
+                            sequential (parallel charge-during-rest is legally
+                            contested; the sequential treatment is conservative
+                            and the charging time counts as work).
+    (45) σ ≥ (b_i − τ_c)/T_b45 − (1 − y)   — C2/Q1: a DECLARED break the
+                            charge does not fully cover forces sequential mode.
+                            b_i = 0.75·x_b45 + 0.25·x_b15 + 0.5·x_b30 is the
+                            declared break minimum; if the charge τ_c is
+                            shorter, the positive shortfall (b_i−τ_c)/0.75 ∈
+                            (0,1] rounds σ up to 1, and (g3) then sets g = 0 so
+                            the full break sits sequentially after the charge.
+                            The −(1−y) term deactivates it when no charge
+                            occurs.  When the charge covers the break the RHS
+                            is ≤ 0 and the min-time objective keeps σ = 0
+                            (parallel) — so no "force parallel" constraint is
+                            needed.
+    extra σ ≤ x + ρ       — no sequential flag without a break/rest to
+                            sequence against (tightening; avoids spurious
+                            M_seq overhead on pure-charge stops).
+
+    The old concurrent-coverage constraints (o.42)–(o.44) are DELETED: with
+    taub_hat = g + taub (M2) and the minimum-duration constraints, a parallel
+    break is automatically covered by charging and/or extra break time.
     """
-    # (5)–(7): v_i activity indicator
+    # v_i activity indicator
     m.v_lb_y  = pyo.Constraint(m.Kset, rule=lambda m, i: m.v[i] >= m.y[i])
     m.v_lb_xr = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.v[i] >= _model_xsum(m, i))
     m.v_ub    = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.v[i] <= m.y[i] + _model_xsum(m, i))
 
-    # (8)–(9): σ_i sequential-mode indicator
-    m.sigma_ub_y  = pyo.Constraint(m.Kset, rule=lambda m, i: m.sigma[i] <= m.y[i])
-    m.sigma_ub_xr = pyo.Constraint(m.Kset, rule=lambda m, i:
+    # (43)–(44) + tightening
+    m.sigma_ub_y   = pyo.Constraint(m.Kset, rule=lambda m, i: m.sigma[i] <= m.y[i])
+    m.sigma_lb_r   = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.sigma[i] >= m.y[i] + m.rho1[i] + m.rho2[i] - 1)
+    m.sigma_ub_xr  = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.sigma[i] <= _model_xsum(m, i))
 
-    # (10)–(14): in concurrent mode (σ=0, y=1) charging must cover the declared break/rest
-    m.conc_b45 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= m.Tb45 * m.x_b45[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
-    m.conc_b15 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= m.Tb15 * m.x_b15[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
-    m.conc_b30 = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= m.Tb30 * m.x_b30[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
-    m.conc_r1  = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= m.Tr1 * m.rho1[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
-    m.conc_r2  = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] >= m.Tr2 * m.rho2[i] - M_big * m.sigma[i] - M_big * (1 - m.y[i]))
+    # (45) C2/Q1 — uncovered declared break forces sequential mode
+    m.sigma_lb_brk = pyo.Constraint(m.Kset, rule=lambda m, i:
+        m.sigma[i] >= (m.Tb45 * m.x_b45[i] + m.Tb15 * m.x_b15[i]
+                       + m.Tb30 * m.x_b30[i] - m.tauc[i]) / m.Tb45
+                      - (1 - m.y[i]))
 
 
 def _add_soc_constraints(m, N, data):
@@ -462,6 +578,9 @@ def _add_soc_constraints(m, N, data):
         return m.ea[i + 1] == m.ed[i] - m.Eparam[i]
     m.soc_prop   = pyo.Constraint(m.I,    rule=_soc)
     m.soc_nc_C   = pyo.Constraint(m.Cset, rule=lambda m, i: m.ed[i] == m.ea[i])
+    # M8 — laybys cannot charge: departure SOC equals arrival SOC (else the
+    # solver gets free energy at every layby and never needs a CS).
+    m.soc_nc_L   = pyo.Constraint(m.Lset, rule=lambda m, i: m.ed[i] == m.ea[i])
     m.soc_mono_K = pyo.Constraint(m.Kset, rule=lambda m, i: m.ed[i] >= m.ea[i])
     m.soc_lb     = pyo.Constraint(m.I,    rule=lambda m, i: m.ea[i] >= m.Emin)
     m.soc_ub     = pyo.Constraint(m.I,    rule=lambda m, i: m.ed[i] <= m.Ecap)
@@ -471,24 +590,69 @@ def _add_soc_constraints(m, N, data):
     m.pwl_no_free_charge = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.ed[i] - m.ea[i] <= m.Ecap * m.y[i])
 
-def _add_time_constraints(m, N):
+def _add_time_constraints(m, N, data=None):
+    """
+    Time propagation, departures, and service windows (v3, eqs. (2)–(7)).
+
+    TW1 — no idle waiting: service starts at arrival, so the customer
+    departure is the additive eq. (depart_C): td = ta + S + taub + taur,
+    with any break/rest taken AFTER service (rest-last at every stop type).
+
+    TW2 — fixed binary penalty: delta_i = 1 whenever service starts outside
+    the window (early OR late — a single indicator), eqs. (5)/(6):
+        ta_i >= Wha_i − H·delta_i,   ta_i <= Whf_i + H·delta_i.
+    data["hard_tw"]=True fixes delta = 0 (hard-window sensitivity).
+
+    C1 — there is NO arrival deadline: the constant H in (5)/(6) is a valid
+    big-M (any feasible arrival satisfies ta_N ≤ t0 + H by construction), so
+    the indicators only DETECT an out-of-window arrival, never forbid a late
+    one.
+
+    TW6 (documented, not implemented): a physically-explicit variant would
+    extend the service time by ΔS when out of window (S_i + ΔS·delta_i in
+    td), delaying downstream arrivals; the objective-penalty form is the
+    base model (paper §3.1).
+    """
+    data = data or {}
+    hard_tw = bool(data.get("hard_tw", False))
+
     def _tp(m, i):
         if i >= N: return pyo.Constraint.Skip
         return m.ta[i + 1] == m.td[i] + m.D_nom[i]
     m.time_prop = pyo.Constraint(m.I, rule=_tp)
 
-    # (3): customer departure — service + break/rest, no maneuver overhead
+    # (depart_C): customer departure — service, then break/rest (TW1)
     m.td_C = pyo.Constraint(m.Cset, rule=lambda m, i:
         m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i])
 
     # (4): CS departure — stop overhead (v·Mstop) + queue + charging + break/rest
-    #                   + sequential repositioning (σ·Mseq)
+    #                    + sequential repositioning (σ·Mseq)
     m.td_K = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.td[i] == m.ta[i] + m.v[i]*m.Mstop[i] + m.Q_nom[i]*m.y[i]
                  + m.tauc[i] + m.taub[i] + m.taur[i] + m.sigma[i]*m.Mseq[i])
 
-    m.tw_hard = pyo.Constraint(m.Cset, rule=lambda m, i:
-        pyo.inequality(m.Wha[i], m.ta[i], m.Whf[i]))
+    # (M8): layby departure — parking overhead + break/rest only
+    if list(m.Lset):
+        m.td_L = pyo.Constraint(m.Lset, rule=lambda m, i:
+            m.td[i] == m.ta[i] + m.Mlay[i] * _model_xsum(m, i)
+                     + m.taub[i] + m.taur[i])
+
+    # TW2 — out-of-window indicator, eqs. (5)/(6).  The single horizon big-M H
+    # (C1) upper-bounds any feasible arrival span, so it relieves both the
+    # early and the late side for every customer when delta = 1.
+    if hard_tw:
+        # Hard-window sensitivity: windows enforced, indicator fixed to 0
+        m.tw_early = pyo.Constraint(m.Cset, rule=lambda m, i:
+            m.ta[i] >= m.Wha[i])
+        m.tw_late = pyo.Constraint(m.Cset, rule=lambda m, i:
+            m.ta[i] <= m.Whf[i])
+        m.delta_zero = pyo.Constraint(m.Cset, rule=lambda m, i:
+            m.delta[i] == 0)
+    else:
+        m.tw_early = pyo.Constraint(m.Cset, rule=lambda m, i:
+            m.ta[i] >= m.Wha[i] - m.H * m.delta[i])
+        m.tw_late = pyo.Constraint(m.Cset, rule=lambda m, i:
+            m.ta[i] <= m.Whf[i] + m.H * m.delta[i])
 
 
 
@@ -520,7 +684,10 @@ def add_valid_inequalities(m: pyo.ConcreteModel,
         sd_0  = float(init_state.get("sd",  0.0))
 
     Tdrv_c  = float(pyo.value(m.Tdrv_cons))
-    Tdrv_s  = float(pyo.value(m.Tdrv_sh1))
+    # M1: a valid inequality must hold for ALL feasible schedules, including
+    # those legally using the 10 h extended-driving allowance — so the
+    # shift-driving VIs use Tdrv_sh2, never the regular 9 h limit.
+    Tdrv_s  = float(pyo.value(m.Tdrv_sh2))
 
     _add_vi1(m, usable)
     _add_vi3(m, I_list, D, N, Tdrv_s)
@@ -741,8 +908,10 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     # ── Variables ─────────────────────────────────────────────────────────────
     _declare_common_vars(m)
 
-    # ── Objective ─────────────────────────────────────────────────────────────
-    m.obj = pyo.Objective(expr=m.ta[N], sense=pyo.minimize)
+    # ── Objective (eq. 1): arrival + fixed penalty per missed window (TW2) ───
+    m.obj = pyo.Objective(
+        expr=m.ta[N] + m.beta * sum(m.delta[i] for i in C),
+        sense=pyo.minimize)
 
     #for i in data["I"]:
      #   m.ta[i].setlb(lb_t.get(i, 0.0))
@@ -755,6 +924,8 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     m.init_sd  = pyo.Constraint(expr=m.sd[0] == 0)
     m.init_sw  = pyo.Constraint(expr=m.sw[0] == 0)
     m.init_phi = pyo.Constraint(expr=m.phi[0] == 0)
+    m.init_h   = pyo.Constraint(expr=m.h[0]  == 0)   # M5
+    m.init_z   = pyo.Constraint(expr=m.z[0]  == 0)   # M6
 
     for v in [m.x_b45, m.x_b15, m.x_b30, m.rho1, m.rho2]:
         v[0].fix(0); v[N].fix(0)
@@ -770,12 +941,37 @@ def build_model(data: dict) -> pyo.ConcreteModel:
 
     # ── Shared constraint blocks ───────────────────────────────────────────────
     _add_soc_constraints(m, N, data)
-    _add_time_constraints(m, N)
+    _add_time_constraints(m, N, data)
     _add_v_sigma_constraints(m, m.M_big)
     _add_pwl_charging_constraints(m, K, R, Rseg)
-    _add_break_rest_constraints(m, N, data["I"], set(K), m.M_big, rho2_limit=3)
+    _add_break_rest_constraints(m, N, data["I"], set(K), m.M_big,
+                                rho2_limit=int(data.get("rho_bar", 3)))
     _add_hos_accumulator_constraints(m, N, data["I"], set(C), set(K),
-                                     data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK)
+                                     data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
+                                     ext_budget=int(data.get("ext_bar", 2)),
+                                     M_lay_dict=data.get("M_lay"))
+
+    # (h_term / eq. 70): terminal spread — the off-model final rest after
+    # arrival is assumed regular, so the unfinished final shift is bounded by
+    # the 13 h regular-rest spread.  Full-route only (a horizon end may sit
+    # mid-shift, where this would be wrong).
+    m.spread_term = pyo.Constraint(expr=m.h[N] <= m.Tspr1)
+
+    # ── M9 (R21): weekly working-time cap (Directive 2002/15/EC, 60 h) ────────
+    _M_lay = data.get("M_lay", {}) or {}
+    _fixed_work = (sum(data["D"].get(i, 0.0) for i in range(N))
+                   + sum(data["S"].get(i, 0.0) for i in C))
+    if K or _M_lay:
+        m.weekly_work = pyo.Constraint(expr=(
+            _fixed_work
+            + sum(m.v[i]*m.Mstop[i] + m.Q_nom[i]*m.y[i]
+                  + (m.tauc[i] - m.g[i]) + m.sigma[i]*m.Mseq[i] for i in K)
+            + sum(_M_lay[i] * _model_xsum(m, i) for i in _M_lay)
+            <= m.Twk60))
+    else:
+        # no decision variables in the expression — check the constant part
+        assert _fixed_work <= float(pyo.value(m.Twk60)) + 1e-9, (
+            "fixed driving+service work exceeds the weekly 60 h cap (M9)")
     return m
 
 
@@ -794,42 +990,56 @@ def solve_model(model, tee=True):
     return results, status
 
 
+def _extract_stop_dict(model, i, data, C_set, K_set) -> dict:
+    """Shared per-stop extraction for full-route and horizon models."""
+    is_K  = i in K_set
+    is_C  = i in C_set
+    y_val = round(pyo.value(model.y[i])) if is_K else 0
+    tauq_val = data["Q"].get(i, 0.0) * y_val if is_K else 0.0
+
+    def _v(var, default=0.0):
+        try:
+            val = pyo.value(var)
+            return default if val is None else val
+        except Exception:
+            return default
+
+    return dict(
+        i     = i,
+        ta    = _v(model.ta[i]),
+        td    = _v(model.td[i]),
+        ea    = _v(model.ea[i]),
+        ed    = _v(model.ed[i]),
+        cd    = _v(model.cd[i]),
+        sd    = _v(model.sd[i]),
+        sw    = _v(model.sw[i]),
+        h     = _v(model.h[i]),                              # M5 spread
+        tauc  = _v(model.tauc[i]) if is_K else 0.0,
+        tauq  = tauq_val,
+        taub  = _v(model.taub[i]),
+        taur  = _v(model.taur[i]),
+        g     = _v(model.g[i]) if is_K else 0.0,             # M2 break credit
+        delta = round(_v(model.delta[i])) if is_C else 0,    # TW2 window miss
+        y     = y_val,
+        sigma = round(_v(model.sigma[i])) if is_K else 0,
+        z     = round(_v(model.z[i])),                       # M6 extension flag
+        b45   = round(_v(model.x_b45[i])),
+        b15   = round(_v(model.x_b15[i])),
+        b30   = round(_v(model.x_b30[i])),
+        rho1  = round(_v(model.rho1[i])),
+        rho2  = round(_v(model.rho2[i])),
+        is_C  = is_C,
+        is_K  = is_K,
+        D_nom = data["D"].get(i, 0.0),
+    )
+
+
 def extract_solution(model, data: dict) -> list[dict]:
     """Extract per-stop solution dicts (same schema as extract_horizon_solution)."""
-    N = data["N"]
-    K = data["K"]
-
-    sol = []
-    for i in data["I"]:
-        is_K  = i in K
-        y_val = round(pyo.value(model.y[i])) if is_K else 0
-        tauq_val = data["Q"].get(i, 0.0) * y_val if is_K else 0.0
-
-        sol.append(dict(
-            i     = i,
-            ta    = pyo.value(model.ta[i]),
-            td    = pyo.value(model.td[i]),
-            ea    = pyo.value(model.ea[i]),
-            ed    = pyo.value(model.ed[i]),
-            cd    = pyo.value(model.cd[i]),
-            sd    = pyo.value(model.sd[i]),
-            sw    = pyo.value(model.sw[i]),
-            tauc  = pyo.value(model.tauc[i]) if is_K else 0.0,
-            tauq  = tauq_val,
-            taub  = pyo.value(model.taub[i]),
-            taur  = pyo.value(model.taur[i]),
-            y     = y_val,
-            sigma = round(pyo.value(model.sigma[i])) if is_K else 0,
-            b45   = round(pyo.value(model.x_b45[i])),
-            b15   = round(pyo.value(model.x_b15[i])),
-            b30   = round(pyo.value(model.x_b30[i])),
-            rho1  = round(pyo.value(model.rho1[i])),
-            rho2  = round(pyo.value(model.rho2[i])),
-            is_C  = i in data["C"],
-            is_K  = is_K,
-            D_nom = data["D"].get(i, 0.0),
-        ))
-    return sol
+    C_set = set(data["C"])
+    K_set = set(data["K"])
+    return [_extract_stop_dict(model, i, data, C_set, K_set)
+            for i in data["I"]]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -864,9 +1074,12 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
 
     H = end_stop - start_stop
 
+    L_glob = set(full_data.get("L", []))
+
     I_loc = list(range(H + 1))
     C_loc = [j for j in range(H + 1) if (start_stop + j) in C_glob]
     K_loc = [j for j in range(H + 1) if (start_stop + j) in K_glob]
+    L_loc = [j for j in range(H + 1) if (start_stop + j) in L_glob]
 
     D_src = D_override if D_override is not None else full_data["D"]
     E_src = E_override if E_override is not None else full_data["E"]
@@ -877,6 +1090,8 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
     Q_loc      = {j: full_data["Q"].get(start_stop + j, 0.0) for j in K_loc}
     M_stop_loc = {j: full_data["M_stop"].get(start_stop + j, 0.0) for j in K_loc}
     M_seq_loc  = {j: full_data["M_seq"].get(start_stop + j, 0.0)  for j in K_loc}
+    M_lay_loc  = {j: full_data.get("M_lay", {}).get(start_stop + j, 0.0)
+                  for j in L_loc}
     # Keep old M dict for covering-inequality helper (uses M_dict = sub_data["M"])
     M_loc = {j: full_data["M"].get(start_stop + j, 5.0 / 60)
              for j in range(H + 1)}
@@ -914,13 +1129,24 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
             k += 1
         e_to_next_cs[j] = cum
 
+    # C1 — the full-route horizon big-M is a valid upper bound for the
+    # sub-route too (the sub-route duration is shorter), so reuse it.
+    H_bigM = full_data.get("H")
+    if H_bigM is None:
+        H_bigM = T_hor - t0
+
     return dict(
         label=f"subproblem [{start_stop}→{end_stop}]",
         title=f"sub_{start_stop}_{end_stop}",
-        N=H, I=I_loc, C=C_loc, K=K_loc, R=R, Rseg=Rseg,
+        N=H, I=I_loc, C=C_loc, K=K_loc, L=L_loc, R=R, Rseg=Rseg,
         D=D_loc, E=E_loc,
         S=S_loc, Q=Q_loc, M=M_loc, M_stop=M_stop_loc, M_seq=M_seq_loc,
+        M_lay=M_lay_loc,
         Wha=Wha_loc, Whf=Whf_loc,
+        t0=t0,                      # sub-window start time
+        H=H_bigM,                   # C1 window / rest big-M (full-route bound)
+        hard_tw=full_data.get("hard_tw", False),
+        beta=full_data.get("beta", 2.0),
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],
         Ebar=full_data["Ebar"], Tbar=Tbar,
@@ -932,8 +1158,14 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         Tdrv_sh1=full_data["Tdrv_sh1"],
         Tdrv_sh2=full_data.get("Tdrv_sh2", 10.0),
         Twrk_sh=full_data["Twrk_sh"],
+        Tspr1=full_data.get("Tspr1", 13.0),
+        Tspr2=full_data.get("Tspr2", 15.0),
+        Twk60=full_data.get("Twk60", 60.0),
+        rho_bar=full_data.get("rho_bar", 3),
+        ext_bar=full_data.get("ext_bar", 2),
         M_drv=full_data["M_drv"], M_sd=full_data["M_sd"],
         M_sw=full_data["M_sw"],   M_big=full_data["M_big"],
+        M_h=full_data.get("M_h", full_data.get("Tspr2", 15.0)),
         global_start=start_stop, global_end=end_stop, global_N=N_glob,
         E_global=full_data["E"],
         K_global=set(full_data["K"]),
@@ -943,6 +1175,10 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
 
 def build_horizon_model(sub_data: dict, init_state: dict,
                         fixed_action=None, rho2_remaining: int = 3,
+                        ext_remaining: int = 2,
+                        fixed_plan: dict = None,
+                        plan_mode: str = "fix",
+                        repair_penalty: float = 1000.0,
                         tee=False) -> pyo.ConcreteModel:
     """
     Build the rolling-horizon sub-problem Pyomo model.
@@ -951,16 +1187,23 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     1. Initial conditions come from init_state (not hardcoded to origin).
     2. fixed_action (if given) fixes binary decisions at local stop 0.
     3. rho2_remaining caps the reduced-rest budget in the sub-window.
-    4. No activities allowed at the last horizon stop (binaries fixed 0).
-    5. Extra SOC bounds tighten the LP relaxation.
-    6. sw[0] override when init_state.sw is already near the limit.
+    4. ext_remaining caps the 10 h extended-driving budget (M6).
+    5. No activities allowed at the last horizon stop (binaries fixed 0).
+    6. fixed_plan (SP1/RO1 recourse): per-stop binary structure taken from an
+       offline plan, either fixed exactly (plan_mode="fix" — duration-only
+       LP recourse) or imposed as lower bounds (plan_mode="repair" — binary
+       activities may be ADDED but never removed, and each addition is
+       penalised by `repair_penalty` in the objective).
 
     Parameters
     ----------
     sub_data       : dict from make_subproblem_data
-    init_state     : dict — ta, ea, cd, sd, sw, phi
+    init_state     : dict — ta, ea, cd, sd, sw, phi (+ optional h)
     fixed_action   : dict — y, break_type, rest_type (or None for free solve)
-    rho2_remaining : int  — remaining r2 budget (3 − vehicle.rho2_used)
+    rho2_remaining : int  — remaining r2 budget (rho_bar − vehicle.rho2_used)
+    ext_remaining  : int  — remaining extension budget (ext_bar − used)
+    fixed_plan     : dict {local_stop: {"y", "break_type", "rest_type"}}
+    plan_mode      : "fix" | "repair"
     """
     import logging as _lg
     _lg.getLogger("pyomo").setLevel(_lg.ERROR)
@@ -973,11 +1216,24 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     # ── Variables ─────────────────────────────────────────────────────────────
     _declare_common_vars(m)
 
-
-    m.obj = pyo.Objective(
-        expr  = m.ta[N],
-        sense = pyo.minimize,
-    )
+    # ── Objective: arrival + fixed window penalty (TW2) (+ repair penalty) ────
+    _obj_expr = m.ta[N] + m.beta * sum(m.delta[i] for i in C)
+    if fixed_plan is not None and plan_mode == "repair":
+        # SP-recourse: lexicographic-ish — heavily penalise every ADDED
+        # binary activity, then ta[N] + beta·Σdelta (repair step ordering).
+        _plan = fixed_plan
+        _added = []
+        for j in sub_data["I"]:
+            p = _plan.get(j, {})
+            if j in set(K) and not int(p.get("y", 0) or 0):
+                _added.append(m.y[j])
+            if p.get("break_type") not in ("b45",): _added.append(m.x_b45[j])
+            if p.get("break_type") not in ("b15",): _added.append(m.x_b15[j])
+            if p.get("break_type") not in ("b30",): _added.append(m.x_b30[j])
+            if p.get("rest_type")  not in ("r1",):  _added.append(m.rho1[j])
+            if p.get("rest_type")  not in ("r2",):  _added.append(m.rho2[j])
+        _obj_expr = _obj_expr + repair_penalty * sum(_added)
+    m.obj = pyo.Objective(expr=_obj_expr, sense=pyo.minimize)
 
     #for i in sub_data["I"]:
      #   m.ta[i].setlb(lb_t.get(i, 0.0))
@@ -990,6 +1246,8 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     m.init_sd  = pyo.Constraint(expr=m.sd[0]  == init_state["sd"])
     m.init_phi = pyo.Constraint(expr=m.phi[0] == init_state["phi"])
     m.init_sw = pyo.Constraint(expr=m.sw[0] == init_state["sw"])
+    # M5: spread at arrival; M6: z[0] is left free — sd[0] > 9 h forces it.
+    m.init_h  = pyo.Constraint(expr=m.h[0] == init_state.get("h", 0.0))
 
     # ── Fixed action at stop 0 ────────────────────────────────────────────────
     if fixed_action is not None:
@@ -1013,6 +1271,49 @@ def build_horizon_model(sub_data: dict, init_state: dict,
 
         # When neither break nor rest is specified (charge_only mode): nothing
 
+    # ── SP1/RO1: fixed-structure plan over the whole window ───────────────────
+    if fixed_plan is not None:
+        K_set_loc = set(K)
+
+        def _plan_bin(j, key, val):
+            p = fixed_plan.get(j)
+            if p is None:
+                return None
+            if key == "y":
+                return int(p.get("y", 0) or 0)
+            if key == "brk":
+                return int(p.get("break_type") == val)
+            if key == "rst":
+                return int(p.get("rest_type") == val)
+            return None
+
+        _pl = pyo.ConstraintList()
+        m.plan_bins = _pl
+        # stop 0 activities already happened or are being decided now; the
+        # plan applies from local stop 0 (current stop) through N−1.  The
+        # last horizon stop stays activity-free (fixed below).
+        for j in sub_data["I"]:
+            if j >= N:
+                continue
+            if fixed_plan.get(j) is None:
+                continue
+            targets = [
+                (m.x_b45[j], _plan_bin(j, "brk", "b45")),
+                (m.x_b15[j], _plan_bin(j, "brk", "b15")),
+                (m.x_b30[j], _plan_bin(j, "brk", "b30")),
+                (m.rho1[j],  _plan_bin(j, "rst", "r1")),
+                (m.rho2[j],  _plan_bin(j, "rst", "r2")),
+            ]
+            if j in K_set_loc:
+                targets.append((m.y[j], _plan_bin(j, "y", None)))
+            for var, val in targets:
+                if val is None:
+                    continue
+                if plan_mode == "fix":
+                    _pl.add(var == val)
+                else:   # "repair": activities may be added, never removed
+                    if val == 1:
+                        _pl.add(var >= 1)
 
     # ── No activities at last horizon stop ─────────────────────────────────────
     # Same reasoning: use equality constraints, not .fix(), so they survive
@@ -1033,14 +1334,16 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     # ── Shared constraint blocks ───────────────────────────────────────────────
 
     _add_soc_constraints(m, N, sub_data)
-    _add_time_constraints(m, N)
+    _add_time_constraints(m, N, sub_data)
     _add_v_sigma_constraints(m, m.M_big)
     _add_pwl_charging_constraints(m, K, R, Rseg)
     _add_break_rest_constraints(m, N, sub_data["I"], set(K), m.M_big,
                             rho2_limit=rho2_remaining)
     _add_hos_accumulator_constraints(m, N, sub_data["I"], set(C), set(K),
                                     sub_data["S"], m.M_drv, m.M_sd, m.M_sw, m.TK,
-                                    is_subproblem=True)
+                                    is_subproblem=True,
+                                    ext_budget=ext_remaining,
+                                    M_lay_dict=sub_data.get("M_lay"))
 
     add_valid_inequalities(m, sub_data, init_state=init_state)
 
@@ -1076,6 +1379,8 @@ def _inject_warm_start(model, warm_sol, start_stop):
             _sv(model.cd,    "cd")
             _sv(model.sd,    "sd")
             _sv(model.sw,    "sw")
+            _sv(model.h,     "h")
+            _sv(model.z,     "z")
             _sv(model.taub,  "taub")
             _sv(model.taur,  "taur")
             _sv(model.x_b45, "b45")
@@ -1083,9 +1388,12 @@ def _inject_warm_start(model, warm_sol, start_stop):
             _sv(model.x_b30, "b30")
             _sv(model.rho1,  "rho1")
             _sv(model.rho2,  "rho2")
+            if i in model.Cset:
+                _sv(model.delta, "delta")
             if i in model.Kset:
                 _sv(model.y,    "y")
                 _sv(model.tauc, "tauc")
+                _sv(model.g,    "g")
 
 
 def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=False):
@@ -1103,8 +1411,17 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
         # ── Partial LP relaxation ──────────────────────────────────────────────
         # keep x_b45/b15/b30/rho1/rho2 BINARY at customer stops; keep ALL
         # integer variables at local stop 1 (next stop) as integer.
+        #
+        # TW4: the out-of-window indicators delta stay INTEGER at every
+        # customer stop.  Their big-M relaxation is terrible — in the LP,
+        # delta takes value ≈ miss/H (a 2 h miss over a 100+ h horizon
+        # ⇒ delta ≈ 0.02 ⇒ penalty ≈ nothing), so a fully-relaxed subproblem
+        # treats windows as free and the action scoring is silently biased
+        # toward window-ignoring actions.  |C ∩ horizon| binaries per
+        # subproblem — negligible solve-time impact, removes the bias.
 
-        _CUST_KEEP_BINARY = frozenset(("x_b45", "x_b15", "x_b30", "rho1", "rho2"))
+        _CUST_KEEP_BINARY = frozenset(("x_b45", "x_b15", "x_b30",
+                                       "rho1", "rho2", "delta"))
         cust_set = set(model.Cset)
 
         for var in model.component_objects(pyo.Var, active=True):
@@ -1113,9 +1430,16 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
                 if vdata.domain not in (pyo.Binary, pyo.Integers,
                                         pyo.NonNegativeIntegers):
                     continue
-                # Keep binary if this is a break/rest variable at a customer stop
+                # Keep binary if this is a break/rest/window variable at a
+                # customer stop
                 if (vname in _CUST_KEEP_BINARY
                         and isinstance(idx, int) and idx in cust_set):
+                    continue  # leave as Binary
+                # C2: keep the sequential-mode flag sigma integer at every CS
+                # stop — (45) governs feasibility/timing (M_seq overhead and
+                # break-credit g), so a fractional sigma would let the LP dodge
+                # the uncovered-break sequential penalty.
+                if vname == "sigma":
                     continue  # leave as Binary
                 # Keep all integer variables at local stop 1 (next stop) as integer
                 stop_idx = idx if isinstance(idx, int) else (idx[0] if isinstance(idx, tuple) else None)
@@ -1167,41 +1491,10 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
 
 def extract_horizon_solution(model, sub_data: dict) -> list[dict]:
     """Extract per-stop solution dicts from a solved horizon model (local indices)."""
-    N     = sub_data["N"]
-    K     = sub_data["K"]
-    K_set = set(K)
-
-    sol = []
-    for i in sub_data["I"]:
-        is_K  = i in K_set
-        y_val = round(pyo.value(model.y[i])) if is_K else 0
-        tauq_val = sub_data["Q"].get(i, 0.0) * y_val if is_K else 0.0
-
-        sol.append(dict(
-            i     = i,
-            ta    = pyo.value(model.ta[i]),
-            td    = pyo.value(model.td[i]),
-            ea    = pyo.value(model.ea[i]),
-            ed    = pyo.value(model.ed[i]),
-            cd    = pyo.value(model.cd[i]),
-            sd    = pyo.value(model.sd[i]),
-            sw    = pyo.value(model.sw[i]),
-            tauc  = pyo.value(model.tauc[i]) if is_K else 0.0,
-            tauq  = tauq_val,
-            taub  = pyo.value(model.taub[i]),
-            taur  = pyo.value(model.taur[i]),
-            y     = y_val,
-            sigma = round(pyo.value(model.sigma[i])) if is_K else 0,
-            b45   = round(pyo.value(model.x_b45[i])),
-            b15   = round(pyo.value(model.x_b15[i])),
-            b30   = round(pyo.value(model.x_b30[i])),
-            rho1  = round(pyo.value(model.rho1[i])),
-            rho2  = round(pyo.value(model.rho2[i])),
-            is_C  = i in set(sub_data["C"]),
-            is_K  = is_K,
-            D_nom = sub_data["D"].get(i, 0.0),
-        ))
-    return sol
+    C_set = set(sub_data["C"])
+    K_set = set(sub_data["K"])
+    return [_extract_stop_dict(model, i, sub_data, C_set, K_set)
+            for i in sub_data["I"]]
 
 
 def solve_horizon(full_data: dict, start_stop: int, end_stop: int,
@@ -1209,7 +1502,10 @@ def solve_horizon(full_data: dict, start_stop: int, end_stop: int,
                   D_override=None, E_override=None,
                   rho2_remaining: int = 3, tee: bool = False,
                   time_limit: int = 30, relax: bool = True,
-                  warm_start=None) -> dict:
+                  warm_start=None,
+                  ext_remaining: int = 2,
+                  fixed_plan: dict = None,
+                  plan_mode: str = "fix") -> dict:
     """
     End-to-end rolling-horizon solve: build → (warm-start) → solve → extract.
 
@@ -1246,6 +1542,9 @@ def solve_horizon(full_data: dict, start_stop: int, end_stop: int,
     model    = build_horizon_model(sub_data, init_state,
                                    fixed_action=fixed_action,
                                    rho2_remaining=rho2_remaining,
+                                   ext_remaining=ext_remaining,
+                                   fixed_plan=fixed_plan,
+                                   plan_mode=plan_mode,
                                    tee=tee)
     _had_warm = bool(warm_start)
     if warm_start:
@@ -1348,12 +1647,14 @@ def check_solution(sol: list, data: dict) -> bool:
         i = s["i"]
         if s["ta"] > s["td"] + EPS and i != 0:
             print(f"  WARN  ta>td stop {i}: ta={s['ta']:.3f} td={s['td']:.3f}")
+        _sd_lim = (data.get("Tdrv_sh2", 10.0) if s.get("z", 0)
+                   else data["Tdrv_sh1"])
         if s["cd"] > data["Tdrv_cons"] + EPS:
             print(f"  FAIL  consec_drv stop {i}: {s['cd']:.3f} > {data['Tdrv_cons']}"); ok=False
-        if s["sd"] > data["Tdrv_sh1"]  + EPS:
-            print(f"  FAIL  shift_drv  stop {i}: {s['sd']:.3f} > {data['Tdrv_sh1']}");  ok=False
-        if s["sw"] > data["Twrk_sh"]   + EPS:
-            print(f"  FAIL  shift_wk   stop {i}: {s['sw']:.3f} > {data['Twrk_sh']}");   ok=False
+        if s["sd"] > _sd_lim + EPS:
+            print(f"  FAIL  shift_drv  stop {i}: {s['sd']:.3f} > {_sd_lim}");  ok=False
+        if s.get("h", 0.0) > data.get("Tspr2", 15.0) + EPS:
+            print(f"  FAIL  spread     stop {i}: {s['h']:.3f} > {data.get('Tspr2', 15.0)}"); ok=False
         if s["ea"] < data["Emin"] - EPS:
             print(f"  FAIL  ea stop {i}: {s['ea']:.2f} < {data['Emin']}");               ok=False
         if s["ed"] > data["Ecap"] + EPS:

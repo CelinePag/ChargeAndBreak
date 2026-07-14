@@ -57,7 +57,8 @@ import numpy as np
 
 
 # ── ECR curve ─────────────────────────────────────────────────────────────────
-from settings import ecr as _ecr, sample_travel_time, V_NOM
+from settings import (ecr as _ecr, sample_travel_time, sample_multipliers,
+                      V_NOM, TRAVEL_TIME_DIST, TRAVEL_TIME_AR1_RHO)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -71,7 +72,9 @@ def generate_scenarios(full_data: dict,
                        delta: float = 0.20,
                        seed: Optional[int] = None,
                        include_best: bool = False,
-                       include_worst: bool = False) -> list[dict]:
+                       include_worst: bool = False,
+                       dist: str = None,
+                       ar1_rho: float = None) -> list[dict]:
     """
     Draw `n_scenarios` travel-time and energy scenarios for legs
     [start_stop, end_stop).
@@ -80,10 +83,17 @@ def generate_scenarios(full_data: dict,
         "D": {leg: travel_time_h}
         "E": {leg: energy_kWh}   (derived from D via ECR curve)
 
-    Travel-time multipliers are log-normal with:
-        mean  = 1  (unbiased)
-        sigma = delta/3  (so 3σ ≈ delta)
-    and clipped to [1−delta, 1+delta] to match the simulation's uniform draw.
+    S5 — distribution options:
+      dist="uniform"   (base case): xi ~ U[1−delta, 1+delta], i.i.d.
+      dist="lognormal": lognormal matched to mean 1 and the same CV
+                        (robustness check; unbounded — combine with
+                        prune_quantile < 1 in the supervisor).
+      ar1_rho > 0     : positively correlated deviations across consecutive
+                        legs (AR(1) on the normal driver) — congestion
+                        persists in time; i.i.d. draws tend to understate the
+                        value of adaptive policies.
+    Defaults (None) fall back to settings.TRAVEL_TIME_DIST /
+    settings.TRAVEL_TIME_AR1_RHO.
 
     Parameters
     ----------
@@ -91,7 +101,7 @@ def generate_scenarios(full_data: dict,
     start_stop    : first leg index (inclusive)
     end_stop      : last  leg index (exclusive)
     n_scenarios   : number of random scenarios to generate
-    delta         : uncertainty half-width (e.g. 0.20 = ±20%)
+    delta         : uncertainty half-width (e.g. 0.15 = ±15%)
     seed          : RNG seed for reproducibility (None = unseeded)
     include_best  : also append a deterministic best-case scenario (1-delta)
     include_worst : also append a deterministic worst-case scenario (1+delta)
@@ -105,16 +115,21 @@ def generate_scenarios(full_data: dict,
     D_nom = full_data["D"]
     L_nom = full_data.get("km", {})   # leg lengths in km (optional)
 
+    dist    = dist    if dist    is not None else TRAVEL_TIME_DIST
+    ar1_rho = ar1_rho if ar1_rho is not None else TRAVEL_TIME_AR1_RHO
+
     legs   = list(range(start_stop, min(end_stop, N)))
     n_legs = len(legs)
 
     scenarios = []
 
     for k in range(n_scenarios):
+        mults = sample_multipliers(n_legs, rng, delta=delta,
+                                   dist=dist, ar1_rho=ar1_rho)
         D_scen: dict[int, float] = {}
         E_scen: dict[int, float] = {}
         for j, leg in enumerate(legs):
-            d_s = sample_travel_time(D_nom.get(leg, 0.0), rng, lower_pct = delta, upper_pct = delta)
+            d_s = D_nom.get(leg, 0.0) * float(mults[j])
             D_scen[leg] = d_s
             # Derive energy from ECR: E = L_km * ECR(v_s), v_s = L_km / d_s
             L_km = L_nom.get(leg, D_nom.get(leg, 0.0) * V_NOM)
