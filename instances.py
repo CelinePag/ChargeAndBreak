@@ -181,7 +181,11 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
               L=None, T_dead: float | None = None,
               charger_power_kw: float | None = None,
               hard_tw: bool = False,
-              beta_tw: float = BETA_TW) -> dict:
+              beta_tw: float = BETA_TW,
+              S: dict | None = None,
+              M_lay_h: float | None = None,
+              allow_wait: bool = False,
+              wtd_rules: bool = False) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -244,6 +248,21 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     beta_tw : float
             Fixed out-of-window service penalty β (h-equivalent per missed
             window, TW2).
+    S     : dict {stop: h} or None
+            Per-stop service times at customer stops.  None (default) applies
+            the uniform SERVICE_TIME_H to every customer.  Used by external
+            benchmark instances (e.g. R15-PGLT) with heterogeneous services.
+    M_lay_h : float or None
+            Parking overhead (h) at layby stops.  None keeps M_LAYBY_H.
+            Benchmark instances pass 0.0 (their idle stops are free).
+    allow_wait : bool
+            True → MILP adds a free idle-wait variable w_i at customer and
+            layby stops (benchmark parity with the TDSP "APO" idle time).
+            Default False preserves the v3 no-idle-waiting convention.
+    wtd_rules : bool
+            True → MILP enforces the Directive 2002/15/EC working-time
+            breaks in-model (6 h continuous work → break; 30'/45' cumulative
+            per shift).  Default False keeps them ex-post only.
 
     Raises
     ------
@@ -279,9 +298,10 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     M_man  = {i: float(M_man_h) for i in range(N + 1)}   # kept for compat
     M_stop = {i: M_STOP_H for i in K}
     M_seq  = {i: M_SEQ_H  for i in K}
-    M_lay  = {i: M_LAYBY_H for i in L}   # parking overhead at layby stops (M8)
+    _M_lay_h = M_LAYBY_H if M_lay_h is None else float(M_lay_h)
+    M_lay  = {i: _M_lay_h for i in L}    # parking overhead at layby stops (M8)
 
-    S    = {c: SERVICE_TIME_H for c in C}
+    S    = dict(S) if S is not None else {c: SERVICE_TIME_H for c in C}
     E0   = Bcap
     Ecap = Bcap
     Emin = SOC_MIN_FRAC * Bcap
@@ -321,6 +341,7 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
                                 # constraint (C1: there is no arrival deadline)
         H=H_bigM,               # C1 window / rest big-M
         hard_tw=bool(hard_tw), beta=float(beta_tw),
+        allow_wait=bool(allow_wait), wtd_rules=bool(wtd_rules),
         T_hor=T_hor, T_START=_T_START,
         lb_t=lb_t, ub_t=ub_t,
         # Break / rest minimum durations (EU Regulation 561/2006)

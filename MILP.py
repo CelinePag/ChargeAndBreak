@@ -133,6 +133,11 @@ def _declare_common_vars(m):
     m.rho2     = pyo.Var(m.I, domain=pyo.Binary)
     m.taur     = pyo.Var(m.I, domain=pyo.NonNegativeReals)
 
+    # Benchmark-parity idle wait (PGLT "APO"): free idle time appended to the
+    # departure at customer/layby stops.  Fixed to 0 unless data["allow_wait"]
+    # (see _add_time_constraints), preserving the v3 no-idle-waiting default.
+    m.w = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+
     m.cd = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.sd = pyo.Var(m.I, domain=pyo.NonNegativeReals)
     m.sw = pyo.Var(m.I, domain=pyo.NonNegativeReals)
@@ -518,6 +523,109 @@ def _add_hos_accumulator_constraints(m, N, I_list, C_set, K_set,
     m.spread_ub = pyo.Constraint(m.I, rule=lambda m, i: m.h[i] <= m.Tspr2)
 
 
+def _add_wtd_constraints(m, N, data):
+    """
+    Directive 2002/15/EC working-time breaks, enforced IN-MODEL (S3 was
+    ex-post only).  Gated by data["wtd_rules"]; used by the R15-PGLT
+    benchmark (pglt.py) to match the reference model's constraints C11-C16
+    (Peña-Arenas/Garaix main.cpp):
+
+      C11  — no more than 6 h of working (driving + other work) without a
+             break: continuous-work accumulator cw, reset by ANY declared
+             break or rest (all our break types are ≥ 15 min), capped so the
+             work performed at a stop BEFORE its break still fits:
+                 cw_i + work_at(i) ≤ Twrk_cons1 (6 h)
+      C12  — if the working time of a shift exceeds 6 h, the cumulated
+             MINIMUM break durations within the shift must reach 30 min.
+      C15  — beyond 9 h of shift work, 45 min.  Break minimums accumulate in
+             bt (reset at rests, like sw); indicators chi30/chi45 are forced
+             by sw.  Enforced at every rest stop and at the route end.
+
+    Deterministic semantics only (uses nominal D); not wired into the RO
+    worst-case propagation.
+    """
+    Twc1 = float(data["Twrk_cons1"])            # 6 h continuous-work cap
+    Twc2 = float(data["Twrk_cons2"])            # 9 h shift-work threshold
+    M_sw = float(data["M_sw"])                  # ≥ any feasible sw (15 h)
+    M_bt = float(data["Tspr2"])                 # ≥ any feasible bt
+    C_set = set(data["C"])
+    K_set = set(data["K"])
+    _M_lay = data.get("M_lay", {}) or {}
+
+    m.cw    = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+    m.l6    = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+    m.bt    = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+    m.l7    = pyo.Var(m.I, domain=pyo.NonNegativeReals)
+    m.chi30 = pyo.Var(m.I, domain=pyo.Binary)
+    m.chi45 = pyo.Var(m.I, domain=pyo.Binary)
+
+    def _work_at(m, j):
+        """Working activities at stop j (mirrors _add_hos_accumulator_constraints)."""
+        if j in K_set:
+            return (m.v[j]*m.Mstop[j] + m.Q_nom[j]*m.y[j]
+                    + (m.tauc[j] - m.g[j]) + m.sigma[j]*m.Mseq[j])
+        if j in C_set:
+            return m.S[j]
+        if j in _M_lay:
+            return _M_lay[j] * _model_xsum(m, j)
+        return 0.0
+
+    def _brkmin(m, i):
+        """Declared break time at stop i, counted at MINIMUM durations
+        (their sumB uses BD[b]); a rest stop has no break (one_brk)."""
+        return (m.Tb15 * m.x_b15[i] + m.Tb30 * m.x_b30[i]
+                + m.Tb45 * m.x_b45[i])
+
+    m.init_cw = pyo.Constraint(expr=m.cw[0] == 0)
+    m.init_bt = pyo.Constraint(expr=m.bt[0] == 0)
+
+    # ── C11: continuous work ≤ 6 h; reset by any break/rest ──────────────────
+    m.cw_cap = pyo.Constraint(m.I, rule=lambda m, i:
+        m.cw[i] + _work_at(m, i) <= Twc1)
+    # l6 = xsum·(cw + work_at) linearisation (work precedes the break)
+    m.l6u1 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l6[i] <= Twc1 * _model_xsum(m, i))
+    m.l6u2 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l6[i] <= m.cw[i] + _work_at(m, i))
+    m.l6lb = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l6[i] >= m.cw[i] + _work_at(m, i) - Twc1 * (1 - _model_xsum(m, i)))
+
+    def _cw(m, i):
+        if i >= N: return pyo.Constraint.Skip
+        return m.cw[i+1] == m.cw[i] + _work_at(m, i) + m.D_nom[i] - m.l6[i]
+    m.cw_prop = pyo.Constraint(m.I, rule=_cw)
+
+    # ── break-minimum accumulator bt (reset by any rest, like sw) ────────────
+    m.l7u1 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l7[i] <= M_bt * _model_rho(m, i))
+    m.l7u2 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l7[i] <= m.bt[i])
+    m.l7lb = pyo.Constraint(m.I, rule=lambda m, i:
+        m.l7[i] >= m.bt[i] - M_bt * (1 - _model_rho(m, i)))
+
+    def _bt(m, i):
+        if i >= N: return pyo.Constraint.Skip
+        return m.bt[i+1] == m.bt[i] + _brkmin(m, i) - m.l7[i]
+    m.bt_prop = pyo.Constraint(m.I, rule=_bt)
+
+    # ── C13/C16: shift-work threshold indicators ─────────────────────────────
+    m.chi30_def = pyo.Constraint(m.I, rule=lambda m, i:
+        m.sw[i] <= Twc1 + (M_sw - Twc1) * m.chi30[i])
+    m.chi45_def = pyo.Constraint(m.I, rule=lambda m, i:
+        m.sw[i] <= Twc2 + (M_sw - Twc2) * m.chi45[i])
+
+    # ── C12/C15: cumulated breaks ≥ 30'/45' by the end of the shift ─────────
+    # sw[i] includes the work performed AT i (before its rest); bt[i] counts
+    # the breaks strictly before i — their sumB over [u, v[.
+    m.wtd30 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.bt[i] >= m.Tb30 * (m.chi30[i] + _model_rho(m, i) - 1))
+    m.wtd45 = pyo.Constraint(m.I, rule=lambda m, i:
+        m.bt[i] >= m.Tb45 * (m.chi45[i] + _model_rho(m, i) - 1))
+    # unfinished final shift at the route end
+    m.wtd30_term = pyo.Constraint(expr=m.bt[N] >= m.Tb30 * m.chi30[N])
+    m.wtd45_term = pyo.Constraint(expr=m.bt[N] >= m.Tb45 * m.chi45[N])
+
+
 def _add_v_sigma_constraints(m, M_big):
     """
     Activity / sequential-mode indicators (M4, rewrite R13–R15).
@@ -615,15 +723,25 @@ def _add_time_constraints(m, N, data=None):
     """
     data = data or {}
     hard_tw = bool(data.get("hard_tw", False))
+    allow_wait = bool(data.get("allow_wait", False))
+
+    # Idle wait w_i: only meaningful at customer/layby stops, and only in
+    # benchmark-parity mode.  Everywhere else it is fixed to 0 so the default
+    # model is unchanged (v3 no-idle-waiting convention).
+    _waitable = (set(m.Cset) | set(m.Lset)) if allow_wait else set()
+    for i in m.I:
+        if i not in _waitable:
+            m.w[i].fix(0.0)
 
     def _tp(m, i):
         if i >= N: return pyo.Constraint.Skip
         return m.ta[i + 1] == m.td[i] + m.D_nom[i]
     m.time_prop = pyo.Constraint(m.I, rule=_tp)
 
-    # (depart_C): customer departure — service, then break/rest (TW1)
+    # (depart_C): customer departure — service, then break/rest (TW1),
+    # then optional benchmark idle wait
     m.td_C = pyo.Constraint(m.Cset, rule=lambda m, i:
-        m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i])
+        m.td[i] == m.ta[i] + m.S[i] + m.taub[i] + m.taur[i] + m.w[i])
 
     # (4): CS departure — stop overhead (v·Mstop) + queue + charging + break/rest
     #                    + sequential repositioning (σ·Mseq)
@@ -635,7 +753,7 @@ def _add_time_constraints(m, N, data=None):
     if list(m.Lset):
         m.td_L = pyo.Constraint(m.Lset, rule=lambda m, i:
             m.td[i] == m.ta[i] + m.Mlay[i] * _model_xsum(m, i)
-                     + m.taub[i] + m.taur[i])
+                     + m.taub[i] + m.taur[i] + m.w[i])
 
     # TW2 — out-of-window indicator, eqs. (5)/(6).  The single horizon big-M H
     # (C1) upper-bounds any feasible arrival span, so it relieves both the
@@ -951,6 +1069,11 @@ def build_model(data: dict) -> pyo.ConcreteModel:
                                      ext_budget=int(data.get("ext_bar", 2)),
                                      M_lay_dict=data.get("M_lay"))
 
+    # Directive 2002/15 working-time breaks in-model (benchmark parity);
+    # default False keeps the ex-post-only treatment (S3).
+    if data.get("wtd_rules", False):
+        _add_wtd_constraints(m, N, data)
+
     # (h_term / eq. 70): terminal spread — the off-model final rest after
     # arrival is assumed regular, so the unfinished final shift is bounded by
     # the 13 h regular-rest spread.  Full-route only (a horizon end may sit
@@ -975,11 +1098,11 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     return m
 
 
-def solve_model(model, tee=True):
-    """Solve the full-route MIP to near-optimality (0.5% gap, 2h limit)."""
+def solve_model(model, tee=True, mipgap=0.005, timelimit=60 * 60 * 2):
+    """Solve the full-route MIP (default: 0.5% gap, 2h limit)."""
     solver = pyo.SolverFactory("gurobi")
-    solver.options["MIPGap"]    = 0.005
-    solver.options["TimeLimit"] = 60 * 60 * 2
+    solver.options["MIPGap"]    = mipgap
+    solver.options["TimeLimit"] = timelimit
     try:
         results = _solve_quiet(solver, model, tee)
         status  = str(results.solver.termination_condition)
@@ -1018,6 +1141,7 @@ def _extract_stop_dict(model, i, data, C_set, K_set) -> dict:
         tauq  = tauq_val,
         taub  = _v(model.taub[i]),
         taur  = _v(model.taur[i]),
+        wait  = _v(model.w[i]),                              # benchmark idle
         g     = _v(model.g[i]) if is_K else 0.0,             # M2 break credit
         delta = round(_v(model.delta[i])) if is_C else 0,    # TW2 window miss
         y     = y_val,
