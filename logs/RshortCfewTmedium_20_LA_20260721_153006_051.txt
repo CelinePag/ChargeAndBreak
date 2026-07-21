@@ -1,0 +1,25 @@
+
+=================================================================
+  LA SIMULATION START  (2026-07-21 16:27:53)
+  Instance : RshortCfewTmedium_20   run_id=RshortCfewTmedium_20_LA_20260721_153006_051
+  Route    : 44 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+
+[LA] stop 1 (LAYBY)  t=8.254h  soc=478kWh  cd=0.25h  sd=0.25h  sw=0.25h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [1->44]  travel=10.91h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1
+  y=0  brk=0    rst=0   25.521h (0.256h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (4.1s)
+  y=0  brk=0    rst=r2  31.133h (0.402h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (3.8s)
+  y=0  brk=b45  rst=0   26.316h (0.260h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (3.4s)
+  y=0  brk=b15  rst=0   25.913h (0.257h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (4.1s)
+     [DIAG] max per-scenario delta spread across actions: 32.05 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=8.254h  td=8.254h  (mean=25.521h)  15.5s
+
+[LA] stop 2 (LAYBY)  t=8.609h  soc=457kWh  cd=0.61h  sd=0.61h  sw=0.61h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [2->44]  travel=10.66h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=25.608h  0.8s  ws=no  1299v/2205c
+  y=0  brk=0    rst=0   25.601h (0.204h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (3.9s)
+  y=0  brk=0    rst=r2  31.044h (0.318h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (3.8s)
+  y=0  brk=b45  rst=0   26.386h (0.205h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (4.0s)
