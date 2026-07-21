@@ -47,6 +47,7 @@ import time
 from BEHDV      import BEHDV
 from MILP       import solve_horizon
 from scenarios  import ScenarioTracker
+from settings   import TRAVEL_TIME_CV, GUARD_QUANTILE
 from supervisor import supervise_action
 
 
@@ -77,9 +78,9 @@ def run_plan_with_recourse(full_data: dict,
                            E_real: list,
                            method_name: str,
                            log_fn,
-                           delta: float = 0.15,
-                           supervised: bool = True,
-                           prune_quantile: float = 1.0,
+                           cv: float = TRAVEL_TIME_CV,
+                           supervised: bool = False,
+                           prune_quantile: float | None = GUARD_QUANTILE,
                            time_limit: int = 60,
                            verbose: bool = True) -> tuple:
     """
@@ -93,9 +94,9 @@ def run_plan_with_recourse(full_data: dict,
     D_real, E_real : realized travel times / energies per leg
     method_name    : "2SP" | "RO" — used in logs and event records
     log_fn         : callable(str) for logging
-    delta          : uncertainty half-width (for the safety supervisor)
-    supervised     : apply the S1 safety supervisor (default True);
-                     False = raw mode (violations recorded, never prevented)
+    cv             : CV of the travel-time multiplier (for the safety supervisor)
+    supervised     : apply the S1 safety supervisor (default False = raw
+                     mode: violations recorded, never prevented)
     prune_quantile : supervisor worst-case quantile (RH2)
     time_limit     : per-stop solver time limit (s)
 
@@ -183,7 +184,7 @@ def run_plan_with_recourse(full_data: dict,
             if supervised:
                 action, itv = supervise_action(
                     full_data, stop, vehicle, action,
-                    delta=delta, quantile=prune_quantile)
+                    cv=cv, quantile=prune_quantile)
                 if itv is not None:
                     events["interventions"].append(itv)
                     log_fn(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
@@ -219,9 +220,9 @@ def run_plan_static(full_data: dict,
                     E_real: list,
                     method_name: str,
                     log_fn,
-                    delta: float = 0.15,
-                    supervised: bool = True,
-                    prune_quantile: float = 1.0,
+                    cv: float = TRAVEL_TIME_CV,
+                    supervised: bool = False,
+                    prune_quantile: float | None = GUARD_QUANTILE,
                     verbose: bool = True) -> tuple:
     """
     C3 — Execute a STATIC plan with NO online recourse (the robust plan).
@@ -232,13 +233,14 @@ def run_plan_static(full_data: dict,
     draw breaks the fixed plan (an HoS breach or a stranding), BEHDV records
     the violation and the run is a ROBUST-PLAN FAILURE — it is reported, not
     repaired.  (Under the conservative box worst case the plan is feasible
-    for every realization inside the box, so failures can only come from
-    draws outside [1-δ, 1+δ].)
+    for every realization inside the box, and the multiplier support
+    [XI_MIN, XI_MAX] is hard, so failures should not occur by construction.)
 
-    The shared one-step safety supervisor (§5.1) still applies in supervised
-    mode — it is the identical guard used by every policy, not plan recourse;
-    when it overrides the action, the pre-computed durations no longer match,
-    so execution falls back to the minimum-duration heuristic for that stop.
+    The shared one-step safety supervisor (§5.1) applies only when
+    supervised=True (non-default) — it is the identical guard used by every
+    policy, not plan recourse; when it overrides the action, the pre-computed
+    durations no longer match, so execution falls back to the
+    minimum-duration heuristic for that stop.
 
     ``plan`` entries must carry the fixed durations (from
     twosp.extract_2sp_full_schedule): keys y, break_type, rest_type, tauc,
@@ -292,7 +294,7 @@ def run_plan_static(full_data: dict,
             if supervised:
                 action, itv = supervise_action(
                     full_data, stop, vehicle, action,
-                    delta=delta, quantile=prune_quantile)
+                    cv=cv, quantile=prune_quantile)
                 if itv is not None:
                     events["interventions"].append(itv)
                     log_fn(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "

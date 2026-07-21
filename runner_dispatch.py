@@ -5,7 +5,8 @@ Provides run_algorithm(), a single entry point that loads a precomputed
 instance JSON file and runs one of four algorithms:
 
   "LA"     — Look-ahead rolling-horizon simulation (Simulation.py)
-  "RO"     — Robust optimisation, solved once on full route (RO.py)
+  "RO"     — Robust optimisation (conservative box), full route (RO.py)
+  "ROBU"   — Budgeted robust optimisation (Bertsimas–Sim, C&CG) (RObudget.py)
   "greedy" — Greedy benchmark heuristic (greedy.py)
   "2SP"    — Two-stage stochastic program, extensive form (2SP.py)
 
@@ -21,7 +22,7 @@ Usage (Python)
 
   results = run_algorithm(
       json_file  = "instances/RmediumCfew_7.json",
-      algorithm  = "LA",        # "LA" | "RO" | "greedy" | "2SP"
+      algorithm  = "LA",        # "LA" | "RO" | "ROBU" | "greedy" | "2SP"
       n_scenarios= 10,          # LA / 2SP: number of scenarios to use
   )
 
@@ -29,7 +30,7 @@ Usage (CLI)
 -----------
   python runner_dispatch.py <json_file> <algorithm> [options...]
 
-  algorithm: LA | RO | greedy | 2SP
+  algorithm: LA | RO | ROBU | greedy | 2SP
 
   Batch usage
   -----------
@@ -75,6 +76,13 @@ Usage (CLI)
     --ro_time_limit INT   full-route MIP time limit s (default: 7200)
     --ro_mip_gap FLOAT    MIP gap tolerance (default: 0.005)
 
+  ROBU options (also uses --ro_time_limit / --ro_mip_gap per master solve):
+    --robu_eps FLOAT      target violation probability for the classic
+                          Bertsimas-Sim budget Gamma = 1 + z_{1-eps}*sqrt(N)
+                          (default: 0.01)
+    --robu_gamma INT      explicit budget override (default: from --robu_eps)
+    --robu_max_iter INT   max C&CG iterations (default: 12)
+
   Greedy options:
     --safety FLOAT        SOC safety buffer fraction (default: 0.10)
     --queue_thresh FLOAT  skip charging at CS with queue_time > this (h)
@@ -93,6 +101,8 @@ import copy
 import os
 import sys
 from typing import Optional
+
+from settings import GUARD_QUANTILE
 
 
 def _apply_diesel_mode(full_data: dict, D_real: list, E_real: list) -> tuple:
@@ -150,6 +160,10 @@ def run_algorithm(
     # RO options
     ro_time_limit: int     = 7200,
     ro_mip_gap: float      = 0.005,
+    # ROBU options (shares ro_time_limit / ro_mip_gap for the master solves)
+    robu_eps: float        = 0.01,
+    robu_gamma: Optional[int] = None,
+    robu_max_iter: int     = 12,
     # greedy options
     safety_buffer: float             = 0.0,
     queue_threshold: Optional[float] = None,   # deprecated, ignored
@@ -162,8 +176,9 @@ def run_algorithm(
     run_id: Optional[str]  = None,
     m_man_h: Optional[float] = None,   # override stored M values (h); None = keep JSON value
     diesel_mode: bool      = False,    # treat vehicle as diesel (HoS only, no charging)
-    supervised: bool       = True,     # S1: safety supervisor on (False = raw mode)
-    prune_quantile: float  = 1.0,      # RH2: worst-case quantile for guard/pruning
+    supervised: bool       = False,    # S1: safety supervisor off by default (raw mode)
+    prune_quantile: Optional[float] = GUARD_QUANTILE,  # RH2 guard level; None = disabled
+    resume: bool           = False,    # LA only: resume a crashed run from its checkpoint
 ) -> dict:
     """
     Load a precomputed instance JSON file and run the specified algorithm.
@@ -219,15 +234,16 @@ def run_algorithm(
     dict -- canonical results dict (same schema for all three algorithms)
     """
     alg = algorithm.upper().strip()
-    if alg not in ("LA", "RO", "GREEDY", "2SP"):
+    if alg not in ("LA", "RO", "ROBU", "GREEDY", "2SP"):
         raise ValueError(
-            f"algorithm must be 'LA', 'RO', 'greedy', or '2SP'; got '{algorithm}'"
+            f"algorithm must be 'LA', 'RO', 'ROBU', 'greedy', or '2SP'; "
+            f"got '{algorithm}'"
         )
 
     # ── Load precomputed instance ──────────────────────────────────────────────
     from instance_io import load_instance_json
 
-    full_data, D_real, E_real, delta = load_instance_json(json_file)
+    full_data, D_real, E_real, cv = load_instance_json(json_file)
 
     # ── Diesel mode: remove all charging/energy constraints ───────────────────
     if diesel_mode:
@@ -252,7 +268,7 @@ def run_algorithm(
             D_real            = D_real,
             E_real            = E_real,
             n_scenarios       = n_scenarios,
-            delta             = delta,
+            cv                = cv,
             time_limit        = twosp_time_limit,
             mip_gap           = twosp_mip_gap,
             tee               = False,
@@ -269,7 +285,8 @@ def run_algorithm(
             full_data       = full_data,
             D_real          = D_real,
             E_real          = E_real,
-            delta           = delta,
+            cv              = cv,
+            guard_quantile  = prune_quantile,
             safety_buffer   = safety_buffer,
             verbose         = verbose,
             run_id          = run_id,
@@ -278,13 +295,33 @@ def run_algorithm(
             prune_quantile  = prune_quantile,
         )
 
+    elif alg == "ROBU":
+        from RObudget import run_robu
+        return run_robu(
+            full_data  = full_data,
+            D_real     = D_real,
+            E_real     = E_real,
+            cv         = cv,
+            time_limit = ro_time_limit,
+            mip_gap    = ro_mip_gap,
+            eps        = robu_eps,
+            gamma      = robu_gamma,
+            max_iter   = robu_max_iter,
+            tee        = False,
+            verbose    = verbose,
+            run_id     = run_id,
+            oracle_tee = oracle_tee,
+            supervised = supervised,
+            prune_quantile = prune_quantile,
+        )
+
     elif alg == "RO":
         from RO import run_ro
         return run_ro(
             full_data  = full_data,
             D_real     = D_real,
             E_real     = E_real,
-            delta      = delta,
+            cv         = cv,
             time_limit = ro_time_limit,
             mip_gap    = ro_mip_gap,
             tee        = False,
@@ -303,7 +340,7 @@ def run_algorithm(
             E_real             = E_real,
             n_scenarios        = n_scenarios,
             horizon_hours      = horizon_hours,
-            delta              = delta,
+            cv                 = cv,
             time_limit         = time_limit,
             verbose            = verbose,
             n_workers          = n_workers,
@@ -316,6 +353,7 @@ def run_algorithm(
             oracle_tee         = oracle_tee,
             supervised         = supervised,
             prune_quantile     = prune_quantile,
+            resume             = resume,
         )
 
 
@@ -323,7 +361,7 @@ def run_algorithm(
 # Batch dispatch — run many (instance, algorithm) combinations in one command
 # ══════════════════════════════════════════════════════════════════════════════
 
-_ALL_ALGORITHMS = ["LA", "RO", "GREEDY", "2SP"]
+_ALL_ALGORITHMS = ["LA", "RO", "ROBU", "GREEDY", "2SP"]
 _INSTANCES_DIR  = "instances"
 
 
@@ -377,7 +415,7 @@ def _expand_algorithms(spec: str) -> list:
         alg = part.upper()
         if alg not in _ALL_ALGORITHMS:
             raise SystemExit(f"unknown algorithm '{part}' "
-                              f"(expected LA, RO, greedy, 2SP, or all)")
+                              f"(expected LA, RO, ROBU, greedy, 2SP, or all)")
         out.append(alg)
     seen = set()
     uniq = []
@@ -414,7 +452,93 @@ def _run_one_job(job: dict) -> dict:
         )
 
 
-def run_batch(json_files: list, algorithms: list, jobs: int = 1, **kwargs) -> list:
+# ── skip-already-run detection ────────────────────────────────────────────────
+# Per method, the result-defining parameters recorded at the top level of each
+# solution JSON (method_meta is merged there by runner.finalize_run).  Two runs
+# with the same instance, method, and these values are considered identical, so
+# --skip-existing will not re-solve them.  NOTE: this matches on stored
+# PARAMETERS only, not on the code version — after a modelling change, delete the
+# stale solutions (and oracle_*.json caches) rather than relying on the skip.
+_SIG_FIELDS = {
+    "GREEDY": ["safety_buffer", "supervised", "prune_quantile"],
+    "RO":     ["supervised", "prune_quantile"],
+    "ROBU":   ["robu_eps", "gamma", "supervised", "prune_quantile"],
+    "2SP":    ["n_scenarios", "supervised", "prune_quantile"],
+    "LA":     ["n_scenarios", "horizon_hours", "criterion", "solve_mode",
+               "charge_only", "supervised", "prune_quantile"],
+}
+
+
+def _requested_sig(alg: str, kw: dict) -> Optional[dict]:
+    """Signature (method_meta field -> value) the requested run would record."""
+    sup = bool(kw.get("supervised", False))
+    pq  = kw.get("prune_quantile")
+    if alg == "GREEDY":
+        return dict(safety_buffer=kw.get("safety_buffer", 0.0),
+                    supervised=sup, prune_quantile=pq)
+    if alg == "RO":
+        return dict(supervised=sup, prune_quantile=pq)
+    if alg == "ROBU":
+        sig = dict(robu_eps=kw.get("robu_eps", 0.01),
+                   gamma=kw.get("robu_gamma"),
+                   supervised=sup, prune_quantile=pq)
+        if sig["gamma"] is None:          # gamma is eps-derived -> match on eps
+            sig.pop("gamma")
+        return sig
+    if alg == "2SP":
+        return dict(n_scenarios=kw.get("n_scenarios", 10),
+                    supervised=sup, prune_quantile=pq)
+    if alg == "LA":
+        return dict(n_scenarios=kw.get("n_scenarios", 10),
+                    horizon_hours=kw.get("horizon_hours", 12.0),
+                    criterion=kw.get("criterion", "mean"),
+                    solve_mode=kw.get("solve_mode", "lp"),
+                    charge_only=bool(kw.get("charge_only", False)),
+                    supervised=sup, prune_quantile=pq)
+    return None
+
+
+def _val_eq(a, b) -> bool:
+    """Tolerant equality for signature values (None / bool / number / str)."""
+    if a is None or b is None:
+        return a is None and b is None
+    if isinstance(a, bool) or isinstance(b, bool):
+        return bool(a) == bool(b)
+    try:
+        return abs(float(a) - float(b)) < 1e-6
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
+def _find_matching_run(json_file: str, alg: str, kw: dict,
+                       solutions_dir: str = "solutions") -> Optional[str]:
+    """Return the path of a finished solution with matching params, else None."""
+    import glob as _glob
+    import json as _json
+    req = _requested_sig(alg, kw)
+    if req is None:
+        return None
+    stem        = os.path.splitext(os.path.basename(json_file))[0]
+    want_diesel = bool(kw.get("diesel_mode", False))
+    for path in _glob.glob(os.path.join(solutions_dir, f"{stem}_{alg}_*.json")):
+        if os.path.basename(path).startswith("oracle_"):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                sol = _json.load(fh)
+        except Exception:
+            continue
+        if sol.get("sim_arrival_h") is None:          # not a finished run
+            continue
+        if str(sol.get("instance", "")).endswith("_diesel") != want_diesel:
+            continue
+        if all(_val_eq(v, sol.get(k)) for k, v in req.items()):
+            return path
+    return None
+
+
+def run_batch(json_files: list, algorithms: list, jobs: int = 1,
+              skip_existing: bool = False, **kwargs) -> list:
     """
     Run every (instance, algorithm) combination from the cartesian product of
     json_files x algorithms, either sequentially (jobs=1) or across `jobs`
@@ -442,6 +566,27 @@ def run_batch(json_files: list, algorithms: list, jobs: int = 1, **kwargs) -> li
     combos = list(itertools.product(json_files, algorithms))
     if not combos:
         raise ValueError("no (instance, algorithm) combinations to run")
+
+    skipped = []
+    if skip_existing:
+        kept = []
+        for jf, alg in combos:
+            match = _find_matching_run(jf, alg, kwargs)
+            if match:
+                skipped.append((jf, alg, match))
+            else:
+                kept.append((jf, alg))
+        combos = kept
+        print(f"\n  Skipping {len(skipped)} already-run combination(s) "
+              f"(matching instance + method + parameters):")
+        for jf, alg, match in skipped[:12]:
+            print(f"    - {os.path.basename(jf):<40} [{alg:<6}] "
+                  f"-> {os.path.basename(match)}")
+        if len(skipped) > 12:
+            print(f"    ... and {len(skipped) - 12} more")
+        if not combos:
+            print("  Nothing left to run.")
+            return []
 
     ts_base = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     jobs_list = []
@@ -498,9 +643,9 @@ if __name__ == "__main__":
     parser.add_argument("json_file",  help="Instance JSON path(s): a single "
                          "path, a comma-separated list, glob pattern(s), or "
                          "'all' for every file in instances/.")
-    parser.add_argument("algorithm",  help="Algorithm(s): LA | RO | greedy | "
-                         "2SP, comma-separated for multiple, or 'all' for "
-                         "all four.")
+    parser.add_argument("algorithm",  help="Algorithm(s): LA | RO | ROBU | "
+                         "greedy | 2SP, comma-separated for multiple, or "
+                         "'all' for all five.")
 
     # Common
     parser.add_argument("--run_id",      type=str,   default=None,
@@ -528,18 +673,33 @@ if __name__ == "__main__":
                         choices=["mean", "worst", "best", "cvar_0.8"],
                         help="RH3: scenario aggregation for LA scoring; "
                              "cvar_0.8 = mean of the worst 20 percent.")
-    parser.add_argument("--raw",          action="store_true", default=True,
-                        help="S1: disable the safety supervisor (raw mode) "
-                             "to expose each method's intrinsic feasibility "
-                             "risk; default is unsupervised.")
-    parser.add_argument("--prune_quantile", type=float, default=1.0,
-                        help="RH2: worst-case quantile used by the "
-                             "supervisor/pruning guard (1.0 = full support; "
-                             "below 1 for unbounded distributions).")
+    parser.add_argument("--supervised",   action="store_true", default=False,
+                        help="S1: enable the safety supervisor guard. "
+                             "Default off (raw mode): each method's intrinsic "
+                             "feasibility risk is exposed — an infeasible run "
+                             "is recorded as-is, never rescued.")
+    parser.add_argument("--prune_quantile", type=float, default=GUARD_QUANTILE,
+                        help="RH2: probability level of the one-step "
+                             "feasibility guard (greedy rule, LA pruning, "
+                             "opt-in supervisor).  Default disabled: greedy "
+                             "checks at nominal, LA does no flag-based "
+                             "pruning.  0.95 = guard at the xi 95%% "
+                             "quantile; 1.0 = full support corners.")
 
     # RO
     parser.add_argument("--ro_time_limit",type=int,   default=7200)
     parser.add_argument("--ro_mip_gap",   type=float, default=0.005)
+
+    # ROBU (budgeted robust, Bertsimas-Sim C&CG; masters use the RO limits)
+    parser.add_argument("--robu_eps",     type=float, default=0.01,
+                        help="Target violation probability for the classic "
+                             "B-S budget Gamma = 1 + z_(1-eps)*sqrt(N).")
+    parser.add_argument("--robu_gamma",   type=int,   default=None,
+                        help="Explicit budget Gamma override (default: "
+                             "derived from --robu_eps).")
+    parser.add_argument("--robu_max_iter",type=int,   default=12,
+                        help="Max C&CG robustification-pessimization "
+                             "iterations.")
 
     # 2SP
     parser.add_argument("--twosp_time_limit", type=int,   default=7200)
@@ -555,6 +715,19 @@ if __name__ == "__main__":
     parser.add_argument("--diesel",       action="store_true", default=False,
                         help="Run as diesel vehicle: remove all charging/energy "
                              "constraints, keep only HoS rules.")
+    parser.add_argument("--skip-existing", dest="skip_existing",
+                        action="store_true", default=False,
+                        help="Skip any (instance, method) that already has a "
+                             "finished solution with the SAME parameters, so a "
+                             "batch can be re-run without redoing completed "
+                             "work.  Matches stored parameters only, NOT the "
+                             "code version: after a model change, delete stale "
+                             "solutions instead of relying on this.")
+    parser.add_argument("--resume", action="store_true", default=False,
+                        help="LA only: checkpoint after every stop and, on a "
+                             "re-run with the same parameters, continue a "
+                             "crashed run from its last completed stop instead "
+                             "of restarting from zero.")
 
     args = parser.parse_args()
 
@@ -571,6 +744,9 @@ if __name__ == "__main__":
         criterion        = args.criterion,
         ro_time_limit    = args.ro_time_limit,
         ro_mip_gap       = args.ro_mip_gap,
+        robu_eps         = args.robu_eps,
+        robu_gamma       = args.robu_gamma,
+        robu_max_iter    = args.robu_max_iter,
         safety_buffer    = args.safety,
         queue_threshold  = args.queue_thresh,
         twosp_time_limit = args.twosp_time_limit,
@@ -579,24 +755,33 @@ if __name__ == "__main__":
         oracle_tee       = args.oracle_tee,
         m_man_h          = args.m_man,
         diesel_mode      = args.diesel,
-        supervised       = not args.raw,
+        supervised       = args.supervised,
         prune_quantile   = args.prune_quantile,
+        resume           = args.resume,
     )
 
     if len(json_files) == 1 and len(algorithms) == 1:
-        results = run_algorithm(
-            json_file = json_files[0],
-            algorithm = algorithms[0],
-            run_id    = args.run_id,
-            **common_kwargs,
-        )
-        print(f"\n  Algorithm  : {algorithms[0]}")
-        print(f"  Arrival    : {results['total_time']:.3f} h")
-        print(f"  Wall clock : {results['wall_clock']:.1f} s")
-        print(f"  Solution   : {results['sol_path']}")
-        print(f"  Log        : {results['log_path']}")
+        _match = (_find_matching_run(json_files[0], algorithms[0], common_kwargs)
+                  if args.skip_existing else None)
+        if _match:
+            print(f"\n  Skipping {algorithms[0]} on "
+                  f"{os.path.basename(json_files[0])}: already run with the "
+                  f"same parameters -> {os.path.basename(_match)}")
+        else:
+            results = run_algorithm(
+                json_file = json_files[0],
+                algorithm = algorithms[0],
+                run_id    = args.run_id,
+                **common_kwargs,
+            )
+            print(f"\n  Algorithm  : {algorithms[0]}")
+            print(f"  Arrival    : {results['total_time']:.3f} h")
+            print(f"  Wall clock : {results['wall_clock']:.1f} s")
+            print(f"  Solution   : {results['sol_path']}")
+            print(f"  Log        : {results['log_path']}")
     else:
         if args.run_id:
             print(f"  [!] --run_id ('{args.run_id}') ignored for batch runs; "
                   f"auto-generating a run_id per combination.")
-        run_batch(json_files, algorithms, jobs=args.jobs, **common_kwargs)
+        run_batch(json_files, algorithms, jobs=args.jobs,
+                  skip_existing=args.skip_existing, **common_kwargs)

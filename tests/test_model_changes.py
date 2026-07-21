@@ -565,7 +565,7 @@ def test_c3_static_execution_records_failure_no_repair():
     E_real = [260.0, 260.0]                 # >> usable per leg -> stranding
     veh, trk, ev = run_plan_static(
         data, plan, D_real, E_real, "RO", lambda s: None,
-        delta=0.15, supervised=False, verbose=False)
+        cv=0.15, supervised=False, verbose=False)
     assert len(ev["repairs"]) == 0 and len(ev["plan_violations"]) == 0, \
         "static RO must not repair"
     assert len(veh.violations) > 0, "a broken static plan must record a failure"

@@ -19,6 +19,19 @@ Public interface
           4. HoS accumulator trajectories
           5. Look-ahead scenario scatter (decision quality across stops)
 
+    replot_run(run_ref) / load_run(run_ref)
+        Rebuild the results dict from a saved solutions/<run_id>.json and
+        re-render the five-panel figure — runs no longer plot automatically.
+
+CLI
+---
+    python plots.py <run_id | instance-prefix | glob | json-path> [--show]
+
+    Examples:
+      python plots.py RshortCfewTlarge_10_RO_20260716_092310_001
+      python plots.py RshortCfewTlarge_10            # every saved run of it
+      python plots.py "solutions/Rmedium*_LA_*.json" --show
+
 Dependencies
 ------------
     matplotlib, numpy — plotting only; no pyomo, no HiGHS.
@@ -978,3 +991,260 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     if show:
         plt.show()
         plt.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Replot from saved run files  (CLI: python plots.py <run_id>)
+# ═════════════════════════════════════════════════════════════════════════════
+# finalize_run (runner.py) no longer renders figures during a run; it saves
+# everything needed into solutions/<run_id>.json instead.  The functions below
+# rebuild the canonical results dict from that JSON + the instance JSON and
+# re-render the standard five-panel figure at any later time.
+#
+#   python plots.py RshortCfewTlarge_10_RO_20260716_092310_001
+#   python plots.py RshortCfewTlarge_10          # all saved runs of instance
+#   python plots.py "solutions/Rmedium*_LA_*.json" --show
+#
+# Panel 5 (look-ahead scenario scatter) is empty on replots: per-stop scenario
+# scores are not serialised to the solution JSON.
+
+SOLUTIONS_DIR = "solutions"
+INSTANCES_DIR = "instances"
+
+
+def _resolve_solution_paths(run_ref: str, solutions_dir: str = SOLUTIONS_DIR):
+    """
+    Expand one CLI reference into a list of solution JSON paths.
+
+    Accepts, in order of precedence:
+      - a literal file path                 solutions/<run_id>.json
+      - a glob pattern                      solutions/Rshort*_RO_*.json
+      - a run_id (with or without .json)    <run_id>
+      - a run_id / instance-name prefix     RshortCfewTlarge_10
+        (matches every saved run of that instance)
+    """
+    import glob as _glob
+
+    if os.path.isfile(run_ref):
+        return [run_ref]
+    if any(ch in run_ref for ch in "*?["):
+        hits = sorted(_glob.glob(run_ref))
+        if not hits:
+            raise FileNotFoundError(f"no files matched pattern '{run_ref}'")
+        return hits
+    for cand in (os.path.join(solutions_dir, run_ref),
+                 os.path.join(solutions_dir, run_ref + ".json")):
+        if os.path.isfile(cand):
+            return [cand]
+    if os.path.isdir(solutions_dir):
+        hits = sorted(
+            os.path.join(solutions_dir, f)
+            for f in os.listdir(solutions_dir)
+            if f.startswith(run_ref) and f.endswith(".json")
+            and not f.startswith("oracle_")
+        )
+        if hits:
+            return hits
+    raise FileNotFoundError(
+        f"no solution file found for '{run_ref}' "
+        f"(looked in '{solutions_dir}/'; pass a run_id, an instance-name "
+        f"prefix, a glob pattern, or a JSON path)")
+
+
+def _pwl_e2t(full_data: dict):
+    """Return e→t interpolator along the instance's PWL charging curve."""
+    Ebar = full_data["Ebar"]
+    Tbar = full_data["Tbar"]
+    rs   = sorted(Ebar)
+    Es   = [Ebar[r] for r in rs]
+    Ts   = [Tbar[r] for r in rs]
+
+    def e2t(e):
+        e = max(Es[0], min(Es[-1], e))
+        for k in range(len(Es) - 1):
+            if Es[k] <= e <= Es[k + 1]:
+                span = Es[k + 1] - Es[k]
+                return (Ts[k] + (e - Es[k]) / span * (Ts[k + 1] - Ts[k])
+                        if span else Ts[k])
+        return Ts[-1]
+
+    return e2t
+
+
+def _reconstruct_durations(traj, actions, full_data, E_real, td_list):
+    """
+    Legacy fallback: rebuild per-stop {taub, tauc, taur, tauq, sigma, v,
+    mstop, mseq, mlay} for solution JSONs saved before durations_list was
+    serialised.  Fixed components (setup, queue, charge via the PWL curve,
+    reposition, rest) are recomputed from the instance data; taub absorbs
+    the remaining dwell so the timeline is consistent by construction.
+    """
+    e2t    = _pwl_e2t(full_data)
+    K_set  = set(full_data["K"])
+    C_set  = set(full_data["C"])
+    L_set  = set(full_data.get("L", []))
+    Q      = full_data.get("Q", {})
+    S      = full_data.get("S", {})
+    M_stop = full_data.get("M_stop", {})
+    M_seq  = full_data.get("M_seq", {})
+    M_lay  = full_data.get("M_lay", {})
+    Tr1    = full_data.get("Tr1", 11.0)
+    Tr2    = full_data.get("Tr2", 9.0)
+    N      = full_data["N"]
+
+    durs = []
+    for i in range(min(N, len(traj) - 1)):
+        s, s1  = traj[i], traj[i + 1]
+        a      = actions[i] if i < len(actions) else {}
+        dwell  = max(0.0, td_list[i] - s["t_arr"])
+        y      = int(a.get("y", 0))
+        brk    = a.get("break_type")
+        rst    = a.get("rest_type")
+        e_dep  = s1["e_arr"] + E_real[i]
+        tauc   = (max(0.0, e2t(e_dep) - e2t(s["e_arr"]))
+                  if (y and e_dep - s["e_arr"] > 1e-6) else 0.0)
+        tauq   = float(Q.get(i, 0.0)) if y else 0.0
+        sigma  = 1 if (y and rst) else 0
+        v      = 1 if (i in K_set and dwell > EPS) else 0
+        mstop  = float(M_stop.get(i, 0.0)) * v
+        mseq   = float(M_seq.get(i, 0.0)) * sigma
+        mlay   = (float(M_lay.get(i, 0.0))
+                  if (i in L_set and (brk or rst)) else 0.0)
+        taur   = Tr2 if rst == "r2" else (Tr1 if rst == "r1" else 0.0)
+        svc    = float(S.get(i, 0.0)) if i in C_set else 0.0
+        taub   = (max(0.0, dwell - svc - mstop - tauq - tauc - mseq
+                      - mlay - taur) if brk else 0.0)
+        durs.append(dict(taub=taub, tauc=tauc, taur=taur, tauq=tauq,
+                         sigma=sigma, v=v, mstop=mstop, mseq=mseq, mlay=mlay))
+    return durs
+
+
+def load_run(run_ref: str,
+             solutions_dir: str = SOLUTIONS_DIR,
+             instances_dir: str = INSTANCES_DIR):
+    """
+    Rebuild (results, full_data, run_id) from a saved solution JSON so that
+    plot_simulation_results can be called long after the run finished.
+
+    `run_ref` must resolve to exactly one solution file (run_id or path);
+    use _resolve_solution_paths / the CLI for prefix and glob expansion.
+    """
+    import json
+    from types import SimpleNamespace
+
+    paths = _resolve_solution_paths(run_ref, solutions_dir)
+    if len(paths) > 1:
+        raise ValueError(
+            f"'{run_ref}' matches {len(paths)} solution files; "
+            f"pass a unique run_id (e.g. {os.path.basename(paths[0])})")
+    sol_path = paths[0]
+
+    with open(sol_path, "r", encoding="utf-8") as fh:
+        sol = json.load(fh)
+
+    run_id = sol.get("run_id") or os.path.splitext(os.path.basename(sol_path))[0]
+    title  = sol.get("instance", "")
+    diesel = title.endswith("_diesel")
+    stem   = title[:-len("_diesel")] if diesel else title
+
+    inst_path = os.path.join(instances_dir, stem + ".json")
+    if not os.path.isfile(inst_path):
+        raise FileNotFoundError(
+            f"instance file '{inst_path}' not found for run '{run_id}'")
+
+    # Late imports — instance_io/runner_dispatch import chains lead back to
+    # plots.py; importing them lazily avoids a circular import at load time.
+    from instance_io import load_instance_json
+    full_data, D_real, E_real, _cv = load_instance_json(inst_path)
+    if diesel:
+        from runner_dispatch import _apply_diesel_mode
+        full_data, D_real, E_real = _apply_diesel_mode(full_data, D_real, E_real)
+
+    traj    = sol["sim_trajectory"]
+    actions = sol["actions"]
+    states  = [SimpleNamespace(**s) for s in traj]
+    N       = full_data["N"]
+
+    D_actual = sol.get("D_actual_list") or list(D_real)
+    td_list  = sol.get("td_list") or [
+        traj[i + 1]["t_arr"] - D_actual[i]
+        for i in range(min(N, len(traj) - 1))
+    ]
+    durations = sol.get("durations_list") or _reconstruct_durations(
+        traj, actions, full_data, E_real, td_list)
+
+    results = dict(
+        states           = states,
+        actions          = actions,
+        scores_log       = [],          # not serialised — panel 5 stays empty
+        td_list          = td_list,
+        D_actual_list    = D_actual,
+        durations_list   = durations,
+        total_time       = traj[-1]["t_arr"],
+        wall_clock       = sol.get("wall_clock_s", 0.0),
+        oracle           = sol.get("oracle", {}),
+        metrics          = sol.get("metrics", {}),
+        sol_path         = sol_path,
+        run_id           = run_id,
+        fig_path         = os.path.join(FIGURES_DIR, f"{run_id}.png"),
+    )
+    return results, full_data, run_id
+
+
+def replot_run(run_ref: str,
+               show: bool = False,
+               save: bool = True,
+               solutions_dir: str = SOLUTIONS_DIR,
+               instances_dir: str = INSTANCES_DIR) -> str:
+    """Render the five-panel figure for one saved run; returns the PNG path."""
+    results, full_data, run_id = load_run(run_ref, solutions_dir, instances_dir)
+    plot_simulation_results(results, full_data,
+                            title=run_id, save=save, show=show)
+    fig_path = results["fig_path"]
+    plt.close("all")
+    return fig_path
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    # The summary block prints Unicode box-drawing characters, which the
+    # default Windows console encoding (cp1252) cannot represent.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    parser = argparse.ArgumentParser(
+        description="Render the five-panel simulation figure from saved "
+                    "solution JSON files, without re-running any algorithm. "
+                    "Each reference may be a run_id, an instance-name prefix "
+                    "(plots every saved run of that instance), a glob "
+                    "pattern, or a path to a solution JSON.")
+    parser.add_argument("runs", nargs="+",
+                        help="run_id(s), instance prefix(es), glob(s), or "
+                             "solution JSON path(s)")
+    parser.add_argument("--show", action="store_true", default=False,
+                        help="open an interactive window for each figure")
+    parser.add_argument("--solutions_dir", default=SOLUTIONS_DIR)
+    parser.add_argument("--instances_dir", default=INSTANCES_DIR)
+    args = parser.parse_args()
+
+    targets = []
+    for ref in args.runs:
+        targets.extend(_resolve_solution_paths(ref, args.solutions_dir))
+    # de-duplicate while preserving order
+    seen = set()
+    targets = [p for p in targets if not (p in seen or seen.add(p))]
+
+    print(f"  Replotting {len(targets)} run(s)")
+    n_fail = 0
+    for p in targets:
+        try:
+            replot_run(p, show=args.show,
+                       solutions_dir=args.solutions_dir,
+                       instances_dir=args.instances_dir)
+        except Exception as e:
+            n_fail += 1
+            print(f"  FAIL {os.path.basename(p)}: {type(e).__name__}: {e}")
+    if n_fail:
+        raise SystemExit(f"  {n_fail}/{len(targets)} replot(s) failed")

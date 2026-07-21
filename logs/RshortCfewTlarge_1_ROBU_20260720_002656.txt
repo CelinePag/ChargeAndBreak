@@ -1,0 +1,32 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-20 00:26:56)
+  Instance : RshortCfewTlarge_1 — short route, few customers, large windows, seed=1   run_id=RshortCfewTlarge_1_ROBU_20260720_002656
+  Route    : 61 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=5 of 61 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  [it 1] master: |scen|=1  theta=38.077h  status=optimal  (7.6s)
+  [it 1] adversary: 3 feasibility cut(s) [global, cd[0-17], soc[0-17]]  (4.7s)
+  [it 2] master: |scen|=4  theta=39.241h  status=optimal  (19.4s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[15-26], soc[15-26], soc[27-38]]  (6.9s)
+  [it 3] master: |scen|=7  theta=39.427h  status=optimal  (159.2s)
+  [it 3] adversary: 2 feasibility cut(s) [soc[35-47], soc[48-60]]  (7.5s)
+  [it 4] master: |scen|=9  theta=39.249h  status=optimal  (155.3s)
+  [it 4] adversary: no violation, worst candidate obj=39.249h <= theta+tol — CONVERGED  (5.4s)
+
+  ROBU objective (worst-case arrival over U_Gamma) : 39.249 h   Gamma=5  scenarios=9  cuts: 8 feas / 0 opt   solve 365.9s
+  plan: 4 chg / 4 brk / 1 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 38.391 h  (38:23)
+  Travel duration    : 30.391 h
+  Solve time         : 365.9 s
+  Wall-clock         : 365.9 s
+=================================================================
+  Oracle   : loaded from cache  solutions\oracle_RshortCfewTlarge_1.json
+  Scenarios: logs\RshortCfewTlarge_1_ROBU_20260720_002656_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : solutions\RshortCfewTlarge_1_ROBU_20260720_002656.json

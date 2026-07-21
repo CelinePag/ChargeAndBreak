@@ -58,7 +58,8 @@ import numpy as np
 
 # ── ECR curve ─────────────────────────────────────────────────────────────────
 from settings import (ecr as _ecr, sample_travel_time, sample_multipliers,
-                      V_NOM, TRAVEL_TIME_DIST, TRAVEL_TIME_AR1_RHO)
+                      V_NOM, XI_MIN, XI_MAX,
+                      TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -69,11 +70,10 @@ def generate_scenarios(full_data: dict,
                        start_stop: int,
                        end_stop: int,
                        n_scenarios: int = 10,
-                       delta: float = 0.20,
+                       cv: float = None,
                        seed: Optional[int] = None,
                        include_best: bool = False,
                        include_worst: bool = False,
-                       dist: str = None,
                        ar1_rho: float = None) -> list[dict]:
     """
     Draw `n_scenarios` travel-time and energy scenarios for legs
@@ -83,16 +83,11 @@ def generate_scenarios(full_data: dict,
         "D": {leg: travel_time_h}
         "E": {leg: energy_kWh}   (derived from D via ECR curve)
 
-    S5 — distribution options:
-      dist="uniform"   (base case): xi ~ U[1−delta, 1+delta], i.i.d.
-      dist="lognormal": lognormal matched to mean 1 and the same CV
-                        (robustness check; unbounded — combine with
-                        prune_quantile < 1 in the supervisor).
-      ar1_rho > 0     : positively correlated deviations across consecutive
-                        legs (AR(1) on the normal driver) — congestion
-                        persists in time; i.i.d. draws tend to understate the
-                        value of adaptive policies.
-    Defaults (None) fall back to settings.TRAVEL_TIME_DIST /
+    S5 — shifted-lognormal multiplier xi = min(XI_MIN + eta, XI_MAX), E[xi]=1
+    (see settings).  ar1_rho > 0 gives positively correlated deviations
+    across consecutive legs (AR(1) on the normal driver) — congestion
+    persists in time; i.i.d. draws tend to understate the value of adaptive
+    policies.  Defaults (None) fall back to settings.TRAVEL_TIME_CV /
     settings.TRAVEL_TIME_AR1_RHO.
 
     Parameters
@@ -101,10 +96,10 @@ def generate_scenarios(full_data: dict,
     start_stop    : first leg index (inclusive)
     end_stop      : last  leg index (exclusive)
     n_scenarios   : number of random scenarios to generate
-    delta         : uncertainty half-width (e.g. 0.15 = ±15%)
+    cv            : coefficient of variation of the multiplier (e.g. 0.15)
     seed          : RNG seed for reproducibility (None = unseeded)
-    include_best  : also append a deterministic best-case scenario (1-delta)
-    include_worst : also append a deterministic worst-case scenario (1+delta)
+    include_best  : also append the deterministic fast corner (xi = XI_MIN)
+    include_worst : also append the deterministic slow corner (xi = XI_MAX)
 
     Returns
     -------
@@ -115,7 +110,7 @@ def generate_scenarios(full_data: dict,
     D_nom = full_data["D"]
     L_nom = full_data.get("km", {})   # leg lengths in km (optional)
 
-    dist    = dist    if dist    is not None else TRAVEL_TIME_DIST
+    cv      = cv      if cv      is not None else TRAVEL_TIME_CV
     ar1_rho = ar1_rho if ar1_rho is not None else TRAVEL_TIME_AR1_RHO
 
     legs   = list(range(start_stop, min(end_stop, N)))
@@ -124,8 +119,7 @@ def generate_scenarios(full_data: dict,
     scenarios = []
 
     for k in range(n_scenarios):
-        mults = sample_multipliers(n_legs, rng, delta=delta,
-                                   dist=dist, ar1_rho=ar1_rho)
+        mults = sample_multipliers(n_legs, rng, cv=cv, ar1_rho=ar1_rho)
         D_scen: dict[int, float] = {}
         E_scen: dict[int, float] = {}
         for j, leg in enumerate(legs):
@@ -149,13 +143,13 @@ def generate_scenarios(full_data: dict,
         return E_corner
 
     if include_best:
-        mult = (1 - delta)
+        mult = XI_MIN
         scenarios.append({
             "D": {l: D_nom.get(l, 0.0) * mult for l in legs},
             "E": _corner_energies(mult),
         })
     if include_worst:
-        mult = (1 + delta)
+        mult = XI_MAX
         scenarios.append({
             "D": {l: D_nom.get(l, 0.0) * mult for l in legs},
             "E": _corner_energies(mult),

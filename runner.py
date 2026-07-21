@@ -83,6 +83,7 @@ def finalize_run(
     scores_log: list     = None,
     method_meta: dict    = None,
     events: dict         = None,
+    plot: bool           = False,
 ) -> dict:
     """
     Shared epilogue executed at the end of every simulation run.
@@ -106,6 +107,10 @@ def finalize_run(
     events       : dict — S1/S2/RH4 event records from the run loop:
                    interventions, decision_times, cmp_log, repairs,
                    plan_violations (all optional)
+    plot         : bool — render and save the five-panel figure at the end
+                   of the run (default False).  Figures can always be
+                   produced later from the saved solution JSON with
+                   `python plots.py <run_id>`.
 
     Returns
     -------
@@ -308,6 +313,11 @@ def finalize_run(
             for s in vehicle.states
         ],
         actions          = [_ser(a) for a in vehicle.actions],
+        # Execution lists needed to re-render the figure later
+        # (python plots.py <run_id>) without re-running the algorithm.
+        td_list          = [round(float(t), 6) for t in vehicle.td_list],
+        D_actual_list    = [round(float(d), 6) for d in vehicle.D_actual_list],
+        durations_list   = [_ser(d) for d in vehicle.durations],
         scenario_summary = _ser(scn_summary),
         metrics          = _ser(metrics),
     )
@@ -356,20 +366,24 @@ def finalize_run(
         for iss in issues[:10]:
             print(f"     {iss}")
 
-    # ── 8. Save figure ────────────────────────────────────────────────────────
-    fig_path = paths["fig"]
-    try:
-        plot_simulation_results(
-            results   = results,
-            full_data = full_data,
-            title     = run_id,
-            save      = True,
-            show      = False,
-        )
-        if verbose:
-            print(f"  Figure   : {fig_path}")
-    except Exception as _pe:
-        if verbose:
-            print(f"  Figure   : could not save ({_pe})")
+    # ── 8. Save figure (opt-in; plot later with `python plots.py <run_id>`) ──
+    if plot:
+        fig_path = paths["fig"]
+        try:
+            plot_simulation_results(
+                results   = results,
+                full_data = full_data,
+                title     = run_id,
+                save      = True,
+                show      = False,
+            )
+            if verbose:
+                print(f"  Figure   : {fig_path}")
+        except Exception as _pe:
+            if verbose:
+                print(f"  Figure   : could not save ({_pe})")
+    elif verbose:
+        print(f"  Figure   : skipped — render later with "
+              f"`python plots.py {run_id}`")
 
     return results

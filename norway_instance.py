@@ -21,7 +21,7 @@ files below (none are bundled with the repo):
       and speed defaults to settings.V_NOM.
   data/norway/dispersion.json   (optional) Travel-time dispersion calibrated
       from Statens vegvesen traffic data
-      (https://trafikkdata.atlas.vegvesen.no): {"delta": float,
+      (https://trafikkdata.atlas.vegvesen.no): {"cv": float,
       "ar1_rho": float}.
 
 Note: gradients on the corridor make the constant-ECR assumption
@@ -47,7 +47,7 @@ import numpy as np
 
 from instances import make_data
 from instance_io import _to_json_safe, generate_time_windows
-from settings import (V_NOM, ecr, LOWER_PCT, TRAVEL_TIME_DIST,
+from settings import (V_NOM, ecr, XI_MIN, XI_MAX, TRAVEL_TIME_CV,
                       TRAVEL_TIME_AR1_RHO, sample_multipliers, scale_tbar)
 
 DATA_DIR = os.path.join("data", "norway")
@@ -62,7 +62,7 @@ def build_norway_instance(seed: int = 1) -> tuple[dict, float, float]:
     """
     Assemble the E6 corridor instance from the CSV files in data/norway/.
 
-    Returns (full_data, delta, ar1_rho).
+    Returns (full_data, cv, ar1_rho).
     Raises FileNotFoundError with a data-sourcing hint if files are missing.
     """
     chargers_csv  = os.path.join(DATA_DIR, "chargers.csv")
@@ -95,10 +95,10 @@ def build_norway_instance(seed: int = 1) -> tuple[dict, float, float]:
     disp_path = os.path.join(DATA_DIR, "dispersion.json")
     if os.path.isfile(disp_path):
         disp = json.load(open(disp_path, encoding="utf-8"))
-        delta, ar1 = float(disp.get("delta", LOWER_PCT)), \
-                     float(disp.get("ar1_rho", TRAVEL_TIME_AR1_RHO))
+        cv, ar1 = float(disp.get("cv", TRAVEL_TIME_CV)), \
+                  float(disp.get("ar1_rho", TRAVEL_TIME_AR1_RHO))
     else:
-        delta, ar1 = LOWER_PCT, TRAVEL_TIME_AR1_RHO
+        cv, ar1 = TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO
 
     # index stops 0..N
     I = list(range(len(stops) + 2))
@@ -141,7 +141,7 @@ def build_norway_instance(seed: int = 1) -> tuple[dict, float, float]:
     if any(Whf.get(c, 2e7) >= 1e6 for c in C):
         generate_time_windows(full_data, "medium",
                               np.random.default_rng(seed))
-    return full_data, delta, ar1
+    return full_data, cv, ar1
 
 
 def main():
@@ -150,12 +150,11 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
 
-    full_data, delta, ar1 = build_norway_instance(seed=args.seed)
+    full_data, cv, ar1 = build_norway_instance(seed=args.seed)
     N   = full_data["N"]
     rng = np.random.default_rng(args.seed)
 
-    mults  = sample_multipliers(N, rng, delta=delta,
-                                dist=TRAVEL_TIME_DIST, ar1_rho=ar1)
+    mults  = sample_multipliers(N, rng, cv=cv, ar1_rho=ar1)
     D_real, E_real = [], []
     for leg in range(N):
         d = full_data["D"][leg] * float(mults[leg])
@@ -166,7 +165,8 @@ def main():
 
     payload = dict(
         meta=dict(route_class="norway_e6", customers_class="real",
-                  window_class="medium", seed=args.seed, delta=delta,
+                  window_class="medium", seed=args.seed, cv=cv,
+                  dist="shifted-lognormal", xi_min=XI_MIN, xi_max=XI_MAX,
                   ar1_rho=ar1, created_at="",
                   window_half_widths={}),
         instance=_to_json_safe(full_data),

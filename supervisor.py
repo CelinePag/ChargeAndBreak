@@ -11,10 +11,11 @@ RO, 2SP) before the vehicle departs a stop:
     (parallel break upgrade < break < charge-to-cover < rest) at stop i.
 
 Runs in two modes (set per run):
-    supervised (default) — overrides are applied and logged as interventions;
-    raw                  — supervisor off, exposing each architecture's
-                           intrinsic feasibility risk (violations recorded by
-                           BEHDV, see S2).
+    raw (default)  — supervisor off, exposing each architecture's intrinsic
+                     feasibility risk (violations recorded by BEHDV, see S2);
+                     an infeasible run is recorded as-is, never rescued.
+    supervised     — overrides are applied and logged as interventions
+                     (opt-in via supervised=True / --supervised).
 
 This module is ALSO the single source of truth for the rolling-horizon
 action pruning (RH2): Simulation._prune_actions calls compute_flags() here,
@@ -22,11 +23,16 @@ so the pruning rule and the supervisor are literally the same check.
 
 Quantile parameter (RH2)
 ------------------------
-`prune_quantile` in [0, 1] scales the worst case: 1.0 = full support bound
-(exact under the bounded uniform base case — the guard removes no action that
-is feasible under all realizations); < 1.0 for unbounded distributions
-(e.g. lognormal), in which case the residual violation risk alpha must be
-reported alongside the results.
+`quantile` is a probability level on the bounded shifted-lognormal
+multiplier xi (settings.GUARD_QUANTILE sets the project default):
+  None — guard disabled: the checks run at NOMINAL travel time / energy
+         (xi = 1 on both sides); no uncertainty margin at all.
+  0.95 — guard uses xi_quantile(0.95) (slow/time side) and
+         xi_quantile(0.05) (fast/energy side); the residual violation risk
+         alpha = 5% per leg must be reported alongside the results.
+  1.0  — the full support corners [XI_MIN, XI_MAX]: the guard removes no
+         action that is feasible under all realizations (the support is
+         hard, so no residual risk).
 
 Import chain
 ------------
@@ -35,7 +41,7 @@ Import chain
 
 from __future__ import annotations
 
-from settings import V_NOM, ecr
+from settings import V_NOM, ecr, xi_quantile, GUARD_QUANTILE
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -43,22 +49,25 @@ from settings import V_NOM, ecr
 # ══════════════════════════════════════════════════════════════════════════════
 
 def worst_case_energy_to_next_cs(full_data: dict, stop: int,
-                                 delta: float, quantile: float = 1.0) -> float:
+                                 cv: float,
+                                 quantile: float | None = GUARD_QUANTILE
+                                 ) -> float:
     """
     Worst-case energy (kWh) to reach the next CS stop (or destination) from
     `stop`, driving non-stop.  The energy worst case is the FASTEST
     realization (ECR is increasing and convex in speed), consistent with the
-    robust counterpart.
+    robust counterpart: xi at the low quantile, bounded by the speed-limiter
+    corner XI_MIN.  quantile=None → nominal energies (no margin).
     """
     N     = full_data["N"]
     K_set = set(full_data["K"])
-    d_eff = delta * quantile
+    xi_lo = 1.0 if quantile is None else xi_quantile(1.0 - quantile, cv)
 
     e_needed, cur = 0.0, stop
     while cur < N:
         d_nom = full_data["D"].get(cur, 0.0)
         L_km  = full_data.get("km", {}).get(cur, d_nom * V_NOM)
-        d_min = max(d_nom * (1.0 - d_eff), 1e-9)
+        d_min = max(d_nom * xi_lo, 1e-9)
         v_wc  = L_km / d_min
         e_needed += L_km * ecr(v_wc)
         cur += 1
@@ -94,7 +103,7 @@ def _action_min_dwell(full_data: dict, stop: int, action: dict) -> float:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def compute_flags(full_data: dict, stop: int, state,
-                  delta: float, quantile: float = 1.0) -> dict:
+                  cv: float, quantile: float | None = GUARD_QUANTILE) -> dict:
     """
     Evaluate the one-step feasibility checks at `stop` for vehicle `state`.
 
@@ -120,10 +129,10 @@ def compute_flags(full_data: dict, stop: int, state,
         return dict(must_charge=False, must_reset_cd=False, must_rest=False,
                     D_next_wc=0.0, e_needed=0.0, sd_limit=full_data["Tdrv_sh1"])
 
-    d_eff     = delta * quantile
-    D_next_wc = full_data["D"].get(stop, 0.0) * (1.0 + d_eff)
+    xi_hi     = 1.0 if quantile is None else xi_quantile(quantile, cv)
+    D_next_wc = full_data["D"].get(stop, 0.0) * xi_hi
 
-    e_needed = worst_case_energy_to_next_cs(full_data, stop, delta, quantile)
+    e_needed = worst_case_energy_to_next_cs(full_data, stop, cv, quantile)
     must_charge = (stop in K_set
                    and state.e_arr - e_needed < full_data["Emin"])
 
@@ -190,7 +199,8 @@ def action_passes(full_data: dict, stop: int, state, action: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def supervise_action(full_data: dict, stop: int, state, action: dict,
-                     delta: float, quantile: float = 1.0) -> tuple:
+                     cv: float, quantile: float | None = GUARD_QUANTILE
+                     ) -> tuple:
     """
     S1 — one-step feasibility guard.
 
@@ -214,7 +224,7 @@ def supervise_action(full_data: dict, stop: int, state, action: dict,
     if stop >= N or stop == 0:
         return action, None
 
-    flags = compute_flags(full_data, stop, state, delta, quantile)
+    flags = compute_flags(full_data, stop, state, cv, quantile)
     if action_passes(full_data, stop, state, action, flags):
         return action, None
 

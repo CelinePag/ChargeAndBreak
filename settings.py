@@ -129,64 +129,177 @@ M_LAYBY_H:        float = M_STOP_H # same maneuver overhead as a CS stop (h)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Travel-time uncertainty (S5)
+# Travel-time uncertainty (S5) — shifted lognormal, bounded by physical speeds
 # ──────────────────────────────────────────────────────────────────────────────
-# Base case: independent multiplicative deviations xi ~ U[1−δ, 1+δ], δ = 0.15.
-# (The old 0.25 base case is kept available as a sensitivity, resolving the
-# δ inconsistency flagged in the paper rewrite.)
-LOWER_PCT = 0.15
+# Per-leg multiplicative deviation on the nominal travel time:
+#
+#     xi = min(XI_MIN + eta, XI_MAX),   eta ~ Lognormal(mu, sigma)
+#
+# The support is set by PHYSICAL speed bounds, not by a statistical choice:
+#   - fast side : EU HGVs carry a mandatory 90 km/h speed limiter
+#                 (Directive 92/6/EEC), so xi >= V_NOM / 90.  The lognormal
+#                 density of eta vanishes at 0, so the distribution approaches
+#                 this floor smoothly (no probability atom on the fast side).
+#   - slow side : a leg-average congestion floor of 50 km/h (e.g. half of a
+#                 25 km leg jammed at 30 km/h around a city ring), so
+#                 xi <= V_NOM / 50 = 1.6.  At the base CV this cap sits at
+#                 ~q99 of the unclipped law and absorbs ~1% of the mass.
+#
+# Calibration: sigma is set from the target CV of xi via the unclipped
+# relation; mu is then recalibrated numerically (closed-form clipped mean +
+# bisection) so that E[xi] = 1 EXACTLY after the cap — the nominal plan stays
+# an unbiased benchmark.
+#
+# The hard support lets the conservative box RO keep its Soyster logic with
+# probability-1 feasibility: time corner at XI_MAX, energy corner at XI_MIN
+# (fastest speed, highest ECR).
+V_LIMITER_KMH: float = 90.0   # HGV speed limiter (Directive 92/6/EEC)
+V_FLOOR_KMH:   float = 50.0   # worst leg-average speed under congestion
+XI_MIN: float = V_NOM / V_LIMITER_KMH   # ≈ 0.889 — fast bound
+XI_MAX: float = V_NOM / V_FLOOR_KMH     # = 1.6   — slow bound
 
-# Available distribution families for the realisation / scenario draws:
-#   "uniform"   : xi ~ U[1−δ, 1+δ]                       (base case, bounded)
-#   "lognormal" : xi lognormal matched to mean 1 and the same CV as the
-#                 uniform (CV = δ/√3), clipped to [1−3δ, 1+3δ] for sanity
-TRAVEL_TIME_DIST: str = "uniform"
+# Coefficient of variation of xi (base + sensitivity axis).  25 km legs that
+# may skirt congested peri-urban motorways sit at the upper end of empirical
+# inter-urban CVs.
+TRAVEL_TIME_CV: float = 0.15
+TRAVEL_TIME_CV_CLASSES: tuple = (0.10, 0.15, 0.25)
 
 # AR(1) correlation between consecutive-leg multipliers (0 = i.i.d. base case).
-# Positive correlation models persistent congestion.
+# With ~25 km legs one congestion event spans several consecutive legs, so
+# rho ≈ 0.4 is the standard sensitivity.
 TRAVEL_TIME_AR1_RHO: float = 0.0
 
+# One-step feasibility guard level (greedy decision rule, LA RH2 action
+# pruning, and the opt-in S1 supervisor).  Probability level on xi:
+#   0.95  — guard against the 95% quantile of the multiplier (xi ≈ 1.25 at
+#           the base CV); residual risk alpha = 5% per leg is reported.
+#   1.0   — guard the full support corners [XI_MIN, XI_MAX].
+#   None  — guard DISABLED (default): greedy's rule degrades to nominal
+#           checks (xi = 1 on both sides) and LA does NO flag-based pruning
+#           at all — infeasible actions are exposed by the scenario scores.
+GUARD_QUANTILE: float | None = None
 
-def sample_travel_time(
-    D_i,
-    rng,
-    lower_pct=LOWER_PCT,
-    upper_pct=LOWER_PCT,
-    n=1,
-):
-    """Sample travel time uniformly from [D_i*(1-lower_pct), D_i*(1+upper_pct)]."""
-    T_min = D_i * (1 - lower_pct)
-    T_max = D_i * (1 + upper_pct)
-    T = rng.uniform(T_min, T_max, size=n)
-    return T if n > 1 else float(T[0])
+_SQRT2 = float(np.sqrt(2.0))
+
+
+def _phi(z: float) -> float:
+    """Standard-normal CDF."""
+    from math import erf
+    return 0.5 * (1.0 + erf(z / _SQRT2))
+
+
+def _probit(p: float) -> float:
+    """Standard-normal quantile (Acklam's rational approximation, |eps|<1e-9)."""
+    a = (-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00)
+    b = (-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01)
+    c = (-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00)
+    d = (7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00)
+    from math import log, sqrt
+    if p < 0.02425:
+        q = sqrt(-2 * log(p))
+        return ((((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])
+                / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1))
+    if p <= 1 - 0.02425:
+        q = p - 0.5
+        r = q * q
+        return ((((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q
+                / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1))
+    q = sqrt(-2 * log(1 - p))
+    return -((((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])
+             / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1))
+
+
+def _clipped_mean(mu: float, sigma: float) -> float:
+    """E[min(XI_MIN + eta, XI_MAX)] for eta ~ LN(mu, sigma), closed form."""
+    from math import exp, log
+    k = XI_MAX - XI_MIN
+    d1 = (mu + sigma * sigma - log(k)) / sigma
+    d2 = (mu - log(k)) / sigma
+    mean_eta = exp(mu + 0.5 * sigma * sigma)
+    excess = mean_eta * _phi(d1) - k * _phi(d2)   # E[(eta - k)^+]
+    return XI_MIN + mean_eta - excess
+
+
+_LN_CACHE: dict[float, tuple[float, float]] = {}
+
+
+def lognormal_params(cv: float = TRAVEL_TIME_CV) -> tuple[float, float]:
+    """
+    (mu, sigma) of the eta driver for a target CV of xi.
+
+    sigma comes from the unclipped relation on eta with mean m = 1 - XI_MIN
+    and sd = cv; mu is then shifted (bisection on the closed-form clipped
+    mean) so that E[min(XI_MIN + eta, XI_MAX)] = 1 exactly.
+    """
+    cv = float(cv)
+    if cv in _LN_CACHE:
+        return _LN_CACHE[cv]
+    from math import log, sqrt
+    m = 1.0 - XI_MIN
+    s2 = log(1.0 + (cv / m) ** 2)
+    sigma = sqrt(s2)
+    mu0 = log(m) - 0.5 * s2
+    lo, hi = mu0 - 0.5, mu0 + 0.5          # clipped mean is increasing in mu
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if _clipped_mean(mid, sigma) < 1.0:
+            lo = mid
+        else:
+            hi = mid
+    mu = 0.5 * (lo + hi)
+    _LN_CACHE[cv] = (mu, sigma)
+    return mu, sigma
+
+
+def xi_quantile(q: float, cv: float = TRAVEL_TIME_CV) -> float:
+    """
+    q-quantile of the bounded multiplier xi (quantiles commute with the cap).
+    cv <= 0 degenerates to the deterministic nominal case (xi = 1); q = 1
+    returns XI_MAX and q = 0 returns XI_MIN — the RO box corners.
+    """
+    if cv <= 0.0:
+        return 1.0
+    if q <= 0.0:
+        return XI_MIN
+    if q >= 1.0:
+        return XI_MAX
+    from math import exp
+    mu, sigma = lognormal_params(cv)
+    return min(XI_MIN + exp(mu + sigma * _probit(q)), XI_MAX)
 
 
 def sample_multipliers(
     n_legs: int,
     rng,
-    delta: float = LOWER_PCT,
-    dist: str = TRAVEL_TIME_DIST,
+    cv: float = TRAVEL_TIME_CV,
     ar1_rho: float = TRAVEL_TIME_AR1_RHO,
 ):
     """
     S5 — Draw a vector of `n_legs` travel-time multipliers xi.
 
+    xi = min(XI_MIN + eta, XI_MAX), eta lognormal, E[xi] = 1 by calibration.
+
     Parameters
     ----------
     n_legs  : number of legs
     rng     : np.random.Generator
-    delta   : uncertainty half-width (uniform) / CV-matching parameter (lognormal)
-    dist    : "uniform" | "lognormal"
+    cv      : target coefficient of variation of xi (0 → xi = 1 exactly)
     ar1_rho : AR(1) correlation between consecutive legs (0 = independent).
               Implemented on the underlying standard-normal driver, so the
               marginal distribution of each multiplier is preserved.
 
     Returns
     -------
-    np.ndarray of length n_legs with mean ≈ 1 multipliers.
+    np.ndarray of length n_legs with mean-1 multipliers in [XI_MIN, XI_MAX].
     """
     if n_legs <= 0:
         return np.array([])
+    if cv <= 0.0:
+        return np.ones(n_legs)
 
     # Underlying standard-normal driver z (AR(1) if requested)
     if abs(ar1_rho) > 1e-12:
@@ -199,21 +312,17 @@ def sample_multipliers(
     else:
         z = rng.standard_normal(n_legs)
 
-    # Map z → uniform quantile u in (0,1)
-    from math import erf
-    u = 0.5 * (1.0 + np.vectorize(erf)(z / np.sqrt(2.0)))
-    u = np.clip(u, 1e-9, 1 - 1e-9)
+    mu, sigma = lognormal_params(cv)
+    eta = np.exp(mu + sigma * z)
+    return np.minimum(XI_MIN + eta, XI_MAX)
 
-    if dist == "uniform":
-        xi = (1.0 - delta) + 2.0 * delta * u
-    elif dist == "lognormal":
-        # Match mean 1 and the CV of U[1−δ,1+δ]: CV = δ/√3.
-        cv = delta / np.sqrt(3.0)
-        s2 = np.log(1.0 + cv ** 2)
-        mu = -0.5 * s2
-        # Inverse-CDF via the normal driver directly (z already standard normal)
-        xi = np.exp(mu + np.sqrt(s2) * z)
-        xi = np.clip(xi, max(1e-3, 1.0 - 3.0 * delta), 1.0 + 3.0 * delta)
-    else:
-        raise ValueError(f"unknown travel-time distribution '{dist}'")
-    return xi
+
+def sample_travel_time(
+    D_i,
+    rng,
+    cv: float = TRAVEL_TIME_CV,
+    n: int = 1,
+):
+    """Sample realised travel time(s) D_i * xi for one leg (i.i.d. draws)."""
+    T = D_i * sample_multipliers(n, rng, cv=cv)
+    return T if n > 1 else float(T[0])
