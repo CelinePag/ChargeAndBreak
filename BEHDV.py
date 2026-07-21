@@ -210,6 +210,13 @@ class BEHDV:
         self.phi_history            : list[int]   = [0]
         self.rho2_used_history      : list[int]   = [0]
         self.ext_shift_used_history : list[int]   = [0]
+        # M9 — cumulative weekly working time.  Unlike sw, this is NOT reset by
+        # a daily rest (only a weekly rest, out of model scope, would reset it).
+        # The offline solve no longer caps it; the realized total is checked
+        # against Twk60 here and a breach is a run-infeasible "hos_weekly"
+        # violation.
+        self.sw_week_history        : list[float] = [0.0]
+        self._weekly_flagged        : bool        = False
 
         # ── Execution history (index = stop departed from) ────────────────────
         self.actions       : list[dict]  = []   # action taken at each stop
@@ -250,6 +257,8 @@ class BEHDV:
     def ext_shift_used(self) -> int: return self.ext_shift_used_history[-1]
     @property
     def h(self) -> float: return self.h_history[-1]
+    @property
+    def sw_week(self) -> float: return self.sw_week_history[-1]
 
     # ── Derived properties ────────────────────────────────────────────────────
 
@@ -299,6 +308,35 @@ class BEHDV:
             h   = self.h,
             phi = self.phi,
         )
+
+    # ── Checkpoint / resume ───────────────────────────────────────────────────
+    _CKPT_LISTS = (
+        "stop_history", "t_arr_history", "e_arr_history", "cd_history",
+        "sd_history", "sw_history", "h_history", "phi_history",
+        "rho2_used_history", "ext_shift_used_history", "sw_week_history",
+        "actions", "durations", "td_list", "D_actual_list",
+    )
+
+    def to_checkpoint(self) -> dict:
+        """JSON-serialisable snapshot of the full execution state, so a crashed
+        stop-by-stop run can be resumed instead of restarted (see
+        Simulation.run_simulation_precomputed)."""
+        ck = {name: list(getattr(self, name)) for name in self._CKPT_LISTS}
+        ck["violations"]      = list(self.violations)
+        ck["tw_misses"]       = {str(k): v for k, v in self.tw_misses.items()}
+        ck["_weekly_flagged"] = bool(self._weekly_flagged)
+        # stops advanced past the origin == completed loop iterations
+        ck["n_done"]          = len(self.stop_history) - 1
+        return ck
+
+    def load_checkpoint(self, ck: dict) -> None:
+        """Restore the state saved by to_checkpoint()."""
+        for name in self._CKPT_LISTS:
+            setattr(self, name, list(ck[name]))
+        self.violations      = list(ck.get("violations", []))
+        self.tw_misses       = {int(k): v
+                                for k, v in ck.get("tw_misses", {}).items()}
+        self._weekly_flagged = bool(ck.get("_weekly_flagged", False))
 
     # ── State transition ──────────────────────────────────────────────────────
 
@@ -522,11 +560,26 @@ class BEHDV:
         else:
             work_now = 0.0
 
+        # M9 weekly working time: same work terms as work_now but WITHOUT the
+        # rest-zeroing, so work performed at a rest stop still counts toward the
+        # week (mirrors the offline weekly_work term, which counted work at
+        # every stop regardless of any rest taken there).
+        if is_CS:
+            work_wk_stop = mstop_time + tauq_exec + u_exec + mseq_time
+        elif is_cust:
+            work_wk_stop = S_stop
+        elif is_lay:
+            work_wk_stop = mlay_time
+        else:
+            work_wk_stop = 0.0
+
         sw_dep = 0.0 if rho else self.sw + work_now     # reset sw on rest
 
         cd_new = cd_dep + D_act
         sd_new = sd_dep + D_act
         sw_new = sw_dep + D_act   # driving to next stop (work_now already in sw_dep)
+        # weekly total: this stop's work + the leg driven from it, no reset
+        sw_week_new = self.sw_week_history[-1] + work_wk_stop + D_act
 
         # ── 6.5. Shift spread h (M5/SP2): elapsed time since end of last rest ──
         # o = on-duty dwell at this stop before the rest.  Single rest-last
@@ -553,6 +606,14 @@ class BEHDV:
             self.violations.append(dict(
                 type="hos_spread", stop=stop + 1, amount=h_new - _Tspr2,
                 detail=f"spread h={h_new:.3f}h > {_Tspr2}h after leg {stop}"))
+        # M9 — realized weekly working-time cap (flagged once, at first breach)
+        _Twk60 = full_data.get("Twk60", 60.0)
+        if sw_week_new > _Twk60 + 1e-3 and not self._weekly_flagged:
+            self._weekly_flagged = True
+            self.violations.append(dict(
+                type="hos_weekly", stop=stop + 1, amount=sw_week_new - _Twk60,
+                detail=(f"weekly working time {sw_week_new:.3f}h > {_Twk60}h "
+                        f"after leg {stop}")))
 
         # ── 7. phi (split-break flag) and rho2_used ───────────────────────────
         if ri or rho:
@@ -585,6 +646,7 @@ class BEHDV:
         self.phi_history.append(phi_new)
         self.rho2_used_history.append(rho2_new)
         self.ext_shift_used_history.append(ext_new)
+        self.sw_week_history.append(sw_week_new)
 
 
     # ── Dunder ────────────────────────────────────────────────────────────────

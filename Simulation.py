@@ -10,7 +10,7 @@ Module responsibilities
       Lives here (not in BEHDV) because action enumeration depends on
       policy flags (charge_only) and pruning rules — decision-layer concerns.
 
-  _prune_actions(actions, stop, state, full_data, delta, charge_only)
+  _prune_actions(actions, stop, state, full_data, cv, charge_only)
       Drop dominated or structurally infeasible actions before evaluation.
 
   find_horizon_end_stop(full_data, start_stop, horizon_hours, state)
@@ -57,7 +57,8 @@ import numpy as np
 from BEHDV      import BEHDV
 from MILP       import solve_horizon, INFEASIBLE_PENALTY
 from scenarios  import generate_scenarios, ScenarioTracker
-from settings   import LOWER_PCT, V_NOM, ecr, sample_travel_time
+from settings   import (TRAVEL_TIME_CV, GUARD_QUANTILE, V_NOM, ecr,
+                        sample_travel_time)
 from supervisor import compute_flags, action_passes, supervise_action
 from runner     import finalize_run
 from plots      import plot_simulation_results   # re-exported for callers
@@ -248,21 +249,25 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
 
 
 def _prune_actions(actions: list, stop: int, state, full_data: dict,
-                   delta: float, charge_only: bool = False, horizon: int = 48,
-                   prune_quantile: float = 1.0,
+                   cv: float, charge_only: bool = False, horizon: int = 48,
+                   prune_quantile: float | None = GUARD_QUANTILE,
                    verbose: bool = False) -> tuple[list, int]:
     """
     Drop structurally dominated or infeasible actions before evaluation (RH2).
 
-    The one-step feasibility checks (must_charge / must_reset_cd / must_rest)
-    are delegated to supervisor.compute_flags — the SAME function used by the
-    S1 safety supervisor for every policy, so pruning and supervision are a
-    single source of truth.  Under the bounded uniform support with
-    prune_quantile=1.0 this pruning is exact: it removes no action that is
-    feasible under all realizations.  For unbounded distributions pass
-    prune_quantile < 1 and report the residual risk alpha.
+    Feasibility guard (prune_quantile — settings.GUARD_QUANTILE default):
+      None : guard DISABLED — no flag-based pruning at all; actions that
+             would be infeasible on the next leg are left in and exposed by
+             the per-scenario scores (an infeasible sub-problem earns
+             INFEASIBLE_PENALTY, so it loses on its own).
+      q<1  : the one-step checks (must_charge / must_reset_cd / must_rest,
+             via supervisor.compute_flags — the same function the greedy
+             rule and the opt-in S1 supervisor use) run at the xi q-quantile;
+             residual risk alpha = 1 - q is reported.
+      1.0  : checks at the full support corners [XI_MIN, XI_MAX] — exact:
+             removes no action that is feasible under all realizations.
 
-    Additional structural rules (not safety-related):
+    Structural rules (always applied — action validity, not safety):
       batt_full    : drop pure-charge actions when SOC is already ≥ Ecap−1 kWh
       b15+phi=1    : b15 is invalid when phi=1 (would require phi=2)
       r1 dominance : with a short horizon and reduced-rest budget left,
@@ -283,9 +288,10 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
     if stop >= N:
         return actions, 0
 
-    flags = compute_flags(full_data, stop, state, delta, prune_quantile)
+    flags = (compute_flags(full_data, stop, state, cv, prune_quantile)
+             if prune_quantile is not None else None)
 
-    if verbose:
+    if verbose and flags is not None:
         print(f"     [PRUNE] stop={stop}  must_charge={flags['must_charge']} "
               f"(e_arr={state.e_arr:.1f}, e_needed={flags['e_needed']:.1f})  "
               f"must_reset_cd={flags['must_reset_cd']} (cd={state.cd:.2f})  "
@@ -301,15 +307,16 @@ def _prune_actions(actions: list, stop: int, state, full_data: dict,
         if y and stop in K_set and state.e_arr > full_data["Ecap"] - 1.0 \
                 and brk in (None, "0") and rst in (None, "0"):
             continue   # pure charge on full battery: queue cost, negligible gain
-        # normalise "0" placeholders to None for the shared check
-        a_norm = dict(y=y,
-                      break_type=None if brk in (None, "0") else brk,
-                      rest_type=None if rst in (None, "0") else rst)
-        if not charge_only and not action_passes(full_data, stop, state,
-                                                 a_norm, flags):
-            continue
-        if flags["must_charge"] and not y and stop in K_set:
-            continue   # applies in charge_only mode too
+        if flags is not None:
+            # normalise "0" placeholders to None for the shared check
+            a_norm = dict(y=y,
+                          break_type=None if brk in (None, "0") else brk,
+                          rest_type=None if rst in (None, "0") else rst)
+            if not charge_only and not action_passes(full_data, stop, state,
+                                                     a_norm, flags):
+                continue
+            if flags["must_charge"] and not y and stop in K_set:
+                continue   # applies in charge_only mode too
         if horizon <= 48 and rst == "r1" and state.rho2_used < 2:
             continue   # will always choose reduced rest anyway
         pruned.append(a)
@@ -598,7 +605,7 @@ def evaluate_action(full_data, start_stop, end_stop, state,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def select_best_action(full_data, stop: int, state,
-                       n_scenarios=10, horizon_hours=12, delta=0.20,
+                       n_scenarios=10, horizon_hours=12, cv=TRAVEL_TIME_CV,
                        scenario_seed=None, time_limit=20,
                        verbose=True, n_workers=1, solve_mode="lp",
                        charge_only=False, criterion="mean",
@@ -607,7 +614,7 @@ def select_best_action(full_data, stop: int, state,
                        tracker: ScenarioTracker = None,
                        precomputed_scenarios=None,
                        ext_shift_used: int = 0,
-                       prune_quantile: float = 1.0,
+                       prune_quantile: float | None = GUARD_QUANTILE,
                        cmp_log: list = None) -> tuple:
     """
     Enumerate, prune, score, and select the best action at ``stop``.
@@ -652,7 +659,7 @@ def select_best_action(full_data, stop: int, state,
     # ── 1. Enumerate + prune ─────────────────────────────────────────────────
     actions, n_pruned = _prune_actions(
         enumerate_actions(stop, state, full_data, charge_only=charge_only),
-        stop, state, full_data, delta, charge_only=charge_only,
+        stop, state, full_data, cv, charge_only=charge_only,
         horizon=horizon_hours, prune_quantile=prune_quantile, verbose=verbose)
 
     end_stop, n_rests = find_horizon_end_stop(
@@ -683,7 +690,7 @@ def select_best_action(full_data, stop: int, state,
     else:
         scenarios = generate_scenarios(
             full_data, stop, end_stop,
-            n_scenarios=n_scenarios, delta=delta, seed=scenario_seed,
+            n_scenarios=n_scenarios, cv=cv, seed=scenario_seed,
             include_best=include_best, include_worst=include_worst)
 
     if tracker is not None:
@@ -1068,7 +1075,7 @@ def select_best_action(full_data, stop: int, state,
 def run_simulation(full_data: dict,
                    n_scenarios: int    = 10,
                    horizon_hours: float = 12.0,
-                   delta: float        = 0.20,
+                   cv: float           = TRAVEL_TIME_CV,
                    seed: int           = 42,
                    time_limit: int     = 20,
                    verbose: bool       = True,
@@ -1079,8 +1086,8 @@ def run_simulation(full_data: dict,
                    include_best: bool  = False,
                    include_worst: bool = False,
                    run_id: str         = None,
-                   supervised: bool    = True,
-                   prune_quantile: float = 1.0) -> dict:
+                   supervised: bool    = False,
+                   prune_quantile: float | None = GUARD_QUANTILE) -> dict:
     """
     Run the rolling-horizon look-ahead simulation from stop 0 to stop N.
 
@@ -1097,7 +1104,7 @@ def run_simulation(full_data: dict,
     full_data      : dict from instances.make_data()
     n_scenarios    : number of scenarios per decision stop
     horizon_hours  : nominal look-ahead window length (hours)
-    delta          : travel-time uncertainty half-width (e.g. 0.20 = ±20%)
+    cv             : CV of the travel-time multiplier (e.g. 0.15)
     seed           : master RNG seed for reproducibility
     time_limit     : per-scenario sub-problem solver time limit (s)
     verbose        : print per-stop decisions and oracle output
@@ -1105,8 +1112,8 @@ def run_simulation(full_data: dict,
     solve_mode     : "lp" | "mip" | "both"
     charge_only    : True → only enumerate charge decision (y=0/1)
     criterion      : "mean" | "worst" | "best" — scenario aggregation
-    include_best   : append a best-case (1−δ) deterministic scenario
-    include_worst  : append a worst-case (1+δ) deterministic scenario
+    include_best   : append the deterministic fast corner (xi = XI_MIN)
+    include_worst  : append the deterministic slow corner (xi = XI_MAX)
     run_id         : base name for output files (auto-generated if None)
 
     Returns
@@ -1152,7 +1159,7 @@ def run_simulation(full_data: dict,
     _lp(f"  SIMULATION START   ({_dt.datetime.now():%Y-%m-%d %H:%M:%S})")
     _lp(f"  Instance : {title}   run_id={rid}")
     _lp(f"  Route    : {N} stops  departure={full_data.get('T_START',8):.0f}:00")
-    _lp(f"  Settings : N_scen={n_scenarios}  H={horizon_hours}h  d={delta:.0%}"
+    _lp(f"  Settings : N_scen={n_scenarios}  H={horizon_hours}h  cv={cv:.2f}"
         f"  workers={n_workers}  {mode_label}  [{criterion}]")
     _lp(f"  Log      : {paths['log']}")
     _lp(f"{'='*65}")
@@ -1174,7 +1181,7 @@ def run_simulation(full_data: dict,
                 state          = vehicle,
                 n_scenarios    = n_scenarios,
                 horizon_hours  = horizon_hours,
-                delta          = delta,
+                cv             = cv,
                 scenario_seed  = int(rng.integers(0, 2**31)),
                 time_limit     = time_limit,
                 verbose        = verbose,
@@ -1220,7 +1227,7 @@ def run_simulation(full_data: dict,
         # ── S1: safety supervisor (identical layer for every policy) ──────────
         if supervised and stop > 0:
             action, itv = supervise_action(full_data, stop, vehicle, action,
-                                           delta=delta, quantile=prune_quantile)
+                                           cv=cv, quantile=prune_quantile)
             if itv is not None:
                 events["interventions"].append(itv)
                 _lp(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
@@ -1234,9 +1241,9 @@ def run_simulation(full_data: dict,
 
         # Draw actual travel time and energy from the uncertainty distribution.
         # This is the simulation realisation — NOT used in any decision above.
-        # RH2: the pruning/supervisor use the SAME delta as this draw.
+        # RH2: the pruning/supervisor use the SAME cv as this draw.
         d_nom = full_data["D"].get(stop, 0.0)
-        D_next = sample_travel_time(d_nom, rng, lower_pct=delta, upper_pct=delta)
+        D_next = sample_travel_time(d_nom, rng, cv=cv)
         km_leg = full_data.get("km", {}).get(stop, d_nom * V_NOM)
         v_act  = km_leg / D_next if D_next > 0 else V_NOM
         E_next = km_leg * ecr(v_act)
@@ -1275,7 +1282,7 @@ def run_simulation(full_data: dict,
             method        = "simulation",
             n_scenarios   = n_scenarios,
             horizon_hours = horizon_hours,
-            delta         = delta,
+            cv            = cv,
             criterion     = criterion,
             solve_mode    = solve_mode,
             charge_only   = charge_only,
@@ -1297,7 +1304,7 @@ def run_simulation_precomputed(
     E_real: list,
     n_scenarios: int             = 10,
     horizon_hours: float         = 12.0,
-    delta: float                 = 0.20,
+    cv: float                    = TRAVEL_TIME_CV,
     time_limit: int              = 20,
     verbose: bool                = True,
     n_workers                    = None,
@@ -1308,8 +1315,9 @@ def run_simulation_precomputed(
     include_worst: bool          = False,
     run_id: str                  = None,
     oracle_tee: bool             = False,
-    supervised: bool             = True,
-    prune_quantile: float        = 1.0,
+    supervised: bool             = False,
+    prune_quantile: float | None = GUARD_QUANTILE,
+    resume: bool                 = False,
 ) -> dict:
     """
     Run the rolling-horizon look-ahead (LA) simulation using a precomputed
@@ -1329,7 +1337,7 @@ def run_simulation_precomputed(
     E_real             : list[float] -- N realised energies (kWh)
     n_scenarios        : how many scenarios to draw per stop
     horizon_hours      : look-ahead window length (h)
-    delta              : uncertainty half-width passed to sub-problem (LA only)
+    cv                 : CV of the multiplier passed to sub-problem (LA only)
     time_limit         : per-scenario MILP time limit (s)
     verbose            : print per-stop decisions
     n_workers          : parallel workers (None = auto)
@@ -1386,14 +1394,59 @@ def run_simulation_precomputed(
     _lp(f"  Instance : {title}   run_id={rid}")
     _lp(f"  Route    : {N} stops  departure={T0:.0f}:00")
     _lp(f"  Settings : N_scen={n_scenarios}  H={horizon_hours}h"
-        f"  d={delta:.0%}  workers={n_workers}  {mode_label}  [{criterion}]")
+        f"  cv={cv:.2f}  workers={n_workers}  {mode_label}  [{criterion}]")
     _lp(f"  Source   : precomputed realisations (D_real/E_real fixed)")
     _lp(f"{'='*65}")
 
     wall_start = time.perf_counter()
 
+    # ── Resume support: checkpoint keyed by instance + params ─────────────────
+    # A stop-by-stop LA run is expensive; if it crashed, --resume continues from
+    # the last completed stop instead of restarting.  The checkpoint holds the
+    # full vehicle trajectory (fixed D_real/E_real make it exactly restorable);
+    # only stops not yet decided are re-solved.  Deleted on clean completion.
+    import json as _json
+    _ckpt_key = "_".join(str(p) for p in (
+        title, alg, f"ns{n_scenarios}", f"h{horizon_hours:g}", criterion,
+        solve_mode, f"co{int(charge_only)}", f"sup{int(supervised)}",
+        f"pq{prune_quantile}")).replace("/", "-").replace(" ", "")
+    _ckpt_dir  = _os.path.join("solutions", ".checkpoints")
+    _ckpt_path = _os.path.join(_ckpt_dir, _ckpt_key + ".json")
+
+    def _write_ckpt():
+        try:
+            _os.makedirs(_ckpt_dir, exist_ok=True)
+            _tmp = _ckpt_path + ".tmp"
+            with open(_tmp, "w", encoding="utf-8") as _fh:
+                _json.dump(dict(vehicle=vehicle.to_checkpoint(),
+                                scores_log=scores_log, events=events), _fh,
+                           default=lambda o: o.item() if hasattr(o, "item")
+                           else str(o))
+            _os.replace(_tmp, _ckpt_path)          # atomic
+        except Exception as _e:                    # never let I/O kill the run
+            _lp(f"  [RESUME] checkpoint write failed ({_e})")
+
+    start_stop = 0
+    if resume and _os.path.isfile(_ckpt_path):
+        try:
+            with open(_ckpt_path, encoding="utf-8") as _fh:
+                _ck = _json.load(_fh)
+            vehicle.load_checkpoint(_ck["vehicle"])
+            scores_log = _ck.get("scores_log", scores_log)
+            for _k, _v in (_ck.get("events") or {}).items():
+                events[_k] = _v
+            start_stop = int(_ck["vehicle"]["n_done"])
+            for _j in range(min(start_stop, N)):    # rebuild tracker realisations
+                tracker.record_realisation(_j, float(D_real[_j]),
+                                           E_actual=float(E_real[_j]))
+            _lp(f"  [RESUME] restored checkpoint: {start_stop}/{N} stops done, "
+                f"continuing from stop {start_stop}")
+        except Exception as _e:
+            _lp(f"  [RESUME] checkpoint load failed ({_e}); starting fresh")
+            start_stop = 0
+
     # ── Main loop ─────────────────────────────────────────────────────────────
-    for stop in range(N):
+    for stop in range(start_stop, N):
         t_dec = time.perf_counter()
         if stop == 0:
             action     = dict(y=0, break_type=None, rest_type=None)
@@ -1409,7 +1462,7 @@ def run_simulation_precomputed(
                 state                 = vehicle,
                 n_scenarios           = n_scenarios,
                 horizon_hours         = horizon_hours,
-                delta                 = delta,
+                cv                    = cv,
                 scenario_seed         = None,
                 time_limit            = time_limit,
                 verbose               = verbose,
@@ -1453,7 +1506,7 @@ def run_simulation_precomputed(
         # ── S1: safety supervisor (identical layer for every policy) ──────────
         if supervised and stop > 0:
             action, itv = supervise_action(full_data, stop, vehicle, action,
-                                           delta=delta, quantile=prune_quantile)
+                                           cv=cv, quantile=prune_quantile)
             if itv is not None:
                 events["interventions"].append(itv)
                 _lp(f"  [SUPERVISOR] stop {stop}: {itv['fixes']} "
@@ -1472,11 +1525,21 @@ def run_simulation_precomputed(
         vehicle.advance(action=action, D_next=D_next, E_next=E_next,
                         milp_sol=nom_sol)
         tracker.record_realisation(stop, D_next, E_actual=E_next)
+        if resume:
+            _write_ckpt()          # after each completed stop, for restart
 
         if verbose and stop > 0:
             print(f"     -> arrived stop {vehicle.stop}"
                   f"  D={D_next:.2f}h  E={E_next:.1f}kWh"
                   f"  t={vehicle.t_arr:.3f}h  soc={vehicle.e_arr:.1f}kWh")
+
+    # run completed cleanly: drop the checkpoint so a rerun starts fresh
+    if resume:
+        try:
+            if _os.path.isfile(_ckpt_path):
+                _os.remove(_ckpt_path)
+        except OSError:
+            pass
 
     wall = time.perf_counter() - wall_start
     arr  = vehicle.t_arr
@@ -1503,7 +1566,7 @@ def run_simulation_precomputed(
             method        = alg,
             n_scenarios   = n_scenarios,
             horizon_hours = horizon_hours,
-            delta         = delta if alg == "LA" else 0.0,
+            cv            = cv if alg == "LA" else 0.0,
             criterion     = criterion,
             solve_mode    = solve_mode,
             charge_only   = charge_only,
@@ -1527,7 +1590,7 @@ if __name__ == "__main__":
     name          = sys.argv[1]               if len(sys.argv) > 1 else "break_forced"
     n_scenarios   = int(sys.argv[2])          if len(sys.argv) > 2 else 5
     horizon_hours = float(sys.argv[3])        if len(sys.argv) > 3 else 8.0
-    delta         = float(sys.argv[4])        if len(sys.argv) > 4 else 0.15
+    cv            = float(sys.argv[4])        if len(sys.argv) > 4 else TRAVEL_TIME_CV
     n_workers     = int(sys.argv[5])          if len(sys.argv) > 5 else None
     solve_mode    = {"0":"lp","lp":"lp","1":"mip","mip":"mip",
                      "2":"both","both":"both"}.get(
@@ -1536,7 +1599,7 @@ if __name__ == "__main__":
     charge_only   = (sys.argv[8].lower() in ("1","true","co")
                      if len(sys.argv) > 8 else False)
     correlation   = float(sys.argv[9])        if len(sys.argv) > 9 else 0.0
-    # Usage: python Simulation.py <inst> [N_scen H δ workers mode criterion co corr]
+    # Usage: python Simulation.py <inst> [N_scen H cv workers mode criterion co corr]
 
     if name not in ALL_INSTANCES:
         print(f"Unknown: '{name}'.  Available: {list(ALL_INSTANCES)}")
@@ -1548,7 +1611,7 @@ if __name__ == "__main__":
             data,
             n_scenarios   = n_scenarios,
             horizon_hours = horizon_hours,
-            delta         = delta,
+            cv            = cv,
             seed          = 42*t,
             time_limit    = 300,
             verbose       = True,
@@ -1558,13 +1621,7 @@ if __name__ == "__main__":
             charge_only   = charge_only,
         )
 
-        plot_simulation_results(
-            results, data,
-            title = f"{name}_n{n_scenarios}_H{int(horizon_hours)}_d{int(delta*100)}",
-            save  = True,
-            show  = False,
-        )
         print(f"\n  Log      : {results['log_path']}")
         print(f"  Solution : {results['sol_path']}")
-        print(f"  Figure   : {results['fig_path']}")
+        print(f"  Figure   : plot later with `python plots.py {results['run_id']}`")
         print(f"  Scenarios: {results['scn_path']}")

@@ -89,11 +89,10 @@ _COLS = [
     ("customers_class",  ("customers_class",),                            "@",     13),
     ("window_class",     ("window_class",),                               "@",     12),
     ("method",           ("method",),                                     "@",     9),
-    ("supervised",       ("supervised",),                                 "@",     10),
     ("criterion",        ("criterion",),                                  "@",     9),
     ("n_scenarios",      ("n_scenarios",),                                "0",     11),
     ("horizon_h",        ("horizon_hours",),                              "0.0",   10),
-    ("delta",            ("delta",),                                      "0.00",  7),
+    ("cv",               ("cv",),                                         "0.00",  7),
     ("gamma",            ("gamma",),                                      "0.0",   7),
     ("solve_mode",       ("solve_mode",),                                 "@",     10),
     ("prune_quantile",   ("prune_quantile",),                             "0.00",  9),
@@ -118,7 +117,6 @@ _COLS = [
     ("n_hos_viol",       ("metrics", "n_hos_violations"),                "0",     10),
     ("n_stranding",      ("metrics", "n_stranding"),                     "0",     11),
     ("n_repairs",        ("metrics", "n_repairs"),                       "0",     10),
-    ("n_interventions",  ("metrics", "n_interventions"),                 "0",     13),
     ("n_plan_viol",      ("metrics", "n_plan_violations"),               "0",     11),
     ("tw_n_customers",   ("metrics", "tw_n_customers"),                  "0",     13),
     ("tw_n_misses",      ("metrics", "tw_n_misses"),                     "0",     11),
@@ -134,10 +132,11 @@ _COLS = [
 # run_id pattern produced by runner_dispatch.run_batch:
 #   <instance>_<ALGO>_<YYYYMMDD>_<HHMMSS>_<idx>
 _RUN_ID_RE = re.compile(
-    r"^(?P<instance>.+)_(?P<algo>LA|RO|GREEDY|2SP)_"
+    r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP)_"
     r"(?P<ts>\d{8}_\d{6})_(?P<idx>\d+)$"
 )
-_ALGO_TO_METHOD = {"GREEDY": "greedy", "LA": "LA", "RO": "RO", "2SP": "2SP"}
+_ALGO_TO_METHOD = {"GREEDY": "greedy", "LA": "LA", "RO": "RO",
+                   "ROBU": "ROBU", "2SP": "2SP"}
 
 _STATUS_LINE_RE = re.compile(r"Status\s*:\s*(\w+)\s*\(([\d.]+)s\)")
 
@@ -402,7 +401,7 @@ def _method_group(r):
     m = r.get("method")
     if m == "greedy":
         return "greedy"
-    if m in ("RO", "2SP"):
+    if m in ("RO", "ROBU", "2SP"):
         return m
     if m == "LA":
         crit = (r.get("criterion") or "mean").lower()
@@ -479,14 +478,13 @@ def build_summary_sheet(ws, rows: list[dict]):
         "gap_pen_% mean (feas)", "gap_nopen_% mean (feas)",
         "tw_misses mean", "tw_hit_rate mean",
         "hos_viol_rate", "stranding_rate", "repair_rate",
-        "intervention_rate",
         "decision_mean_s mean", "offline_solve_s mean", "method_time_s mean",
     ]
     col_widths = [22, 11, 13, 12, 9, 8, 9, 12,
-                  16, 16, 19, 20, 13, 15, 13, 14, 12, 15, 18, 18, 18]
+                  16, 16, 19, 20, 13, 15, 13, 14, 12, 18, 18, 18]
     num_fmts   = ["@", "@", "@", "@", "@", "0", "0", "0",
                   "0.000", "0.000", "0.00%", "0.00%", "0.0", "0.0%",
-                  "0.0%", "0.0%", "0.0%", "0.0%",
+                  "0.0%", "0.0%", "0.0%",
                   "0.0000", "0.0", "0.0"]
 
     for ci, (h, w) in enumerate(zip(headers, col_widths), start=1):
@@ -501,7 +499,6 @@ def build_summary_sheet(ws, rows: list[dict]):
     for ri, ((family, method), recs) in enumerate(sorted(groups.items()), start=2):
         ok_recs = [r for r in recs if _is_ok(r)]
         feas    = [r for r in ok_recs if _is_feasible(r)]
-        sup     = [r for r in ok_recs if _is_supervised(r)]
         n_runs   = len(recs)
         n_failed = n_runs - len(ok_recs)
         n_infeas = sum(1 for r in ok_recs if not _is_feasible(r))
@@ -519,7 +516,6 @@ def build_summary_sheet(ws, rows: list[dict]):
             _rate(ok_recs, lambda r: (_mval(r, "n_hos_violations") or 0) > 0),
             _rate(ok_recs, lambda r: (_mval(r, "n_stranding") or 0) > 0),
             _rate(ok_recs, lambda r: (_mval(r, "n_repairs") or 0) > 0),
-            _rate(sup, lambda r: (_mval(r, "n_interventions") or 0) > 0),
             _mean([_mval(r, "decision_time_mean_s") for r in ok_recs]),
             _mean([_mval(r, "offline_solve_time_s") for r in ok_recs]),
             _mean([_safe_float(_get(r, ("wall_clock_s",))) for r in ok_recs]),
@@ -561,46 +557,88 @@ def _method_labels(rows):
     la_lbl = f"LA ({la_tag})" if la_tag else "LA"
     cvar_lbl = f"LA-CVaR ({la_tag})" if la_tag else "LA-CVaR"
     sp_lbl = f"SP ({int(sp_s)}S)" if sp_s else "SP"
-    return dict(greedy="Greedy", RO="RO",
+    return dict(greedy="Greedy", RO="RO", ROBU="ROBU",
                 LA_mean=la_lbl, twosp=sp_lbl, LA_cvar=cvar_lbl)
 
 
-def build_gap_latex(rows, supervised: bool) -> list[str]:
+def build_gap_latex(rows, metric: str = "gap_pen",
+                    full_grid: bool = True) -> list[str]:
     """
     Table 1 — gap to oracle (%) by Route × Customers × Time-Window × method.
-    ``supervised`` selects the run population.  Gaps average over FEASIBLE
-    (non-stranded) runs and are DURATION-based with window penalties included
-    on both sides (gap_pen); the Oracle (h) column is the mean oracle route
-    duration including its window penalty.
+
+    Gaps average over FEASIBLE (non-stranded) runs.  ``metric`` selects the
+    gap definition:
+
+      "gap_pen"   — penalised route duration on both sides (arrival +
+                    beta*window-misses vs the oracle's); the objective-function
+                    gap.  Oracle (h) is the mean penalised oracle duration.
+      "gap_nopen" — pure route duration, window penalties excluded (beta-
+                    independent efficiency gap).  Oracle (h) excludes penalties.
+
+    Each gap cell carries a superscript with the FEASIBLE/TOTAL run count for
+    that (class, method); it is a single number when all runs were feasible and
+    ``feas/total`` when some were excluded as infeasible, so sample size and
+    per-cell reliability are visible next to the gap.
     """
+    pen = (metric == "gap_pen")
+    ora_field = "oracle_duration_pen_h" if pen else "oracle_duration_h"
+
     pop = [r for r in rows
-           if _is_ok(r) and _is_supervised(r) == supervised
+           if _is_ok(r)
            and r.get("route_class") and r.get("customers_class")
            and r.get("window_class")]
-    labels = _method_labels(pop)
-    col_keys = ["greedy", "RO", "LA_mean", "twosp", "LA_cvar"]
-    col_meth = {"greedy": "greedy", "RO": "RO", "LA_mean": "LA_mean",
-                "twosp": "2SP", "LA_cvar": "LA_cvar"}
-    col_hdr  = [labels["greedy"], labels["RO"], labels["LA_mean"],
-                labels["twosp"], labels["LA_cvar"]]
+    # CVaR column dropped; plain method headers (scenario/horizon config moves
+    # to the caption instead of parenthesised headers)
+    col_keys = ["greedy", "RO", "ROBU", "LA_mean", "twosp"]
+    col_meth = {"greedy": "greedy", "RO": "RO", "ROBU": "ROBU",
+                "LA_mean": "LA_mean", "twosp": "2SP"}
+    col_hdr  = ["Greedy", "RO", "ROBU", "LA", "SP"]
 
     # aggregate: gaps[(route,cust,tw)][method_group] = [gaps]; oracle by instance
-    gaps: dict = defaultdict(lambda: defaultdict(list))
-    oracle: dict = defaultdict(dict)
+    gaps:    dict = defaultdict(lambda: defaultdict(list))
+    n_total: dict = defaultdict(lambda: defaultdict(int))   # feasible + infeasible
+    oracle:  dict = defaultdict(dict)
     n_seeds: dict = defaultdict(set)
     for r in pop:
         cell = (r["route_class"], r["customers_class"], r["window_class"])
         mg = _method_group(r)
-        oobj = _safe_float(r.get("oracle_duration_pen_h"))
+        oobj = _safe_float(r.get(ora_field))
         if oobj is not None:
             oracle[cell][r.get("instance")] = oobj
-        if mg is not None and _is_feasible(r) and r.get("gap_to_oracle") is not None:
-            gaps[cell][mg].append(r["gap_to_oracle"])
-            n_seeds[cell].add(r.get("instance"))
+        if mg is not None:
+            n_total[cell][mg] += 1
+            if _is_feasible(r) and r.get(metric) is not None:
+                gaps[cell][mg].append(r[metric])
+                n_seeds[cell].add(r.get("instance"))
 
-    routes = _present_sorted((c[0] for c in oracle), _ROUTE_ORDER)
-    delta  = _mode([r.get("delta") for r in pop])
-    delta_s = f"{delta:g}" if delta is not None else r"\langle\delta\rangle"
+    def _cell_str(cell, mg):
+        vals = gaps[cell].get(mg, [])
+        tot  = n_total[cell].get(mg, 0)
+        if tot == 0:
+            return "--"
+        nf  = len(vals)
+        cnt = f"{nf}" if nf == tot else f"{nf}/{tot}"
+        body = _pct(_mean(vals), 1) if nf else "--"
+        return rf"{body}~{{\scriptsize({cnt})}}"
+
+    # full_grid=True draws the complete canonical layout (every route,
+    # customer and TW class), with '--' where no run exists yet, so the table
+    # is paper-shaped from the start.
+    def _custs_of(route):
+        return (_CUST_ORDER if full_grid else
+                _present_sorted((c[1] for c in oracle if c[0] == route),
+                                _CUST_ORDER))
+
+    def _tws_of(route, cust):
+        return (_TW_ORDER if full_grid else
+                _present_sorted(
+                    (c[2] for c in oracle if c[0] == route and c[1] == cust),
+                    _TW_ORDER))
+
+    routes = (_ROUTE_ORDER if full_grid
+              else _present_sorted((c[0] for c in oracle), _ROUTE_ORDER))
+    cv    = _mode([r.get("cv") for r in pop])
+    cv_s  = f"{cv:g}" if cv is not None else r"\langle CV\rangle"
     seed_counts = sorted({len(s) for s in n_seeds.values()})
     if not seed_counts:
         n_real = r"\langle N\rangle"
@@ -609,47 +647,67 @@ def build_gap_latex(rows, supervised: bool) -> list[str]:
     else:
         n_real = f"{seed_counts[0]}--{seed_counts[-1]}"
 
-    kind = "Supervised" if supervised else "Unsupervised"
+    # LA / SP scenario + horizon config, for the caption
+    la_s = _mode([r.get("n_scenarios") for r in pop
+                  if r.get("method") == "LA"])
+    la_h = _mode([r.get("horizon_hours") for r in pop
+                  if r.get("method") == "LA"])
+    sp_s = _mode([r.get("n_scenarios") for r in pop
+                  if r.get("method") == "2SP"])
+    cfg_bits = []
+    if la_s:
+        cfg_bits.append(f"LA uses {int(la_s)} scenarios"
+                        + (f" over a {la_h:g}\\,h horizon" if la_h else ""))
+    if sp_s:
+        cfg_bits.append(f"SP uses {int(sp_s)} scenarios")
+    cfg_txt = ("  " + "; ".join(cfg_bits) + ".") if cfg_bits else ""
+
+    pen_txt = ("window penalties included" if pen
+               else "route duration only, window penalties excluded")
+    lbl = "tab:gap" + ("" if pen else "-nopen")
     L = []
     L.append(r"\begin{table}[htbp]")
     L.append(r"\centering")
-    L.append(rf"\caption{{{kind} gap to oracle (\%) in route duration "
-             rf"(window penalties included) by instance class and "
+    L.append(rf"\caption{{Gap to oracle (\%) in route duration "
+             rf"({pen_txt}) by instance class and "
              rf"method, averaged over {n_real} seed(s) per instance class; "
-             rf"travel-time deviation $\xi_i \in U[1-\delta, 1+\delta]$, "
-             rf"$\delta = {delta_s}$.}}")
-    L.append(rf"\label{{tab:gap-{kind.lower()}}}")
+             rf"travel-time multiplier $\xi_i$ shifted-lognormal on "
+             rf"$[0.889, 1.6]$ with $\mathrm{{E}}[\xi]=1$, "
+             rf"$\mathrm{{CV}} = {cv_s}$.  Parentheses give the feasible/total "
+             rf"run count per cell (a single number when all were feasible)."
+             rf"{cfg_txt}}}")
+    L.append(rf"\label{{{lbl}}}")
     L.append(r"\begin{tabular}{lll c ccccc}")
     L.append(r"\toprule")
-    L.append(r"\multirow{2}{*}{\textbf{Route}} & \multirow{2}{*}{\textbf{Cust.}} "
-             r"& \multirow{2}{*}{\textbf{TW}} & \multirow{2}{*}{\textbf{Oracle (h)}} &")
+    L.append(r"\multirow{2}{*}{\textbf{\small Route}} "
+             r"& \multirow{2}{*}{\textbf{\small Cust.}} "
+             r"& \multirow{2}{*}{\textbf{\small TW}} "
+             r"& \multirow{2}{*}{\textbf{Oracle (h)}} &")
     L.append(r"\multicolumn{5}{c}{\textbf{Gap to Oracle \%}} \\")
     L.append(r"\cmidrule(lr){5-9}")
     L.append(" & & & & " + " & ".join(col_hdr) + r" \\")
     L.append(r"\midrule")
 
     for ri, route in enumerate(routes):
-        custs = _present_sorted((c[1] for c in oracle if c[0] == route), _CUST_ORDER)
-        route_span = sum(len(_present_sorted(
-            (c[2] for c in oracle if c[0] == route and c[1] == cu), _TW_ORDER))
-            for cu in custs)
+        custs = _custs_of(route)
+        route_span = sum(len(_tws_of(route, cu)) for cu in custs)
+        if route_span == 0:
+            continue
         first_route = True
         for cust in custs:
-            tws = _present_sorted(
-                (c[2] for c in oracle if c[0] == route and c[1] == cust), _TW_ORDER)
+            tws = _tws_of(route, cust)
+            if not tws:
+                continue
             first_cust = True
             for tw in tws:
                 cell = (route, cust, tw)
                 oracle_h = _mean(list(oracle[cell].values()))
-                gap_cells = []
-                for ck in col_keys:
-                    mg = col_meth[ck]
-                    gap_cells.append(_pct(_mean(gaps[cell].get(mg, [])), 1))
-                c0 = (rf"\multirow{{{route_span}}}{{*}}{{{_ROUTE_DISPLAY[route]}}}"
+                gap_cells = [_cell_str(cell, col_meth[ck]) for ck in col_keys]
+                c0 = (rf"\multirow{{{route_span}}}{{*}}{{\small {_ROUTE_DISPLAY[route]}}}"
                       if first_route else "")
-                c1 = (rf"\multirow{{{len(tws)}}}{{*}}{{{_CUST_DISPLAY[cust]}}}"
+                c1 = (rf"\multirow{{{len(tws)}}}{{*}}{{\small {_CUST_DISPLAY[cust]}}}"
                       if first_cust else "")
-                c2 = _TW_DISPLAY.get(tw, tw)
+                c2 = rf"{{\small {_TW_DISPLAY.get(tw, tw)}}}"
                 L.append(f"{c0} & {c1} & {c2} & {_fmt(oracle_h, 1)} & "
                          + " & ".join(gap_cells) + r" \\")
                 first_route = False
@@ -665,18 +723,17 @@ def build_gap_latex(rows, supervised: bool) -> list[str]:
 
 def build_feasibility_latex(rows) -> list[str]:
     """
-    Table 2 — feasibility / robustness by method.  HoS/stranding/repair/TW-hit
-    over UNSUPERVISED OK runs; intervention rate over SUPERVISED OK runs.
+    Table 2 — feasibility / robustness by method over all OK runs:
+    HoS-violation rate, stranding rate, repair frequency, window hit rate.
     """
     ok = [r for r in rows if _is_ok(r)]
-    unsup = [r for r in ok if not _is_supervised(r)]
-    sup   = [r for r in ok if _is_supervised(r)]
     labels = _method_labels(ok)
 
     # (data method value, display label, repairs-applicable?)
     method_rows = [
         ("greedy", labels["greedy"], False),
         ("RO",     labels["RO"],     True),
+        ("ROBU",   labels.get("ROBU", "ROBU"), True),
         ("LA",     labels["LA_mean"], False),
         ("2SP",    labels["twosp"],  True),
     ]
@@ -687,30 +744,26 @@ def build_feasibility_latex(rows) -> list[str]:
     L = []
     L.append(r"\begin{table}[htbp]")
     L.append(r"\centering")
-    L.append(r"\caption{Feasibility and robustness statistics by method "
-             r"(raw mode, supervisor off): HoS-violation rate, stranding rate, "
-             r"repair frequency (offline plans), supervisor intervention rate "
-             r"(supervised mode), and window hit rate.}")
+    L.append(r"\caption{Feasibility and robustness statistics by method: "
+             r"HoS-violation rate, stranding rate, repair frequency (offline "
+             r"plans), and window hit rate.}")
     L.append(r"\label{tab:feasibility}")
-    L.append(r"\begin{tabular}{lccccc}")
+    L.append(r"\begin{tabular}{lcccc}")
     L.append(r"\toprule")
     L.append(r"\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{Stranding (\%)} "
-             r"& \textbf{Repairs (\%)} & \textbf{Superv. interv. (\%)} "
-             r"& \textbf{TW hit (\%)}\\")
+             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)}\\")
     L.append(r"\midrule")
 
     for mval, label, has_repair in method_rows:
-        u = [r for r in unsup if r.get("method") == mval]
-        s = [r for r in sup if r.get("method") == mval]
+        u = [r for r in ok if r.get("method") == mval]
         hos  = _rate(u, lambda r: (_mval(r, "n_hos_violations") or 0) > 0)
         strd = _rate(u, lambda r: (_mval(r, "n_stranding") or 0) > 0)
         rep  = (_rate(u, lambda r: (_mval(r, "n_repairs") or 0) > 0)
                 if has_repair else None)
-        itv  = _rate(s, lambda r: (_mval(r, "n_interventions") or 0) > 0)
         twh  = _mean([_mval(r, "tw_hit_rate") for r in u])
         rep_s = _pct(rep, 1) if has_repair else "--"
         L.append(f"{label} & {_pct(hos,1)} & {_pct(strd,1)} & {rep_s} "
-                 f"& {_pct(itv,1)} & {_pct(twh,1)} \\\\")
+                 f"& {_pct(twh,1)} \\\\")
 
     L.append(r"\bottomrule")
     L.append(r"\end{tabular}")
@@ -738,6 +791,7 @@ def build_runtime_latex(rows) -> list[str]:
     method_rows = [
         ("greedy", labels["greedy"], False, True),
         ("RO",     labels["RO"],     True,  True),
+        ("ROBU",   labels.get("ROBU", "ROBU"), True,  True),
         ("LA",     labels["LA_mean"], False, True),
         ("2SP",    labels["twosp"],  True,  True),
         ("__oracle__", "Oracle",     True,  False),   # offline not recorded -> '--'
@@ -805,15 +859,11 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     build_results_sheet(wb.active, rows)
     build_summary_sheet(wb.create_sheet(), rows)
 
-    # LaTeX tables
-    gap_unsup = build_gap_latex(rows, supervised=False)
-    write_latex_sheet(wb.create_sheet(), "LaTeX_Gap", gap_unsup)
-
-    has_supervised = any(_is_ok(r) and _is_supervised(r) for r in rows)
-    gap_sup = None
-    if has_supervised:
-        gap_sup = build_gap_latex(rows, supervised=True)
-        write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_Sup", gap_sup)
+    # LaTeX tables — penalised (objective) gap and duration-only gap
+    gap_pen_tab = build_gap_latex(rows, metric="gap_pen")
+    write_latex_sheet(wb.create_sheet(), "LaTeX_Gap", gap_pen_tab)
+    gap_np_tab  = build_gap_latex(rows, metric="gap_nopen")
+    write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_nopen", gap_np_tab)
 
     feas = build_feasibility_latex(rows)
     write_latex_sheet(wb.create_sheet(), "LaTeX_Feasibility", feas)
@@ -825,21 +875,18 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
 
     if tex_dir:
         os.makedirs(tex_dir, exist_ok=True)
-        _dump = {"gap_unsupervised.tex": gap_unsup,
+        _dump = {"gap.tex": gap_pen_tab,
+                 "gap_nopen.tex": gap_np_tab,
                  "feasibility.tex": feas,
                  "runtime.tex": runtime}
-        if gap_sup:
-            _dump["gap_supervised.tex"] = gap_sup
         for name, lines in _dump.items():
             with open(os.path.join(tex_dir, name), "w", encoding="utf-8") as fh:
                 fh.write("\n".join(lines) + "\n")
         print(f"  LaTeX .tex  : {len(_dump)} file(s) -> '{tex_dir}/'")
 
     n_failed = sum(1 for r in rows if r.get("status") != "OK")
-    sheets = ["Results", "Summary", "LaTeX_Gap"]
-    if has_supervised:
-        sheets.append("LaTeX_Gap_Sup")
-    sheets += ["LaTeX_Feasibility", "LaTeX_Runtime"]
+    sheets = ["Results", "Summary", "LaTeX_Gap", "LaTeX_Gap_nopen",
+              "LaTeX_Feasibility", "LaTeX_Runtime"]
     print(f"  Excel saved : {output_path}")
     print(f"  Sheets      : {', '.join(sheets)}  "
           f"({len(rows)} rows, {n_failed} unfinished)")

@@ -47,9 +47,9 @@ Time windows
 
 Generating all files
 --------------------
-  python instance_io.py [output_dir] [n_seeds] [delta]
+  python instance_io.py [output_dir] [n_seeds] [cv]
 
-  Defaults: output_dir="instances"  n_seeds=50  delta=0.20
+  Defaults: output_dir="instances"  n_seeds=50  cv=0.15
 
   This produces n_seeds files per (route_class, customers_class, window_class)
   combo, i.e. 9 route/customer combos × 4 window classes × 50 seeds = 1800
@@ -58,7 +58,7 @@ Generating all files
 Loading a file
 --------------
   from instance_io import load_instance_json
-  full_data, D_real, E_real, delta = load_instance_json(
+  full_data, D_real, E_real, cv = load_instance_json(
       "instances/RmediumCfewTtight_7.json")
 
 JSON schema
@@ -69,7 +69,9 @@ JSON schema
     "customers_class":    str,
     "window_class":       str,       // "none" | "tight" | "medium" | "large"
     "seed":               int,
-    "delta":              float,
+    "cv":                 float,     // CV of the shifted-lognormal multiplier
+    "xi_min":             float,     // hard support bounds of the multiplier
+    "xi_max":             float,
     "created_at":         str,
     "window_half_widths": {str: float}   // per-customer half-width (h), omitted for "none"
   },
@@ -100,8 +102,9 @@ import numpy as np
 
 from instances import instance_realistic
 from scenarios import _ecr
-from settings  import (V_NOM, sample_travel_time, sample_multipliers,
-                       LOWER_PCT, TRAVEL_TIME_DIST, TRAVEL_TIME_AR1_RHO)
+from settings  import (V_NOM, sample_multipliers,
+                       XI_MIN, XI_MAX,
+                       TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO)
 from greedy    import compute_nominal_arrivals
 
 
@@ -310,9 +313,8 @@ def generate_instance_file(route_class: str,
                            window_class: str,
                            seed: int,
                            output_dir: str  = "instances",
-                           delta: float     = LOWER_PCT,
+                           cv: float        = TRAVEL_TIME_CV,
                            verbose: bool    = True,
-                           dist: str        = TRAVEL_TIME_DIST,
                            ar1_rho: float   = TRAVEL_TIME_AR1_RHO,
                            cs_spacing_km: float | None = None,
                            charger_power_kw: float | None = None,
@@ -344,7 +346,7 @@ def generate_instance_file(route_class: str,
     window_class     : "none" | "tight" | "medium" | "large"
     seed             : integer seed — uniquely identifies this instance file
     output_dir       : directory where the JSON file is written
-    delta            : travel-time uncertainty half-width (e.g. 0.20)
+    cv               : CV of the travel-time multiplier (e.g. 0.15)
     verbose          : print progress
 
     Returns
@@ -404,8 +406,7 @@ def generate_instance_file(route_class: str,
               f"  |K|={len(full_data['K'])}", end="  ")
 
     # ── 2. Draw uncertainty realisation (S5: distribution + correlation) ──────
-    mults  = sample_multipliers(N, rng, delta=delta, dist=dist,
-                                ar1_rho=ar1_rho)
+    mults  = sample_multipliers(N, rng, cv=cv, ar1_rho=ar1_rho)
     D_real = []
     E_real = []
     for leg in range(N):
@@ -435,8 +436,10 @@ def generate_instance_file(route_class: str,
             window_class       = window_class,
             seed               = seed,
             geometry_seed      = geo_seed,
-            delta              = delta,
-            dist               = dist,
+            cv                 = cv,
+            dist               = "shifted-lognormal",
+            xi_min             = XI_MIN,
+            xi_max             = XI_MAX,
             ar1_rho            = ar1_rho,
             cs_spacing_km      = cs_spacing_km,
             charger_power_kw   = charger_power_kw,
@@ -465,7 +468,7 @@ def generate_instance_file(route_class: str,
 
 def generate_all(output_dir: str  = "instances",
                  n_seeds: int     = 50,
-                 delta: float     = LOWER_PCT,
+                 cv: float        = TRAVEL_TIME_CV,
                  first_seed: int  = 1,
                  combos           = None,
                  verbose: bool    = True) -> list[str]:
@@ -486,7 +489,7 @@ def generate_all(output_dir: str  = "instances",
     ----------
     output_dir   : directory where files are written (created if absent)
     n_seeds      : how many independent instances per combo (default 50)
-    delta        : uncertainty half-width (default 0.20)
+    cv           : CV of the travel-time multiplier (default settings.TRAVEL_TIME_CV)
     first_seed   : starting seed value (default 1); seeds are first_seed..first_seed+n_seeds-1
     combos       : list of (route_class, customers_class, window_class) to
                    generate, or None for all 36 combinations
@@ -515,7 +518,7 @@ def generate_all(output_dir: str  = "instances",
                 window_class    = wc,
                 seed            = seed,
                 output_dir      = output_dir,
-                delta           = delta,
+                cv              = cv,
                 verbose         = verbose,
             )
             paths.append(p)
@@ -549,7 +552,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     full_data  : dict  -- instance data dict with int keys restored
     D_real     : list[float] -- N realised travel times (h)
     E_real     : list[float] -- N realised energies (kWh)
-    delta_file : float -- travel-time uncertainty half-width used to draw D_real
+    cv_file    : float -- CV of the travel-time multiplier used to draw D_real
     """
     with open(filepath, "r", encoding="utf-8") as fh:
         data = json.load(fh)
@@ -557,7 +560,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     full_data = _restore_int_keys(data["instance"])
     D_real    = data["D_real"]
     E_real    = data["E_real"]
-    delta_file = data["meta"].get("delta", 0.20)  # back-fill delta if missing from meta
+    cv_file   = data["meta"].get("cv", TRAVEL_TIME_CV)
 
     # Back-fill M_stop / M_seq for JSON files generated before model_v5.
     # Use the legacy M dict as the stop-overhead value; default M_seq to 5 min.
@@ -594,7 +597,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
             full_data.get("Q", {}), full_data.get("M_stop", {}),
             full_data.get("Tr1", 11.0))
 
-    return full_data, D_real, E_real, delta_file
+    return full_data, D_real, E_real, cv_file
 
 
 def list_available(output_dir: str = "instances") -> list[str]:
@@ -626,24 +629,24 @@ def describe_file(filepath: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    # Usage: python instance_io.py [output_dir] [n_seeds] [delta] [first_seed]
+    # Usage: python instance_io.py [output_dir] [n_seeds] [cv] [first_seed]
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else "instances"
-    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 5
-    delta        = float(sys.argv[3]) if len(sys.argv) > 3 else 0.15
+    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 50
+    cv           = float(sys.argv[3]) if len(sys.argv) > 3 else TRAVEL_TIME_CV
     first_seed   = int(sys.argv[4])   if len(sys.argv) > 4 else 1
 
     print("=" * 60)
     print("  instance_io.py — precomputing instance JSON files")
     print(f"  output_dir  = {output_dir}")
     print(f"  n_seeds     = {n_seeds}  (seeds {first_seed}..{first_seed+n_seeds-1})")
-    print(f"  delta       = {delta:.0%}")
+    print(f"  cv          = {cv:.2f}  (xi in [{XI_MIN:.3f}, {XI_MAX:.3f}])")
     print(f"  total files = {len(_COMBOS) * n_seeds}")
     print("=" * 60)
 
     generate_all(
         output_dir  = output_dir,
         n_seeds     = n_seeds,
-        delta       = delta,
+        cv          = cv,
         first_seed  = first_seed,
         verbose     = True,
     )

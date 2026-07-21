@@ -55,7 +55,7 @@ the repair frequency is itself a reported robustness metric (S2).
 Scenarios
 ---------
 Scenarios are generated live at solve time via scenarios.generate_scenarios()
-(start_stop=0, end_stop=N, delta=delta) — the same mechanism LA uses — rather
+(start_stop=0, end_stop=N, cv=cv) — the same mechanism LA uses — rather
 than read from a precomputed pool.  Runs are therefore not tied to a fixed
 scenario sample across repeated calls; pass `scenario_seed` for reproducibility.
 
@@ -91,6 +91,7 @@ from MILP      import (
 from scenarios import ScenarioTracker, generate_scenarios
 from recourse  import run_plan_with_recourse
 from runner    import finalize_run
+from settings  import GUARD_QUANTILE
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -576,13 +577,13 @@ def build_2sp_model(data: dict, scenarios: list[dict],
         m.h[N, s] <= Tspr1)
 
     # ── M9 (R21): weekly working-time cap per scenario ────────────────────────
-    Twk60 = float(data.get("Twk60", 60.0))
-    m.weekly_work = pyo.Constraint(m.Scen, rule=lambda m, s: (
-        sum(m.D_sc[i, s] for i in range(N))
-        + sum(S_svc.get(i, 0.0) for i in C)
-        + sum(_cs_work(m, i, s) for i in K)
-        + sum(M_lay.get(i, 0.0) * _xsum(m, i) for i in sorted(L_set))
-        <= Twk60))
+    # NOT enforced in the offline extensive form (RO / ROBU / 2SP).  The weekly
+    # working time is dominated by total driving, which is fixed by the route
+    # and not a plan decision, so the cap shapes no decision and only produces
+    # spurious infeasibility when driving is priced at a worst case (box RO).
+    # Legal compliance is checked on the REALIZED trajectory in the simulator
+    # (BEHDV.advance -> "hos_weekly" violation), like the other realized HoS
+    # checks.
 
     # ── C3: non-anticipativity — one shared duration vector (static robust) ───
     # Tie tauc/taub/taur across scenarios to the reference scenario 0; sigma,
@@ -741,7 +742,7 @@ def run_2sp(full_data: dict,
             D_real: list,
             E_real: list,
             n_scenarios: int  = 10,
-            delta: float      = 0.20,
+            cv: float         = None,
             scenario_seed              = None,
             time_limit: int   = 2 * 3600,
             mip_gap: float    = 0.005,
@@ -749,8 +750,8 @@ def run_2sp(full_data: dict,
             verbose: bool     = True,
             run_id: str       = None,
             oracle_tee: bool  = True,
-            supervised: bool  = True,
-            prune_quantile: float = 1.0) -> dict:
+            supervised: bool  = False,
+            prune_quantile: float | None = GUARD_QUANTILE) -> dict:
     """
     Solve the two-stage stochastic program, then execute the first-stage
     structure with online duration recourse (SP1) on D_real/E_real.
@@ -769,7 +770,8 @@ def run_2sp(full_data: dict,
     D_real            : list[float] — precomputed realised travel times (h), length N
     E_real            : list[float] — precomputed realised energies (kWh), length N
     n_scenarios       : number of full-route scenarios to draw (default 10)
-    delta             : travel-time uncertainty half-width used to draw scenarios
+    cv                : CV of the travel-time multiplier used to draw scenarios
+                        (None → settings.TRAVEL_TIME_CV)
     scenario_seed     : seed for scenario generation (None = unseeded/random)
     time_limit        : solver wall-clock limit in seconds (default 2h)
     mip_gap           : MIP relative gap tolerance (default 0.5%)
@@ -778,6 +780,7 @@ def run_2sp(full_data: dict,
     run_id            : override auto-generated run identifier
     oracle_tee        : show Gurobi output in oracle solve
     supervised        : apply the S1 safety supervisor during execution
+                        (default False — infeasible runs are recorded as-is)
     prune_quantile    : supervisor worst-case quantile (RH2)
 
     Returns
@@ -815,7 +818,7 @@ def run_2sp(full_data: dict,
     _p(f"  2SP SOLVE START   ({datetime.datetime.now():%Y-%m-%d %H:%M:%S})")
     _p(f"  Instance   : {label}   run_id={run_id}")
     _p(f"  Route      : {N} stops  departure={T_START:.0f}:00")
-    _p(f"  Settings   : S={n_scenarios}  δ={delta:.0%}  gap={mip_gap:.1%}"
+    _p(f"  Settings   : S={n_scenarios}  cv={cv}  gap={mip_gap:.1%}"
        f"  time_limit={time_limit}s")
     _p("=" * 65)
 
@@ -825,12 +828,12 @@ def run_2sp(full_data: dict,
         start_stop    = 0,
         end_stop      = N,
         n_scenarios   = n_scenarios,
-        delta         = delta,
+        cv            = cv,
         seed          = scenario_seed,
         include_best  = False,
         include_worst = False,
     )
-    _p(f"\n  Drew {len(scenarios)} full-route scenarios (δ={delta:.0%})")
+    _p(f"\n  Drew {len(scenarios)} full-route scenarios (cv={cv})")
 
     # ── Step 2: Build and solve the extensive form ─────────────────────────────
     _p(f"\n  Building 2SP extensive form (S={len(scenarios)}, N={N})...")
@@ -869,7 +872,7 @@ def run_2sp(full_data: dict,
         E_real         = E_real,
         method_name    = "2SP",
         log_fn         = _p,
-        delta          = delta,
+        cv             = cv,
         supervised     = supervised,
         prune_quantile = prune_quantile,
         verbose        = verbose,
@@ -906,7 +909,7 @@ def run_2sp(full_data: dict,
         method_meta = dict(
             method        = "2SP",
             n_scenarios   = len(scenarios),
-            delta         = delta,
+            cv            = cv,
             twosp_obj     = info["obj"],
             twosp_status  = status,
             twosp_optimal = info["optimal"],
@@ -934,14 +937,14 @@ if __name__ == "__main__":
         print("Usage: python 2SP.py <json_file> [n_scenarios] [time_limit_s]")
         sys.exit(1)
 
-    full_data, D_real, E_real, delta_file = load_instance_json(json_file)
+    full_data, D_real, E_real, cv_file = load_instance_json(json_file)
 
     results = run_2sp(
         full_data         = full_data,
         D_real            = D_real,
         E_real            = E_real,
         n_scenarios       = n_scenarios,
-        delta             = delta_file,
+        cv                = cv_file,
         time_limit        = time_limit,
         tee               = True,
         verbose           = True,

@@ -6,13 +6,15 @@ every leg is assumed to be at its worst case simultaneously (Soyster-style
 box uncertainty, no budget).  The model, decision variables, and objective
 are identical to the full-route MILP; only the leg parameters differ:
 
-    D_i  =  D_nom_i · (1 + delta)                       (slowest travel time)
-    E_i  =  L_i · ECR(L_i / (D_nom_i · (1 − delta)))    (fastest-speed energy)
+    D_i  =  D_nom_i · XI_MAX                       (slowest travel time)
+    E_i  =  L_i · ECR(L_i / (D_nom_i · XI_MIN))    (fastest-speed energy)
 
-Each constraint thus faces its own worst extreme of the box
-[1−delta, 1+delta]^N: the time/HoS accumulators bind at the slow extreme,
-the SOC constraints at the fast (energy-hungry) extreme.  This is the
-classical constraint-wise robust counterpart — deliberately conservative
+The box [XI_MIN, XI_MAX]^N is the HARD support of the shifted-lognormal
+multiplier (settings S5): XI_MIN = V_NOM/90 from the HGV speed limiter,
+XI_MAX = V_NOM/50 from the leg-average congestion floor.  Each constraint
+faces its own worst extreme: the time/HoS accumulators bind at the slow
+extreme, the SOC constraints at the fast (energy-hungry) extreme.  This is
+the classical constraint-wise robust counterpart — deliberately conservative
 (no single realization attains both extremes at once), and feasible for
 EVERY realization in the box by construction.
 
@@ -29,7 +31,7 @@ comparison against the MILP / LA / 2SP policies.
 Integration
 -----------
   from RO import run_ro
-  results = run_ro(full_data, D_real, E_real, delta=0.15)
+  results = run_ro(full_data, D_real, E_real)
 
   Or via runner_dispatch:
     python runner_dispatch.py instances/RmediumCfewTmedium_7.json RO
@@ -47,7 +49,7 @@ import pyomo.environ as pyo
 
 from recourse  import run_plan_static
 from scenarios import _ecr
-from settings  import V_NOM
+from settings  import V_NOM, XI_MIN, XI_MAX, TRAVEL_TIME_CV, GUARD_QUANTILE
 from runner    import finalize_run
 from plots     import plot_simulation_results
 
@@ -58,13 +60,13 @@ _twosp = importlib.import_module("2SP")
 # WORST-CASE (BOX) SCENARIO
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _box_scenario(full_data: dict, delta: float) -> dict:
+def _box_scenario(full_data: dict) -> dict:
     """
-    Constraint-wise worst case of the box [1−delta, 1+delta]^N as a single
-    scenario: slowest times D·(1+delta) AND fastest-speed energies
-    E(L/(D·(1−delta))).  Each constraint of the deterministic model then
-    holds at its own worst extreme, so the plan is feasible for every
-    realization in the box.
+    Constraint-wise worst case of the support box [XI_MIN, XI_MAX]^N as a
+    single scenario: slowest times D·XI_MAX AND fastest-speed energies
+    E(L/(D·XI_MIN)) — the truck pinned at the 90 km/h limiter.  Each
+    constraint of the deterministic model then holds at its own worst
+    extreme, so the plan is feasible for every realization in the box.
     """
     N     = full_data["N"]
     D_nom = full_data["D"]
@@ -73,8 +75,8 @@ def _box_scenario(full_data: dict, delta: float) -> dict:
     for i in range(N):
         d_nom = D_nom.get(i, 0.0)
         L     = km.get(i, d_nom * V_NOM)
-        D_s[i] = d_nom * (1.0 + delta)
-        d_min  = max(d_nom * (1.0 - delta), 1e-9)
+        D_s[i] = d_nom * XI_MAX
+        d_min  = max(d_nom * XI_MIN, 1e-9)
         E_s[i] = L * _ecr(L / d_min)
     return dict(D=D_s, E=E_s)
 
@@ -91,15 +93,15 @@ def _plan_from_model(model, full_data: dict) -> list[dict]:
 def run_ro(full_data: dict,
            D_real: list,
            E_real: list,
-           delta: float      = 0.15,
+           cv: float         = TRAVEL_TIME_CV,
            time_limit: int   = 2 * 3600,
            mip_gap: float    = 0.005,
            tee: bool         = True,
            verbose: bool     = True,
            run_id: str       = None,
            oracle_tee: bool  = True,
-           supervised: bool  = True,
-           prune_quantile: float = 1.0,
+           supervised: bool  = False,
+           prune_quantile: float | None = GUARD_QUANTILE,
            **kwargs) -> dict:
     """
     Solve the conservative box robust plan (worst-case MILP counterpart) and
@@ -110,10 +112,12 @@ def run_ro(full_data: dict,
     full_data     : instance dict (from instance_io.load_instance_json)
     D_real        : list[float] — precomputed realised travel times (h)
     E_real        : list[float] — precomputed realised energies (kWh)
-    delta         : uncertainty half-width; every leg is assumed at its worst
-                    case (time +delta, energy at the fast extreme)
+    cv            : CV of the travel-time multiplier — the box corners are the
+                    fixed support bounds [XI_MIN, XI_MAX] regardless of cv;
+                    cv is only forwarded to the S1 supervisor guard
     supervised    : apply the shared S1 safety supervisor during execution
-                    (the identical guard used by every policy — NOT recourse)
+                    (the identical guard used by every policy — NOT recourse;
+                    default False — a broken plan is recorded, not rescued)
     **kwargs      : ignored (absorbs legacy caller arguments, e.g. Gamma,
                     legacy_box, n_random_scen from the old budgeted variant)
 
@@ -134,7 +138,7 @@ def run_ro(full_data: dict,
         os.makedirs(d, exist_ok=True)
     if run_id is None:
         ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id = f"{title}_RO_box_d{int(delta*100)}_{ts}"
+        run_id = f"{title}_RO_box_{ts}"
     paths = dict(
         log = os.path.join("logs",      f"{run_id}.txt"),
         fig = os.path.join("figures",   f"{run_id}.png"),
@@ -153,11 +157,11 @@ def run_ro(full_data: dict,
     _p(f"  Instance : {label}   run_id={run_id}")
     _p(f"  Route    : {N} stops  departure={T_START:.0f}:00")
     _p(f"  Model    : conservative box RO (all legs at worst case, "
-       f"delta={delta:.0%}), MILP counterpart, no recourse")
+       f"xi in [{XI_MIN:.3f}, {XI_MAX:.3f}]), MILP counterpart, no recourse")
     _p("=" * 65)
 
     # ── Step 1: single worst-case scenario (all legs at their extremes) ───────
-    scen_set = [_box_scenario(full_data, delta)]
+    scen_set = [_box_scenario(full_data)]
 
     # ── Step 2: deterministic solve on the worst-case parameters ──────────────
     # With one scenario, the epigraph max + shared durations reduce EXACTLY to
@@ -195,7 +199,7 @@ def run_ro(full_data: dict,
         E_real         = E_real,
         method_name    = "RO",
         log_fn         = _p,
-        delta          = delta,
+        cv             = cv,
         supervised     = supervised,
         prune_quantile = prune_quantile,
         verbose        = verbose,
@@ -229,7 +233,7 @@ def run_ro(full_data: dict,
         events      = events,
         method_meta = dict(
             method       = "RO",
-            delta        = delta,
+            cv           = cv,
             gamma        = "box",
             n_scenarios  = 1,
             ro_obj       = theta,
@@ -250,23 +254,21 @@ def run_ro(full_data: dict,
 if __name__ == "__main__":
     from instance_io import load_instance_json
 
-    # Usage: python RO.py <json_file> [delta] [time_limit]
+    # Usage: python RO.py <json_file> [time_limit]
     json_file = sys.argv[1] if len(sys.argv) > 1 else None
-    delta_arg = float(sys.argv[2]) if len(sys.argv) > 2 else None
-    time_lim  = int(sys.argv[3]) if len(sys.argv) > 3 else 2 * 3600
+    time_lim  = int(sys.argv[2]) if len(sys.argv) > 2 else 2 * 3600
 
     if json_file is None:
-        print("Usage: python RO.py <json_file> [delta] [time_limit_s]")
+        print("Usage: python RO.py <json_file> [time_limit_s]")
         sys.exit(1)
 
-    full_data, D_real, E_real, delta_file = load_instance_json(json_file)
-    delta_use = delta_arg if delta_arg is not None else delta_file
+    full_data, D_real, E_real, cv_file = load_instance_json(json_file)
 
     results = run_ro(
         full_data,
         D_real     = D_real,
         E_real     = E_real,
-        delta      = delta_use,
+        cv         = cv_file,
         time_limit = time_lim,
         tee        = True,
         verbose    = True,

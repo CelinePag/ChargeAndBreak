@@ -1081,20 +1081,15 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     m.spread_term = pyo.Constraint(expr=m.h[N] <= m.Tspr1)
 
     # ── M9 (R21): weekly working-time cap (Directive 2002/15/EC, 60 h) ────────
-    _M_lay = data.get("M_lay", {}) or {}
-    _fixed_work = (sum(data["D"].get(i, 0.0) for i in range(N))
-                   + sum(data["S"].get(i, 0.0) for i in C))
-    if K or _M_lay:
-        m.weekly_work = pyo.Constraint(expr=(
-            _fixed_work
-            + sum(m.v[i]*m.Mstop[i] + m.Q_nom[i]*m.y[i]
-                  + (m.tauc[i] - m.g[i]) + m.sigma[i]*m.Mseq[i] for i in K)
-            + sum(_M_lay[i] * _model_xsum(m, i) for i in _M_lay)
-            <= m.Twk60))
-    else:
-        # no decision variables in the expression — check the constant part
-        assert _fixed_work <= float(pyo.value(m.Twk60)) + 1e-9, (
-            "fixed driving+service work exceeds the weekly 60 h cap (M9)")
+    # NOT enforced in the offline model.  The weekly working time is dominated
+    # by total driving, which is fixed by the route and is not a plan decision,
+    # so imposing the cap here shapes no decision and only creates spurious
+    # infeasibility when driving is priced at a worst case (box RO).  Legal
+    # compliance is instead verified on the REALIZED trajectory in the
+    # simulator (BEHDV.advance records a "hos_weekly" violation when the
+    # executed weekly working time exceeds Twk60), consistent with the other
+    # realized HoS checks.  Twk60 is still declared as a parameter and consumed
+    # by the simulator via full_data.
     return m
 
 

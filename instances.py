@@ -87,7 +87,7 @@ from settings import (
     M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H, M_LAYBY_H,
     LAYBY_SPACING_KM, LAYBY_MIN_LEG_H,
     SERVICE_TIME_H, CS_SPACING_KM, T_START as _T_START,
-    CHARGER_POWER_BASE_KW, scale_tbar,
+    CHARGER_POWER_BASE_KW, scale_tbar, XI_MAX,
 )
 
 
@@ -147,7 +147,8 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 # C1 — HORIZON BIG-M  H  (valid upper bound on any feasible arrival span)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1, delta_pad: float = 0.5) -> float:
+def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1,
+                         delta_pad: float = XI_MAX - 1.0) -> float:
     """
     C1 — a valid big-M H bounding the total route duration (arrival minus t0).
 
@@ -162,8 +163,9 @@ def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1, delta_pad: float = 0.5) -> flo
     The rest term is deliberately loose (each stop can host at most one
     break/rest by (23), so N+1 rests of 11 h dominates every break too),
     keeping H valid for every schedule the solver can produce — optimal or
-    not — which is what a big-M requires.  delta_pad = 0.5 covers travel
-    inflation well beyond the base δ = 0.15 support.
+    not — which is what a big-M requires.  delta_pad defaults to XI_MAX − 1
+    (= 0.6): the multiplier support is hard, so D·XI_MAX bounds every
+    realised leg time.
     """
     D_total = sum(D.get(i, 0.0) for i in range(N))
     return (D_total * (1.0 + delta_pad)

@@ -90,6 +90,7 @@ from typing import Optional
 from BEHDV      import BEHDV, _energy_after_charging, _charging_time_needed
 from scenarios  import ScenarioTracker
 from supervisor import compute_flags, supervise_action
+from settings   import TRAVEL_TIME_CV, GUARD_QUANTILE
 from runner     import finalize_run
 from plots      import plot_simulation_results   # re-exported for callers
 
@@ -169,7 +170,8 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
-                    delta: float = 0.15,
+                    cv: float = TRAVEL_TIME_CV,
+                    guard_quantile: float | None = GUARD_QUANTILE,
                     safety_buffer_frac: float = 0.0,
                     queue_threshold: Optional[float] = None,
                     verbose: bool = False) -> tuple[dict, str]:
@@ -202,9 +204,14 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
     Parameters
     ----------
-    delta : float
-        Travel-time uncertainty half-width (distribution support) used for
-        the worst-case checks — same value as the simulator draws from.
+    cv : float
+        CV of the travel-time multiplier — same value as the simulator draws
+        from; cv = 0 forces nominal checks regardless of guard_quantile.
+    guard_quantile : float or None
+        Probability level of the one-step feasibility guard
+        (settings.GUARD_QUANTILE default).  None = nominal checks (xi = 1,
+        no uncertainty margin); 0.95 = guard against the xi 95% quantile;
+        1.0 = full support corners.
     safety_buffer_frac : float [0, 1]
         OPTIONAL extra SOC buffer on top of the worst-case energy check
         (default 0.0 — the worst case is already conservative).
@@ -229,7 +236,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
     # One-step feasibility checks — single source of truth shared with the
     # rolling-horizon pruning and the S1 safety supervisor.
-    flags = compute_flags(full_data, stop_global, state, delta)
+    flags = compute_flags(full_data, stop_global, state, cv, guard_quantile)
 
     must_rest   = flags["must_rest"]
     must_break  = flags["must_reset_cd"] and not must_rest
@@ -355,8 +362,8 @@ def compute_nominal_arrivals(full_data: dict) -> list[float]:
 
     vehicle = BEHDV(full_data)
     for stop in range(N):
-        # nominal pass: no uncertainty margin (delta=0)
-        action, _ = greedy_decision(full_data, stop, vehicle, delta=0.0)
+        # nominal pass: no uncertainty margin (cv=0)
+        action, _ = greedy_decision(full_data, stop, vehicle, cv=0.0)
         dur       = _greedy_durations(full_data, stop, action, vehicle)
         brk       = action.get("break_type")
         rst       = action.get("rest_type")
@@ -391,14 +398,15 @@ def compute_nominal_arrivals(full_data: dict) -> list[float]:
 def run_greedy(full_data: dict,
                D_real: list,
                E_real: list,
-               delta: float                     = 0.15,
+               cv: float                        = TRAVEL_TIME_CV,
+               guard_quantile: float | None     = GUARD_QUANTILE,
                safety_buffer: float             = 0.0,
                queue_threshold: Optional[float] = None,   # deprecated, ignored
                verbose: bool                    = True,
                run_id: str                      = None,
                oracle_tee: bool                 = True,
-               supervised: bool                 = True,
-               prune_quantile: float            = 1.0) -> dict:
+               supervised: bool                 = False,
+               prune_quantile: float | None     = GUARD_QUANTILE) -> dict:
     """
     Run the greedy benchmark simulation from stop 0 to stop N.
 
@@ -459,8 +467,8 @@ def run_greedy(full_data: dict,
     _p(f"  GREEDY SIMULATION START   ({datetime.datetime.now():%Y-%m-%d %H:%M:%S})")
     _p(f"  Instance : {label}   run_id={run_id}")
     _p(f"  Route    : {N} stops  departure={T_START:.0f}:00")
-    _p(f"  Settings : delta={delta:.0%}  safety={safety_buffer:.0%}  "
-       f"supervised={supervised}")
+    _p(f"  Settings : cv={cv:.2f}  guard_q={guard_quantile}  "
+       f"safety={safety_buffer:.0%}  supervised={supervised}")
     _p("=" * 65)
 
     vehicle    = BEHDV(full_data)
@@ -476,7 +484,8 @@ def run_greedy(full_data: dict,
             full_data,
             stop,
             vehicle,
-            delta              = delta,
+            cv                 = cv,
+            guard_quantile     = guard_quantile,
             safety_buffer_frac = safety_buffer,
         )
 
@@ -485,7 +494,7 @@ def run_greedy(full_data: dict,
         # interventions should be rare; the call keeps the guarantee uniform.
         if supervised and stop > 0:
             action, itv = supervise_action(full_data, stop, vehicle, action,
-                                           delta=delta,
+                                           cv=cv,
                                            quantile=prune_quantile)
             if itv is not None:
                 events["interventions"].append(itv)
@@ -584,7 +593,8 @@ def run_greedy(full_data: dict,
         events      = events,
         method_meta = dict(
             method          = "greedy",
-            delta           = delta,
+            cv              = cv,
+            guard_quantile  = guard_quantile,
             safety_buffer   = safety_buffer,
             supervised      = supervised,
             prune_quantile  = prune_quantile,
@@ -619,8 +629,4 @@ if __name__ == "__main__":
         oracle_tee      = True,
     )
 
-    plot_simulation_results(
-        results, full_data,
-        title = f"greedy_{os.path.splitext(os.path.basename(json_file))[0]}",
-        save  = True,
-    )
+    print(f"\n  Figure   : plot later with `python plots.py {results['run_id']}`")
