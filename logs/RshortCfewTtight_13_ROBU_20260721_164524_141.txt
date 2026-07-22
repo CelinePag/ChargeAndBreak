@@ -1,0 +1,84 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-22 02:44:34)
+  Instance : RshortCfewTtight_13 — short route, few customers, tight windows, seed=13   run_id=RshortCfewTtight_13_ROBU_20260721_164524_141
+  Route    : 46 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=17 of 46 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  [it 1] master: |scen|=1  theta=34.753h  status=optimal  (24.8s)
+  [it 1] adversary: 3 feasibility cut(s) [global, cd[0-16], cd[17-22]]  (1.4s)
+  [it 2] master: |scen|=4  theta=41.374h  status=optimal  (35.2s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[9-20], shift[0-20], shift[21-45]]  (3.7s)
+  [it 3] master: |scen|=7  theta=41.754h  status=optimal  (109.4s)
+  [it 3] adversary: 3 feasibility cut(s) [shift[0-27], soc[0-8], soc[9-17]]  (5.9s)
+  [it 4] master: |scen|=10  theta=41.812h  status=optimal  (184.1s)
+  [it 4] adversary: 3 feasibility cut(s) [shift[0-26], soc[18-30], soc[31-37]]  (6.4s)
+  [it 5] master: |scen|=13  theta=41.828h  status=optimal  (250.0s)
+  [it 5] adversary: 1 feasibility cut(s) [soc[30-37]]  (9.2s)
+  [it 6] master: |scen|=14  theta=41.933h  status=optimal  (333.7s)
+  [it 6] adversary: 1 feasibility cut(s) [soc[9-20]]  (7.0s)
+  [it 7] master: |scen|=15  theta=41.918h  status=optimal  (219.5s)
+  [it 7] adversary: no violation, worst candidate obj=41.918h <= theta+tol — CONVERGED  (3.7s)
+
+  ROBU objective (worst-case arrival over U_Gamma) : 41.918 h   Gamma=17  scenarios=15  cuts: 14 feas / 0 opt   solve 1193.9s
+  plan: 4 chg / 5 brk / 1 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.242h soc=478kWh  cd=0.24 sd=0.24 h=0.24  -> y=0 brk=--- rst=---
+  stop   2  t=8.557h soc=457kWh  cd=0.56 sd=0.56 h=0.56  -> y=0 brk=--- rst=---
+  stop   3  t=8.791h soc=434kWh  cd=0.79 sd=0.79 h=0.79  -> y=0 brk=--- rst=---
+  stop   4  t=9.028h soc=410kWh  cd=1.03 sd=1.03 h=1.03  -> y=0 brk=--- rst=---
+  stop   5  t=9.274h soc=386kWh  cd=1.27 sd=1.27 h=1.27  -> y=0 brk=--- rst=---
+  stop   6  t=9.585h soc=364kWh  cd=1.59 sd=1.59 h=1.59  -> y=0 brk=--- rst=---
+  stop   7  t=9.786h soc=344kWh  cd=1.79 sd=1.79 h=1.79  -> y=0 brk=--- rst=---
+  stop   8  t=9.987h soc=324kWh  cd=1.99 sd=1.99 h=1.99  -> y=0 brk=--- rst=---
+  stop   9  t=10.214h soc=306kWh  cd=2.21 sd=2.21 h=2.21  -> y=1 brk=b15 rst=---
+  stop  10  t=11.095h soc=366kWh  cd=2.51 sd=2.51 h=3.10  -> y=0 brk=--- rst=---
+  stop  11  t=11.403h soc=338kWh  cd=2.82 sd=2.82 h=3.40  -> y=0 brk=b30 rst=---
+  stop  12  t=12.366h soc=310kWh  cd=0.30 sd=3.11 h=4.37  -> y=0 brk=--- rst=---
+  stop  13  t=13.122h soc=286kWh  cd=0.55 sd=3.37 h=5.12  -> y=0 brk=--- rst=---
+  stop  14  t=13.241h soc=274kWh  cd=0.67 sd=3.49 h=5.24  -> y=0 brk=--- rst=---
+  stop  15  t=13.471h soc=251kWh  cd=0.90 sd=3.72 h=5.47  -> y=0 brk=--- rst=---
+  stop  16  t=13.698h soc=228kWh  cd=1.13 sd=3.95 h=5.70  -> y=0 brk=--- rst=---
+  stop  17  t=13.936h soc=206kWh  cd=1.37 sd=4.18 h=5.94  -> y=0 brk=--- rst=---
+  stop  18  t=14.163h soc=184kWh  cd=1.59 sd=4.41 h=6.16  -> y=0 brk=--- rst=---
+  stop  19  t=14.425h soc=159kWh  cd=1.86 sd=4.67 h=6.43  -> y=0 brk=--- rst=---
+  stop  20  t=14.675h soc=133kWh  cd=2.11 sd=4.92 h=6.68  -> y=0 brk=--- rst=---
+  stop  21  t=14.923h soc=108kWh  cd=2.35 sd=5.17 h=6.92  -> y=1 brk=b45 rst=---
+  stop  22  t=16.316h soc=318kWh  cd=0.29 sd=5.46 h=8.32  -> y=0 brk=--- rst=---
+  stop  23  t=16.607h soc=290kWh  cd=0.58 sd=5.75 h=8.61  -> y=0 brk=--- rst=r2
+  stop  24  t=25.997h soc=268kWh  cd=0.22 sd=0.22 h=0.22  -> y=0 brk=--- rst=---
+  stop  25  t=26.235h soc=247kWh  cd=0.46 sd=0.46 h=0.46  -> y=0 brk=--- rst=---
+  stop  26  t=26.468h soc=226kWh  cd=0.69 sd=0.69 h=0.69  -> y=0 brk=--- rst=---
+  stop  27  t=26.840h soc=206kWh  cd=1.07 sd=1.07 h=1.07  -> y=0 brk=--- rst=---
+  stop  28  t=27.115h soc=182kWh  cd=1.34 sd=1.34 h=1.34  -> y=0 brk=--- rst=---
+  stop  29  t=27.376h soc=157kWh  cd=1.60 sd=1.60 h=1.60  -> y=0 brk=--- rst=---
+  stop  30  t=27.623h soc=131kWh  cd=1.85 sd=1.85 h=1.85  -> y=0 brk=--- rst=---
+  stop  31  t=27.877h soc=106kWh  cd=2.10 sd=2.10 h=2.10  -> y=1 brk=b45 rst=---
+  stop  32  t=29.109h soc=295kWh  cd=0.27 sd=2.37 h=3.34  -> y=0 brk=--- rst=---
+  stop  33  t=29.461h soc=272kWh  cd=0.62 sd=2.72 h=3.69  -> y=0 brk=--- rst=---
+  stop  34  t=29.739h soc=248kWh  cd=0.90 sd=3.00 h=3.97  -> y=0 brk=--- rst=---
+  stop  35  t=30.539h soc=227kWh  cd=1.20 sd=3.30 h=4.77  -> y=0 brk=--- rst=---
+  stop  36  t=30.992h soc=182kWh  cd=1.65 sd=3.75 h=5.22  -> y=0 brk=--- rst=---
+  stop  37  t=31.885h soc=144kWh  cd=2.04 sd=4.14 h=6.11  -> y=0 brk=--- rst=---
+  stop  38  t=32.291h soc=105kWh  cd=2.45 sd=4.55 h=6.52  -> y=1 brk=b45 rst=---
+  stop  39  t=33.482h soc=297kWh  cd=0.25 sd=4.80 h=7.71  -> y=0 brk=--- rst=---
+  stop  40  t=33.738h soc=275kWh  cd=0.51 sd=5.06 h=7.96  -> y=0 brk=--- rst=---
+  stop  41  t=33.969h soc=252kWh  cd=0.74 sd=5.29 h=8.20  -> y=0 brk=--- rst=---
+  stop  42  t=34.198h soc=228kWh  cd=0.97 sd=5.52 h=8.42  -> y=0 brk=--- rst=---
+  stop  43  t=34.409h soc=207kWh  cd=1.18 sd=5.73 h=8.64  -> y=0 brk=--- rst=---
+  stop  44  t=34.630h soc=186kWh  cd=1.40 sd=5.95 h=8.86  -> y=0 brk=--- rst=---
+  stop  45  t=34.842h soc=165kWh  cd=1.61 sd=6.16 h=9.07  -> y=0 brk=--- rst=---
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 35.318 h  (35:19)
+  Travel duration    : 27.318 h
+  Solve time         : 1193.9 s
+  Wall-clock         : 1193.9 s
+=================================================================
+  Oracle   : loaded from cache  solutions/oracle_RshortCfewTtight_13.json
+  Scenarios: logs/RshortCfewTtight_13_ROBU_20260721_164524_141_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=0% (early=0, late=3)  interventions=0  repairs=0
+  Solution : solutions/RshortCfewTtight_13_ROBU_20260721_164524_141.json

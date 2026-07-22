@@ -1,0 +1,83 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-22 00:42:31)
+  Instance : RshortCfewTnone_22 — short route, few customers, none windows, seed=22   run_id=RshortCfewTnone_22_ROBU_20260721_164524_101
+  Route    : 49 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=18 of 49 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  [it 1] master: |scen|=1  theta=35.029h  status=optimal  (5.5s)
+  [it 1] adversary: 3 feasibility cut(s) [global, cd[0-11], cd[12-24]]  (0.7s)
+  [it 2] master: |scen|=4  theta=38.624h  status=optimal  (32.8s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[8-18], shift[0-24], shift[25-48]]  (2.4s)
+  [it 3] master: |scen|=7  theta=47.608h  status=optimal  (187.6s)
+  [it 3] adversary: 3 feasibility cut(s) [soc[0-7], soc[8-18], soc[19-29]]  (5.3s)
+  [it 4] master: |scen|=10  theta=47.815h  status=optimal  (397.9s)
+  [it 4] adversary: 1 feasibility cut(s) [soc[30-39]]  (3.3s)
+  [it 5] master: |scen|=11  theta=47.830h  status=optimal  (561.9s)
+  [it 5] adversary: no violation, worst candidate obj=47.830h <= theta+tol — CONVERGED  (5.2s)
+
+  ROBU objective (worst-case arrival over U_Gamma) : 47.830 h   Gamma=18  scenarios=11  cuts: 10 feas / 0 opt   solve 1202.4s
+  plan: 5 chg / 3 brk / 2 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.235h soc=477kWh  cd=0.23 sd=0.23 h=0.23  -> y=0 brk=--- rst=---
+  stop   2  t=8.486h soc=455kWh  cd=0.49 sd=0.49 h=0.49  -> y=0 brk=--- rst=---
+  stop   3  t=8.733h soc=433kWh  cd=0.73 sd=0.73 h=0.73  -> y=0 brk=--- rst=---
+  stop   4  t=8.980h soc=412kWh  cd=0.98 sd=0.98 h=0.98  -> y=0 brk=--- rst=---
+  stop   5  t=9.221h soc=390kWh  cd=1.22 sd=1.22 h=1.22  -> y=0 brk=--- rst=---
+  stop   6  t=9.463h soc=368kWh  cd=1.46 sd=1.46 h=1.46  -> y=0 brk=--- rst=---
+  stop   7  t=9.882h soc=345kWh  cd=1.88 sd=1.88 h=1.88  -> y=0 brk=--- rst=---
+  stop   8  t=10.147h soc=321kWh  cd=2.15 sd=2.15 h=2.15  -> y=1 brk=--- rst=---
+  stop   9  t=10.982h soc=359kWh  cd=2.48 sd=2.48 h=2.98  -> y=0 brk=--- rst=r2
+  stop  10  t=20.416h soc=333kWh  cd=0.27 sd=0.27 h=0.27  -> y=0 brk=--- rst=---
+  stop  11  t=20.786h soc=310kWh  cd=0.64 sd=0.64 h=0.64  -> y=0 brk=--- rst=---
+  stop  12  t=21.079h soc=285kWh  cd=0.93 sd=0.93 h=0.93  -> y=0 brk=--- rst=---
+  stop  13  t=21.299h soc=266kWh  cd=1.15 sd=1.15 h=1.15  -> y=0 brk=--- rst=---
+  stop  14  t=21.495h soc=246kWh  cd=1.35 sd=1.35 h=1.35  -> y=0 brk=--- rst=---
+  stop  15  t=21.693h soc=226kWh  cd=1.54 sd=1.54 h=1.54  -> y=0 brk=--- rst=---
+  stop  16  t=21.946h soc=201kWh  cd=1.80 sd=1.80 h=1.80  -> y=0 brk=--- rst=---
+  stop  17  t=22.263h soc=178kWh  cd=2.11 sd=2.11 h=2.11  -> y=0 brk=--- rst=---
+  stop  18  t=22.511h soc=152kWh  cd=2.36 sd=2.36 h=2.36  -> y=0 brk=--- rst=---
+  stop  19  t=23.062h soc=119kWh  cd=2.91 sd=2.91 h=2.91  -> y=1 brk=b45 rst=---
+  stop  20  t=24.297h soc=306kWh  cd=0.24 sd=3.16 h=4.15  -> y=0 brk=--- rst=---
+  stop  21  t=24.531h soc=283kWh  cd=0.48 sd=3.39 h=4.38  -> y=0 brk=--- rst=---
+  stop  22  t=24.786h soc=260kWh  cd=0.73 sd=3.65 h=4.64  -> y=0 brk=--- rst=---
+  stop  23  t=25.079h soc=236kWh  cd=1.03 sd=3.94 h=4.93  -> y=0 brk=--- rst=---
+  stop  24  t=25.342h soc=210kWh  cd=1.29 sd=4.20 h=5.19  -> y=0 brk=--- rst=---
+  stop  25  t=25.615h soc=185kWh  cd=1.56 sd=4.47 h=5.47  -> y=0 brk=--- rst=---
+  stop  26  t=26.572h soc=147kWh  cd=2.02 sd=4.93 h=6.42  -> y=1 brk=--- rst=r2
+  stop  27  t=36.716h soc=190kWh  cd=0.50 sd=0.50 h=0.50  -> y=0 brk=--- rst=---
+  stop  28  t=36.970h soc=164kWh  cd=0.75 sd=0.75 h=0.75  -> y=0 brk=--- rst=---
+  stop  29  t=37.417h soc=140kWh  cd=1.20 sd=1.20 h=1.20  -> y=0 brk=--- rst=---
+  stop  30  t=37.696h soc=115kWh  cd=1.48 sd=1.48 h=1.48  -> y=1 brk=b45 rst=---
+  stop  31  t=39.113h soc=335kWh  cd=0.26 sd=1.74 h=2.90  -> y=0 brk=--- rst=---
+  stop  32  t=39.369h soc=311kWh  cd=0.51 sd=2.00 h=3.15  -> y=0 brk=--- rst=---
+  stop  33  t=39.653h soc=289kWh  cd=0.80 sd=2.28 h=3.44  -> y=0 brk=--- rst=---
+  stop  34  t=39.940h soc=263kWh  cd=1.09 sd=2.57 h=3.73  -> y=0 brk=--- rst=---
+  stop  35  t=40.229h soc=237kWh  cd=1.37 sd=2.85 h=4.01  -> y=0 brk=--- rst=---
+  stop  36  t=40.471h soc=213kWh  cd=1.62 sd=3.10 h=4.26  -> y=0 brk=--- rst=---
+  stop  37  t=40.737h soc=191kWh  cd=1.88 sd=3.36 h=4.52  -> y=0 brk=--- rst=---
+  stop  38  t=40.990h soc=168kWh  cd=2.13 sd=3.62 h=4.77  -> y=0 brk=--- rst=---
+  stop  39  t=41.290h soc=141kWh  cd=2.44 sd=3.92 h=5.08  -> y=0 brk=--- rst=---
+  stop  40  t=41.570h soc=114kWh  cd=2.72 sd=4.20 h=5.35  -> y=1 brk=b45 rst=---
+  stop  41  t=42.826h soc=303kWh  cd=0.24 sd=4.44 h=6.61  -> y=0 brk=--- rst=---
+  stop  42  t=43.068h soc=280kWh  cd=0.48 sd=4.68 h=6.85  -> y=0 brk=--- rst=---
+  stop  43  t=43.336h soc=258kWh  cd=0.75 sd=4.95 h=7.12  -> y=0 brk=--- rst=---
+  stop  44  t=43.575h soc=235kWh  cd=0.99 sd=5.19 h=7.36  -> y=0 brk=--- rst=---
+  stop  45  t=43.808h soc=212kWh  cd=1.22 sd=5.42 h=7.59  -> y=0 brk=--- rst=---
+  stop  46  t=44.047h soc=188kWh  cd=1.46 sd=5.66 h=7.83  -> y=0 brk=--- rst=---
+  stop  47  t=44.295h soc=164kWh  cd=1.71 sd=5.90 h=8.08  -> y=0 brk=--- rst=---
+  stop  48  t=44.543h soc=139kWh  cd=1.96 sd=6.15 h=8.33  -> y=0 brk=--- rst=---
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 44.790 h  (44:47)
+  Travel duration    : 36.790 h
+  Solve time         : 1202.4 s
+  Wall-clock         : 1202.4 s
+=================================================================
+  Oracle   : loaded from cache  solutions/oracle_RshortCfewTnone_22.json
+  Scenarios: logs/RshortCfewTnone_22_ROBU_20260721_164524_101_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : solutions/RshortCfewTnone_22_ROBU_20260721_164524_101.json

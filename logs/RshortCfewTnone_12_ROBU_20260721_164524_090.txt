@@ -1,0 +1,83 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-21 23:44:26)
+  Instance : RshortCfewTnone_12 — short route, few customers, none windows, seed=12   run_id=RshortCfewTnone_12_ROBU_20260721_164524_090
+  Route    : 47 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=17 of 47 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  [it 1] master: |scen|=1  theta=35.782h  status=optimal  (12.7s)
+  [it 1] adversary: 3 feasibility cut(s) [global, cd[0-14], cd[15-26]]  (1.1s)
+  [it 2] master: |scen|=4  theta=39.928h  status=optimal  (38.9s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[7-17], shift[0-24], soc[0-6]]  (2.3s)
+  [it 3] master: |scen|=7  theta=40.150h  status=optimal  (133.5s)
+  [it 3] adversary: 3 feasibility cut(s) [cd[28-37], shift[24-46], soc[7-14]]  (3.3s)
+  [it 4] master: |scen|=10  theta=48.583h  status=optimal  (840.1s)
+  [it 4] adversary: 3 feasibility cut(s) [shift[9-31], soc[0-14], soc[15-22]]  (6.9s)
+  [it 5] master: |scen|=13  theta=48.655h  status=optimal  (1076.4s)
+  [it 5] adversary: 3 feasibility cut(s) [soc[18-28], soc[29-37], soc[38-46]]  (4.8s)
+  [it 6] master: |scen|=16  theta=48.715h  status=optimal  (826.8s)
+  [it 6] adversary: no violation, worst candidate obj=48.715h <= theta+tol — CONVERGED  (4.7s)
+
+  ROBU objective (worst-case arrival over U_Gamma) : 48.715 h   Gamma=17  scenarios=16  cuts: 15 feas / 0 opt   solve 2951.6s
+  plan: 4 chg / 3 brk / 2 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.241h soc=478kWh  cd=0.24 sd=0.24 h=0.24  -> y=0 brk=--- rst=---
+  stop   2  t=8.502h soc=456kWh  cd=0.50 sd=0.50 h=0.50  -> y=0 brk=--- rst=---
+  stop   3  t=8.726h soc=433kWh  cd=0.73 sd=0.73 h=0.73  -> y=0 brk=--- rst=---
+  stop   4  t=8.986h soc=408kWh  cd=0.99 sd=0.99 h=0.99  -> y=0 brk=--- rst=---
+  stop   5  t=9.240h soc=384kWh  cd=1.24 sd=1.24 h=1.24  -> y=0 brk=--- rst=---
+  stop   6  t=9.522h soc=360kWh  cd=1.52 sd=1.52 h=1.52  -> y=0 brk=--- rst=---
+  stop   7  t=10.089h soc=321kWh  cd=2.09 sd=2.09 h=2.09  -> y=0 brk=--- rst=---
+  stop   8  t=10.335h soc=297kWh  cd=2.33 sd=2.33 h=2.33  -> y=0 brk=--- rst=---
+  stop   9  t=10.568h soc=273kWh  cd=2.57 sd=2.57 h=2.57  -> y=0 brk=--- rst=r2
+  stop  10  t=19.981h soc=250kWh  cd=0.25 sd=0.25 h=0.25  -> y=0 brk=--- rst=---
+  stop  11  t=20.226h soc=226kWh  cd=0.49 sd=0.49 h=0.49  -> y=0 brk=--- rst=---
+  stop  12  t=20.983h soc=203kWh  cd=0.75 sd=0.75 h=1.25  -> y=0 brk=--- rst=---
+  stop  13  t=21.261h soc=181kWh  cd=1.03 sd=1.03 h=1.53  -> y=1 brk=--- rst=---
+  stop  14  t=22.062h soc=233kWh  cd=1.30 sd=1.30 h=2.33  -> y=0 brk=--- rst=---
+  stop  15  t=22.462h soc=194kWh  cd=1.70 sd=1.70 h=2.73  -> y=0 brk=--- rst=---
+  stop  16  t=22.729h soc=167kWh  cd=1.97 sd=1.97 h=2.99  -> y=0 brk=--- rst=---
+  stop  17  t=23.082h soc=142kWh  cd=2.32 sd=2.32 h=3.35  -> y=0 brk=--- rst=---
+  stop  18  t=23.357h soc=115kWh  cd=2.59 sd=2.59 h=3.62  -> y=1 brk=b45 rst=---
+  stop  19  t=24.922h soc=367kWh  cd=0.26 sd=2.85 h=5.19  -> y=0 brk=--- rst=---
+  stop  20  t=25.233h soc=343kWh  cd=0.57 sd=3.16 h=5.50  -> y=0 brk=--- rst=---
+  stop  21  t=25.675h soc=319kWh  cd=1.01 sd=3.60 h=5.94  -> y=0 brk=--- rst=---
+  stop  22  t=25.911h soc=295kWh  cd=1.25 sd=3.84 h=6.18  -> y=0 brk=--- rst=---
+  stop  23  t=26.204h soc=273kWh  cd=1.54 sd=4.13 h=6.47  -> y=0 brk=--- rst=---
+  stop  24  t=26.456h soc=250kWh  cd=1.79 sd=4.39 h=6.72  -> y=0 brk=--- rst=---
+  stop  25  t=26.696h soc=227kWh  cd=2.03 sd=4.63 h=6.96  -> y=0 brk=--- rst=---
+  stop  26  t=26.929h soc=203kWh  cd=2.26 sd=4.86 h=7.19  -> y=0 brk=--- rst=---
+  stop  27  t=27.191h soc=180kWh  cd=2.53 sd=5.12 h=7.46  -> y=0 brk=--- rst=r2
+  stop  28  t=37.020h soc=150kWh  cd=0.33 sd=0.33 h=0.33  -> y=0 brk=--- rst=---
+  stop  29  t=37.411h soc=113kWh  cd=0.72 sd=0.72 h=0.72  -> y=1 brk=b45 rst=---
+  stop  30  t=38.687h soc=298kWh  cd=0.28 sd=1.00 h=2.00  -> y=0 brk=--- rst=---
+  stop  31  t=38.968h soc=271kWh  cd=0.56 sd=1.28 h=2.28  -> y=0 brk=--- rst=---
+  stop  32  t=39.251h soc=243kWh  cd=0.85 sd=1.56 h=2.56  -> y=0 brk=--- rst=---
+  stop  33  t=39.716h soc=201kWh  cd=1.31 sd=2.03 h=3.03  -> y=0 brk=--- rst=---
+  stop  34  t=39.949h soc=178kWh  cd=1.54 sd=2.26 h=3.26  -> y=0 brk=--- rst=---
+  stop  35  t=40.184h soc=155kWh  cd=1.78 sd=2.50 h=3.49  -> y=0 brk=--- rst=---
+  stop  36  t=40.465h soc=133kWh  cd=2.06 sd=2.78 h=3.77  -> y=0 brk=--- rst=---
+  stop  37  t=40.712h soc=111kWh  cd=2.31 sd=3.03 h=4.02  -> y=0 brk=--- rst=---
+  stop  38  t=41.251h soc=107kWh  cd=2.35 sd=3.06 h=4.56  -> y=1 brk=b45 rst=---
+  stop  39  t=42.866h soc=328kWh  cd=0.43 sd=3.49 h=6.17  -> y=0 brk=--- rst=---
+  stop  40  t=43.145h soc=301kWh  cd=0.70 sd=3.77 h=6.45  -> y=0 brk=--- rst=---
+  stop  41  t=43.419h soc=273kWh  cd=0.98 sd=4.04 h=6.73  -> y=0 brk=--- rst=---
+  stop  42  t=43.691h soc=245kWh  cd=1.25 sd=4.31 h=7.00  -> y=0 brk=--- rst=---
+  stop  43  t=43.971h soc=217kWh  cd=1.53 sd=4.59 h=7.28  -> y=0 brk=--- rst=---
+  stop  44  t=44.260h soc=189kWh  cd=1.82 sd=4.88 h=7.57  -> y=0 brk=--- rst=---
+  stop  45  t=44.740h soc=163kWh  cd=2.30 sd=5.36 h=8.05  -> y=0 brk=--- rst=---
+  stop  46  t=45.024h soc=134kWh  cd=2.58 sd=5.65 h=8.33  -> y=0 brk=--- rst=---
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 45.309 h  (45:18)
+  Travel duration    : 37.309 h
+  Solve time         : 2951.6 s
+  Wall-clock         : 2951.7 s
+=================================================================
+  Oracle   : loaded from cache  solutions/oracle_RshortCfewTnone_12.json
+  Scenarios: logs/RshortCfewTnone_12_ROBU_20260721_164524_090_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : solutions/RshortCfewTnone_12_ROBU_20260721_164524_090.json
