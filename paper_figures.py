@@ -108,30 +108,9 @@ def _shade(color: str, frac: float = 0.35) -> tuple:
 # DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _dedup_latest(rows):
-    """
-    When the same instance was solved several times with the same method
-    (e.g. a rerun batch), keep only the LATEST run — ranked by the
-    timestamp+index in the run_id (file name as fallback) — and drop the
-    rest.  Returns (kept_rows, n_dropped).
-    """
-    def _rank(r):
-        m = cs._RUN_ID_RE.match(r.get("run_id") or "")
-        if m:
-            return (m.group("ts"), int(m.group("idx")))
-        return (r.get("_file", ""), 0)
-
-    best = {}
-    n_dup = 0
-    for r in rows:
-        key = (r.get("instance"), r.get("method"), bool(r.get("supervised")))
-        if key in best:
-            n_dup += 1
-            if _rank(r) > _rank(best[key]):
-                best[key] = r
-        else:
-            best[key] = r
-    return list(best.values()), n_dup
+# Dedup lives in compile_solutions so the Excel tables and these figures share
+# one definition of "latest run per (instance, method)".
+_dedup_latest = cs._dedup_latest
 
 
 def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
@@ -140,14 +119,25 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
     and pool the chosen gap metric per (route, customers, window, method)
     cell.
 
+    Runs are split three ways (see compile_solutions.classify_outcome):
+      feasible   -> contributes a gap sample
+      infeasible -> a GENUINE failure (certified plan still fails); counted in
+                    n_infe, drives the infeasibility heat strip
+      unsolved   -> the offline solver never certified the plan (ROBU C&CG did
+                    not converge); counted separately in n_unsl and excluded
+                    from BOTH the gaps and the infeasibility rate, so a
+                    non-converged solve is not mislabelled as infeasible
+
     Returns
     -------
     gaps    : dict[(route, cust, tw, method)] -> list of gaps (%)
-    n_infe  : dict[same key] -> count of infeasible runs (excluded from gaps)
+    n_infe  : dict[same key] -> count of genuinely-infeasible runs
+    n_unsl  : dict[same key] -> count of unsolved (uncertified) runs
     """
     rows = cs.load_solutions(solutions_dir)
     cs._annotate_instance_tags(rows)
     cs._annotate_gap_to_oracle(rows)
+    cs._annotate_outcome(rows)
     rows, n_dup = _dedup_latest(rows)
     if n_dup:
         print(f"  Dropped {n_dup} superseded duplicate run(s) "
@@ -155,6 +145,7 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
 
     gaps   = defaultdict(list)
     n_infe = defaultdict(int)
+    n_unsl = defaultdict(int)
     for r in rows:
         if r.get("status") != "OK":
             continue
@@ -164,22 +155,26 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
         if not (route and cust and tw and method):
             continue
         key = (route, cust, tw, method)
-        if not cs._is_feasible(r):
+        outcome = r.get("outcome")
+        if outcome == "unsolved":
+            n_unsl[key] += 1
+            continue
+        if outcome == "infeasible":
             n_infe[key] += 1
             continue
         g = r.get(metric)
         if g is not None:
             gaps[key].append(100.0 * g)
-    return gaps, n_infe
+    return gaps, n_infe, n_unsl
 
 
-def write_stats_csv(gaps, n_infe, path: str):
+def write_stats_csv(gaps, n_infe, n_unsl, path: str):
     """One row per (route, cust, tw, method): n, mean, std, median, quartiles."""
-    keys = sorted(set(gaps) | set(n_infe))
+    keys = sorted(set(gaps) | set(n_infe) | set(n_unsl))
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["route_class", "customers_class", "window_class", "method",
-                    "n_feasible", "n_infeasible_excluded",
+                    "n_feasible", "n_infeasible_excluded", "n_unsolved_excluded",
                     "gap_mean_%", "gap_std_%", "gap_median_%",
                     "gap_q1_%", "gap_q3_%", "gap_min_%", "gap_max_%"])
         for key in keys:
@@ -189,7 +184,9 @@ def write_stats_csv(gaps, n_infe, path: str):
                           np.median(vals), np.percentile(vals, 25),
                           np.percentile(vals, 75), vals.min(), vals.max())]
                      if len(vals) else [""] * 7)
-            w.writerow(list(key) + [len(vals), n_infe.get(key, 0)] + stats)
+            w.writerow(list(key)
+                       + [len(vals), n_infe.get(key, 0), n_unsl.get(key, 0)]
+                       + stats)
     print(f"  Stats CSV : {path}")
 
 
@@ -264,7 +261,7 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
         raise ValueError(f"unknown kind '{kind}'")
 
 
-def plot_gap_figure(gaps, n_infe, kind: str = "box",
+def plot_gap_figure(gaps, n_infe, n_unsl=None, kind: str = "box",
                     metric: str = "gap_pen", out_dir: str = "figures",
                     annotate_n: bool = True, full_grid: bool = True,
                     layout: str = "row", inner: str = "tw") -> list:
@@ -287,7 +284,14 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
     customer, TW class and method) even where no runs exist yet, so the
     final paper figure is visible from the start; False draws only the
     levels present in the data.
+
+    The infeasibility heat strip below each panel shades the GENUINE
+    infeasibility rate (certified plans that still fail); cells that also hold
+    unsolved (uncertified) runs are marked with a diagonal hatch so a
+    non-converged solve is visually distinct from a true failure.
     """
+    if n_unsl is None:
+        n_unsl = {}
     if full_grid:
         routes, custs, tws, methods = (_ROUTE_ORDER, _CUST_ORDER,
                                        _TW_ORDER, _METHOD_ORDER)
@@ -361,8 +365,14 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
         tops = [v for vals in gaps.values() for v in vals]
     y_top = 1.06 * max(tops) if tops else 1.0
 
-    def _legend(fig, tw_shades: bool = False):
-        """One legend per figure: methods by colour, optionally TW shades."""
+    any_unsolved = any(n_unsl.values())
+
+    def _legend(fig, tw_shades: bool = False, has_unsolved: bool = False):
+        """Single legend row: method colours, then (when ``tw_shades`` is set)
+        a "TW:" lead-in and the four shade swatches keyed T=Tight ... N=None
+        (dark = Tight -> light = None), so the window class is readable from the
+        legend instead of from illegible per-bar axis letters.  Keeping it to
+        ONE row avoids colliding with the centred route titles below."""
         if kind == "bar":
             handles = [Patch(facecolor=_METHOD_COLOR[m], alpha=0.85,
                              label=_METHOD_LBL[m]) for m in methods]
@@ -370,19 +380,24 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
             handles = [Patch(facecolor=_tint(_METHOD_COLOR[m]),
                              edgecolor=_METHOD_COLOR[m],
                              label=_METHOD_LBL[m]) for m in methods]
-        if tw_shades:
-            handles += [Patch(facecolor=_tint("#4d4d4d", _TW_TINT[t]),
-                              edgecolor="#4d4d4d",
-                              label=f"TW {_TW_LBL[t]}") for t in tws]
         if kind == "box":
             handles.append(Line2D([], [], marker="D", linestyle="none",
                                   markerfacecolor=_INK_MUTED,
                                   markeredgecolor="white",
                                   markeredgewidth=0.6, markersize=4.5,
                                   label="mean"))
+        if tw_shades:
+            handles.append(Patch(facecolor="none", edgecolor="none",
+                                 label="   TW:"))    # spacer / row lead-in
+            handles += [Patch(facecolor=_tint("#4d4d4d", _TW_TINT[t]),
+                              edgecolor="#4d4d4d",
+                              label=f"{_TW_SHORT[t]}={_TW_LBL[t]}") for t in tws]
+        if has_unsolved:
+            handles.append(Patch(facecolor="white", edgecolor="#4d4d4d",
+                                 hatch="////", label="not solved"))
         fig.legend(handles=handles, loc="upper center",
-                   ncol=len(handles), frameon=False, fontsize=6.8,
-                   handlelength=1.2, handletextpad=0.5, columnspacing=1.0,
+                   ncol=len(handles), frameon=False, fontsize=6.5,
+                   handlelength=1.1, handletextpad=0.4, columnspacing=0.9,
                    bbox_to_anchor=(0.5, 1.0))
 
     metric_sfx = "" if metric == "gap_pen" else f"_{metric}"
@@ -538,17 +553,14 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
                         for oi in range(n_o)
                         for ii in range(n_i)]
             if inner_is_tw:
-                # a T/M/L/N letter under every slot (methods are the blocks
-                # and carry colour); single letters stay horizontal — at
-                # this slot pitch any rotation makes glyphs collide
-                slot_lbl = [_TW_SHORT[tws[ii]]
-                            for _ in range(len(custs) * n_o)
-                            for ii in range(n_i)]
+                # Per-bar T/M/L/N letters are illegible at this slot pitch
+                # (up to 60 bars/panel), so the TW class is read from the bar
+                # SHADE keyed in the legend instead.  Keep only faint tick
+                # guides at each slot — no crowded per-bar text.
                 ax.set_xticks(slot_pos)
-                ax.set_xticklabels(slot_lbl)
-                ax.tick_params(axis="x", length=1.8, width=0.5, pad=1.5,
-                               color=_INK_MUTED,
-                               labelsize=6.0, labelcolor=_INK_PRIMARY)
+                ax.set_xticklabels([])
+                ax.tick_params(axis="x", length=1.8, width=0.5,
+                               color=_INK_MUTED)
                 # faint vertical guide from every tick to the top border
                 ax.grid(True, axis="x", color="#ececec", lw=0.35, zorder=0)
             else:
@@ -590,12 +602,22 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
                     for ii, iv in enumerate(inner_list):
                         m, tw = (ov, iv) if inner_is_tw else (iv, ov)
                         frac = _infeas_frac(route, cust, tw, m)
-                        if frac is None:
+                        n_u  = n_unsl.get((route, cust, tw, m), 0)
+                        if frac is None and not n_u:
                             continue        # not run -> leave blank
+                        # base colour: green->red over the GENUINE infeas rate;
+                        # a cell that is only unsolved (frac is None) stays light
+                        face = (_reds(min(1.0, frac / _fmax))
+                                if frac is not None else "#f2f2f2")
                         axst.add_patch(_Rect(
                             (_x(ci, oi, ii) - 0.46, 0.30), 0.92, 0.60,
-                            facecolor=_reds(min(1.0, frac / _fmax)),
+                            facecolor=face,
                             edgecolor="#8a8a8a", lw=0.35, zorder=3))
+                        if n_u:                       # uncertified solves: hatch
+                            axst.add_patch(_Rect(
+                                (_x(ci, oi, ii) - 0.46, 0.30), 0.92, 0.60,
+                                facecolor="none", edgecolor="#4d4d4d",
+                                lw=0.0, hatch="////", zorder=4))
             # customer-class labels sit UNDER the strip (no overlap now)
             centers = [ci * grp + (n_o * blk - gap_b - 1) / 2
                        for ci in range(len(custs))]
@@ -623,7 +645,9 @@ def plot_gap_figure(gaps, n_infe, kind: str = "box",
             ax.tick_params(labelleft=False)
         main_axes[0].set_ylabel("Gap to oracle (%)", fontsize=8,
                                 color=_INK_PRIMARY)
-        _legend(fig)     # TW classes are labelled on the axis, not the legend
+        # inner="tw": TW is read from the shade key in the legend; inner=
+        # "method": TW is the on-axis block, so no shade key needed.
+        _legend(fig, tw_shades=inner_is_tw, has_unsolved=any_unsolved)
         fig.tight_layout(rect=(0, 0.0, 1, 0.90))
 
         # compact colour key, tucked to the right of the strip row
@@ -686,20 +710,26 @@ if __name__ == "__main__":
                              "'grid' = 3x3 facet grid")
     args = parser.parse_args()
 
-    gaps, n_infe = collect_gaps(args.dir, metric=args.metric)
+    gaps, n_infe, n_unsl = collect_gaps(args.dir, metric=args.metric)
 
     n_groups = len(gaps)
     n_runs   = sum(len(v) for v in gaps.values())
     n_exc    = sum(n_infe.values())
+    n_uns    = sum(n_unsl.values())
     print(f"  Pooled {n_runs} feasible run(s) into {n_groups} "
-          f"(family x method) group(s); excluded {n_exc} infeasible run(s)")
+          f"(family x method) group(s); excluded {n_exc} infeasible and "
+          f"{n_uns} unsolved (uncertified) run(s)")
     for key in sorted(n_infe):
         if n_infe[key]:
             print(f"    excluded {n_infe[key]:>2} infeasible: "
                   f"{'/'.join(key[:3])} [{key[3]}]")
+    for key in sorted(n_unsl):
+        if n_unsl[key]:
+            print(f"    excluded {n_unsl[key]:>2} unsolved  : "
+                  f"{'/'.join(key[:3])} [{key[3]}]")
 
     os.makedirs(args.out_dir, exist_ok=True)
-    write_stats_csv(gaps, n_infe,
+    write_stats_csv(gaps, n_infe, n_unsl,
                     os.path.join(args.out_dir, "paper_gap_stats.csv"))
 
     if args.all:
@@ -709,7 +739,7 @@ if __name__ == "__main__":
                   else [args.kind])
         combos = [(k, args.inner) for k in kinds]
     for kind, inner in combos:
-        for p in plot_gap_figure(gaps, n_infe, kind=kind,
+        for p in plot_gap_figure(gaps, n_infe, n_unsl, kind=kind,
                                  metric=args.metric, out_dir=args.out_dir,
                                  full_grid=not args.present_only,
                                  layout=args.layout, inner=inner):

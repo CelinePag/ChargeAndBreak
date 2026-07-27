@@ -166,6 +166,59 @@ def _scen_key(up_legs: set, down_legs: set) -> tuple:
     return (tuple(sorted(up_legs)), tuple(sorted(down_legs)))
 
 
+def _seed_scenarios(full_data: dict, tab: dict, gamma: int) -> list:
+    """Plan-independent worst-case vertices used to PRIME the scenario set.
+
+    Starting the cutting-plane loop from the nominal scenario alone forces the
+    first master to build a plan with no robustness margin, so the adversary
+    then has to teach it every worst case one feasibility cut at a time — the
+    dominant cost on medium/long routes, where each master solve is expensive.
+    Priming with the globally slowest-Gamma legs (latest arrival / tightest
+    HoS) and the hungriest-Gamma legs (deepest SOC draw) means the very first
+    plan already anticipates the extreme time and energy realisations, so far
+    fewer iterations are needed.
+
+    Each returned (up, down) pair is a genuine vertex of U_Gamma, so seeding
+    only makes the plan more robust — it can never make it wrong.  Kept to a
+    handful so the first extensive-form master stays tractable on long routes.
+    """
+    all_legs = list(range(full_data["N"]))
+    slow   = _top_legs(all_legs, tab["D_hat"], gamma)   # latest arrival / HoS
+    hungry = _top_legs(all_legs, tab["E_hat"], gamma)   # deepest SOC draw
+    seeds = []
+    for up, down in ((slow, set()), (set(), hungry), (slow, hungry)):
+        if up or down:
+            seeds.append((up, down))
+    return seeds
+
+
+def _apply_warmstart(model, fs: dict):
+    """Prime a freshly built master's first-stage variables with the previous
+    iteration's plan, so Gurobi begins from a known-good incumbent (MIP start).
+
+    Only the first-stage binaries and shared durations are set; the newly added
+    scenario's second stage is left for the solver to fill (Gurobi accepts a
+    partial start).  Best-effort — any index mismatch is swallowed so a warm
+    start can never block a solve."""
+    def _set(var, idx, val):
+        try:
+            var[idx].value = val
+        except Exception:
+            pass
+
+    for k in ("y", "x_b45", "x_b15", "x_b30", "rho1", "rho2",
+              "phi", "z", "q_ext"):
+        var = getattr(model, k, None)
+        if var is not None:
+            for i, v in fs.get(k, {}).items():
+                _set(var, i, v)
+    for k in ("tauc", "taub", "taur", "sigma"):
+        var = getattr(model, k, None)
+        if var is not None:
+            for i, v in fs.get(k, {}).items():
+                _set(var, (i, 0), v)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PESSIMIZATION — CANDIDATE GENERATION (greedy vertices per constraint family)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -344,11 +397,14 @@ def run_robu(full_data: dict,
              E_real: list,
              cv: float         = TRAVEL_TIME_CV,
              time_limit: int   = 2 * 3600,
+             wall_limit: int | None = None,
              mip_gap: float    = 0.005,
              eps: float        = ROBU_EPS_DEFAULT,
              gamma: int | None = None,
              max_iter: int     = ROBU_MAX_ITER_DEFAULT,
              max_cuts: int     = ROBU_MAX_CUTS_PER_IT,
+             seed_scenarios: bool = True,
+             warmstart: bool   = True,
              tee: bool         = True,
              verbose: bool     = True,
              run_id: str       = None,
@@ -368,6 +424,15 @@ def run_robu(full_data: dict,
     max_iter : maximum robustification–pessimization iterations
     max_cuts : violated scenarios appended per iteration (feasibility cuts)
     time_limit / mip_gap : per master solve (same role as in run_ro)
+    wall_limit : total solve wall-clock budget (s) across ALL iterations; the
+               loop stops before a master that would exceed it, returning the
+               best plan so far (robu_converged=False → reported as "unsolved",
+               not infeasible).  None → 2·time_limit.  Prevents the runaway
+               multi-hour solves seen on medium/long routes.
+    seed_scenarios : prime the scenario set with plan-independent worst-case
+               vertices so fewer feasibility-cut iterations are needed
+    warmstart : feed each master the previous iteration's plan as a Gurobi MIP
+               start (consecutive masters differ only by appended scenarios)
 
     Returns
     -------
@@ -385,6 +450,8 @@ def run_robu(full_data: dict,
     if gamma is None:
         gamma = classic_gamma(N, eps)
     gamma = int(min(max(1, gamma), N))
+    if wall_limit is None:
+        wall_limit = 2 * time_limit
 
     for d in ("logs", "figures", "solutions"):
         os.makedirs(d, exist_ok=True)
@@ -415,9 +482,20 @@ def run_robu(full_data: dict,
     tab      = _leg_tables(full_data)
     scen_set = [_nominal_scenario(full_data)]
     scen_keys = {_scen_key(set(), set())}
+    if seed_scenarios:
+        for up, down in _seed_scenarios(full_data, tab, gamma):
+            key = _scen_key(up, down)
+            if key not in scen_keys:
+                scen_set.append(_make_scenario(tab, N, up, down))
+                scen_keys.add(key)
+        _p(f"  Primed scenario set: {len(scen_set)} vertices "
+           f"(nominal + {len(scen_set) - 1} worst-case).")
+    _p(f"  Budget wall-clock limit: {wall_limit}s "
+       f"(<= {time_limit}s per master solve).")
 
     theta = None
     plan  = None
+    prev_fs = None
     converged   = False
     n_cuts_feas = 0
     n_cuts_opt  = 0
@@ -427,11 +505,25 @@ def run_robu(full_data: dict,
     for it in range(1, max_iter + 1):
         # ── Robustification: min-max over the scenario set found so far ──────
         t0 = time.perf_counter()
+        elapsed = time.perf_counter() - t_wall_start
+        remaining = wall_limit - elapsed
+        # keep enough headroom for a certification pass + plan execution; stop
+        # cleanly (with the best plan so far) rather than overrun the budget
+        if plan is not None and remaining < ROBU_EVAL_TIME_LIMIT:
+            _p(f"  [it {it}] wall-clock budget spent "
+               f"({elapsed:.0f}s / {wall_limit}s) — stopping with the "
+               f"iteration-{it - 1} plan (robu_converged=False).")
+            break
+        master_tl = int(max(ROBU_EVAL_TIME_LIMIT, min(time_limit, remaining)))
         model = _twosp.build_2sp_model(full_data, scen_set, objective="max",
                                        share_durations=True)
+        do_warm = warmstart and prev_fs is not None
+        if do_warm:
+            _apply_warmstart(model, prev_fs)
         try:
-            info, status = _twosp.solve_2sp(model, time_limit=time_limit,
-                                            mip_gap=mip_gap, tee=tee)
+            info, status = _twosp.solve_2sp(model, time_limit=master_tl,
+                                            mip_gap=mip_gap, tee=tee,
+                                            warmstart=do_warm, heuristics=0.2)
         except (ValueError, RuntimeError) as e:
             # Master hit the time limit with NO incumbent (Pyomo 'aborted').
             t_master = time.perf_counter() - t0
@@ -462,6 +554,7 @@ def run_robu(full_data: dict,
         theta = info["obj"]
         plan  = _twosp.extract_2sp_full_schedule(model, full_data)
         fs    = _extract_first_stage(model, full_data)
+        prev_fs = fs                       # MIP start for the next master
         _p(f"  [it {it}] master: |scen|={len(scen_set)}  theta={theta:.3f}h  "
            f"status={status}  ({t_master:.1f}s)")
 
@@ -578,6 +671,9 @@ def run_robu(full_data: dict,
             robu_converged = converged,
             robu_cuts_feas = n_cuts_feas,
             robu_cuts_opt  = n_cuts_opt,
+            robu_seeded    = bool(seed_scenarios),
+            robu_warmstart = bool(warmstart),
+            robu_wall_limit= wall_limit,
             ro_obj         = theta,
             robu_certified_obj = worst_certified,
             ro_status      = info.get("status"),

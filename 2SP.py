@@ -609,14 +609,40 @@ def build_2sp_model(data: dict, scenarios: list[dict],
 def solve_2sp(model: pyo.ConcreteModel,
               time_limit: int = 2 * 3600,
               mip_gap: float  = 0.005,
-              tee: bool       = True) -> tuple[dict, str]:
-    """Solve the 2SP extensive form with Gurobi."""
+              tee: bool       = True,
+              warmstart: bool = False,
+              heuristics: float | None = None,
+              mip_focus: int | None    = None,
+              extra_options: dict | None = None) -> tuple[dict, str]:
+    """Solve the 2SP extensive form with Gurobi.
+
+    warmstart=True feeds the model's current variable values to Gurobi as a MIP
+    start (used by the ROBU cutting-plane loop, where consecutive masters differ
+    only by a few appended scenarios, so the previous plan is an excellent
+    incumbent).
+
+    Performance knobs for the hard long-route solves (all default None → Gurobi
+    defaults, so behaviour is unchanged unless set):
+      heuristics    fraction of runtime spent on incumbent heuristics (Gurobi
+                    'Heuristics'); raising it to ~0.2 finds good feasible plans
+                    sooner, which is what matters when the time limit — not
+                    optimality — is binding.  The oracle already uses 0.2.
+      mip_focus     Gurobi 'MIPFocus' (1 = find feasible solutions fast,
+                    2 = prove optimality, 3 = improve the bound).
+      extra_options any further Gurobi option → value overrides.
+    """
     solver = pyo.SolverFactory("gurobi")
     solver.options["MIPGap"]    = mip_gap
     solver.options["TimeLimit"] = time_limit
+    if heuristics is not None:
+        solver.options["Heuristics"] = heuristics
+    if mip_focus is not None:
+        solver.options["MIPFocus"] = mip_focus
+    for k, v in (extra_options or {}).items():
+        solver.options[k] = v
 
     try:
-        res    = _solve_quiet(solver, model, tee=tee)
+        res    = _solve_quiet(solver, model, tee=tee, warmstart=warmstart)
         status = str(res.solver.termination_condition)
     except RuntimeError:
         return dict(feasible=False, optimal=False,
@@ -632,6 +658,66 @@ def solve_2sp(model: pyo.ConcreteModel,
     obj_val = pyo.value(model.obj)
     return dict(feasible=True, optimal=is_optimal,
                 obj=obj_val, status=status), status
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WARM-START HELPERS (shared by RO / 2SP / ROBU seeding)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def extract_first_stage(model: pyo.ConcreteModel, data: dict) -> dict:
+    """First-stage decisions of a solved (share_durations) model — the binaries
+    plus the shared durations at scenario index 0 — as a plain dict, for reuse
+    as a Gurobi MIP start on a related model with the same first stage."""
+    K_set = set(data["K"])
+    I     = list(data["I"])
+
+    def _b(var, i):
+        try:    return int(round(pyo.value(var[i])))
+        except Exception: return 0
+
+    def _f(var, idx):
+        try:    return max(0.0, float(pyo.value(var[idx])))
+        except Exception: return 0.0
+
+    return dict(
+        y     = {i: _b(model.y, i) for i in K_set},
+        x_b45 = {i: _b(model.x_b45, i) for i in I},
+        x_b15 = {i: _b(model.x_b15, i) for i in I},
+        x_b30 = {i: _b(model.x_b30, i) for i in I},
+        rho1  = {i: _b(model.rho1, i) for i in I},
+        rho2  = {i: _b(model.rho2, i) for i in I},
+        phi   = {i: _b(model.phi, i) for i in I},
+        z     = {i: _b(model.z, i) for i in I},
+        q_ext = {i: _b(model.q_ext, i) for i in I},
+        tauc  = {i: _f(model.tauc, (i, 0)) for i in K_set},
+        taub  = {i: _f(model.taub, (i, 0)) for i in I},
+        taur  = {i: _f(model.taur, (i, 0)) for i in I},
+        sigma = {i: _b(model.sigma, (i, 0)) for i in K_set},
+    )
+
+
+def apply_first_stage_warmstart(model: pyo.ConcreteModel, fs: dict):
+    """Prime a freshly built model's first-stage variables from ``fs`` so Gurobi
+    starts from that plan as a MIP start.  Best-effort: any index/attr mismatch
+    is swallowed, so a warm start can never block a solve.  The added model's
+    second stage is left for the solver (Gurobi accepts a partial start)."""
+    def _set(var, idx, val):
+        try:
+            var[idx].value = val
+        except Exception:
+            pass
+
+    for k in ("y", "x_b45", "x_b15", "x_b30", "rho1", "rho2",
+              "phi", "z", "q_ext"):
+        var = getattr(model, k, None)
+        if var is not None:
+            for i, v in fs.get(k, {}).items():
+                _set(var, i, v)
+    for k in ("tauc", "taub", "taur", "sigma"):
+        var = getattr(model, k, None)
+        if var is not None:
+            for i, v in fs.get(k, {}).items():
+                _set(var, (i, 0), v)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -746,6 +832,9 @@ def run_2sp(full_data: dict,
             scenario_seed              = None,
             time_limit: int   = 2 * 3600,
             mip_gap: float    = 0.005,
+            heuristics: float | None = 0.2,
+            mip_focus: int | None    = None,
+            warmstart_seed: bool = False,
             tee: bool         = True,
             verbose: bool     = True,
             run_id: str       = None,
@@ -839,9 +928,34 @@ def run_2sp(full_data: dict,
     _p(f"\n  Building 2SP extensive form (S={len(scenarios)}, N={N})...")
     model = build_2sp_model(full_data, scenarios)
 
-    _p(f"  Solving...")
+    # Optional warm start: solve the cheap single NOMINAL-scenario model first
+    # (same first-stage structure, a fraction of the extensive form's size) and
+    # feed its plan to the full model as a Gurobi MIP start.  A short cap keeps
+    # the seed from eating the budget; it only ever adds a starting incumbent,
+    # so it cannot worsen the result.  Off by default — worthwhile on the hard
+    # long-route instances, wasteful on the ones that already solve fast.
     t_solve = time.perf_counter()
-    info, status = solve_2sp(model, time_limit=time_limit, mip_gap=mip_gap, tee=True)
+    if warmstart_seed:
+        seed_cap = int(max(60, min(time_limit // 6, 600)))
+        _p(f"  Warm-start seed: solving nominal 1-scenario model "
+           f"(<= {seed_cap}s)...")
+        nominal = [dict(D=dict(full_data["D"]), E=dict(full_data["E"]))]
+        seed_model = build_2sp_model(full_data, nominal)
+        s_info, s_status = solve_2sp(seed_model, time_limit=seed_cap,
+                                     mip_gap=mip_gap, tee=False,
+                                     heuristics=heuristics, mip_focus=1)
+        if s_info["feasible"]:
+            apply_first_stage_warmstart(model, extract_first_stage(seed_model,
+                                                                   full_data))
+            _p(f"  Warm-start seed ready ({s_status}); priming full solve.")
+        else:
+            _p(f"  Warm-start seed found no plan ({s_status}); "
+               f"solving cold.")
+
+    _p(f"  Solving...")
+    info, status = solve_2sp(model, time_limit=time_limit, mip_gap=mip_gap,
+                             tee=True, warmstart=warmstart_seed,
+                             heuristics=heuristics, mip_focus=mip_focus)
     t_solve = time.perf_counter() - t_solve
 
     _p(f"  Status     : {status}  ({t_solve:.1f}s)")
@@ -913,6 +1027,8 @@ def run_2sp(full_data: dict,
             twosp_obj     = info["obj"],
             twosp_status  = status,
             twosp_optimal = info["optimal"],
+            twosp_warmstart_seed = bool(warmstart_seed),
+            twosp_heuristics     = heuristics,
             solve_time    = t_solve,
             supervised    = supervised,
             prune_quantile= prune_quantile,

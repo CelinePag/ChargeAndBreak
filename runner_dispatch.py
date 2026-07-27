@@ -164,12 +164,19 @@ def run_algorithm(
     robu_eps: float        = 0.01,
     robu_gamma: Optional[int] = None,
     robu_max_iter: int     = 12,
+    robu_wall_limit: Optional[int] = None,   # total C&CG budget (s); None=2*master
+    robu_seed_scenarios: bool = True,
+    robu_warmstart: bool   = True,
     # greedy options
     safety_buffer: float             = 0.0,
     queue_threshold: Optional[float] = None,   # deprecated, ignored
     # 2SP options
     twosp_time_limit: int  = 7200,
     twosp_mip_gap: float   = 0.005,
+    twosp_warmstart_seed: bool = False,
+    # shared MILP solver tuning (RO / 2SP); None → Gurobi defaults
+    milp_heuristics: Optional[float] = 0.2,
+    milp_mip_focus: Optional[int]    = None,
     # common
     verbose: bool          = True,
     oracle_tee: bool       = False,
@@ -271,6 +278,9 @@ def run_algorithm(
             cv                = cv,
             time_limit        = twosp_time_limit,
             mip_gap           = twosp_mip_gap,
+            heuristics        = milp_heuristics,
+            mip_focus         = milp_mip_focus,
+            warmstart_seed    = twosp_warmstart_seed,
             tee               = False,
             verbose           = verbose,
             run_id            = run_id,
@@ -303,10 +313,13 @@ def run_algorithm(
             E_real     = E_real,
             cv         = cv,
             time_limit = ro_time_limit,
+            wall_limit = robu_wall_limit,
             mip_gap    = ro_mip_gap,
             eps        = robu_eps,
             gamma      = robu_gamma,
             max_iter   = robu_max_iter,
+            seed_scenarios = robu_seed_scenarios,
+            warmstart  = robu_warmstart,
             tee        = False,
             verbose    = verbose,
             run_id     = run_id,
@@ -324,6 +337,8 @@ def run_algorithm(
             cv         = cv,
             time_limit = ro_time_limit,
             mip_gap    = ro_mip_gap,
+            heuristics = milp_heuristics,
+            mip_focus  = milp_mip_focus,
             tee        = False,
             verbose    = verbose,
             run_id     = run_id,
@@ -700,10 +715,41 @@ if __name__ == "__main__":
     parser.add_argument("--robu_max_iter",type=int,   default=12,
                         help="Max C&CG robustification-pessimization "
                              "iterations.")
+    parser.add_argument("--robu_wall_limit", type=int, default=None,
+                        help="Total C&CG wall-clock budget (s) across all "
+                             "iterations; the loop stops before a master that "
+                             "would exceed it and returns the best plan so far "
+                             "(reported as 'unsolved', not infeasible). "
+                             "Default: 2x --ro_time_limit.")
+    parser.add_argument("--robu_no_seed", dest="robu_seed_scenarios",
+                        action="store_false", default=True,
+                        help="Disable priming the scenario set with worst-case "
+                             "vertices (start from nominal only).")
+    parser.add_argument("--robu_no_warmstart", dest="robu_warmstart",
+                        action="store_false", default=True,
+                        help="Disable feeding each master the previous plan as "
+                             "a Gurobi MIP start.")
 
     # 2SP
     parser.add_argument("--twosp_time_limit", type=int,   default=7200)
     parser.add_argument("--twosp_mip_gap",    type=float, default=0.005)
+    parser.add_argument("--twosp_warmstart_seed", action="store_true",
+                        default=False,
+                        help="2SP: solve the cheap nominal 1-scenario model "
+                             "first and feed its plan to the full extensive "
+                             "form as a Gurobi MIP start (helps hard long "
+                             "routes; wasteful on fast instances).")
+    # shared MILP tuning (RO / 2SP master solves)
+    parser.add_argument("--milp_heuristics", type=float, default=0.2,
+                        help="Gurobi 'Heuristics' fraction for the RO/2SP "
+                             "solves (default 0.2, as the oracle uses). Higher "
+                             "finds good incumbents sooner on long routes; "
+                             "pass a negative value to leave Gurobi's default.")
+    parser.add_argument("--milp_mip_focus", type=int, default=None,
+                        choices=[0, 1, 2, 3],
+                        help="Gurobi 'MIPFocus' for RO/2SP (1=find feasible "
+                             "fast, 2=prove optimality, 3=improve bound). "
+                             "Default: Gurobi's balanced default.")
 
     # Greedy
     parser.add_argument("--safety",       type=float, default=0.10)
@@ -747,10 +793,18 @@ if __name__ == "__main__":
         robu_eps         = args.robu_eps,
         robu_gamma       = args.robu_gamma,
         robu_max_iter    = args.robu_max_iter,
+        robu_wall_limit     = args.robu_wall_limit,
+        robu_seed_scenarios = args.robu_seed_scenarios,
+        robu_warmstart      = args.robu_warmstart,
         safety_buffer    = args.safety,
         queue_threshold  = args.queue_thresh,
         twosp_time_limit = args.twosp_time_limit,
         twosp_mip_gap    = args.twosp_mip_gap,
+        twosp_warmstart_seed = args.twosp_warmstart_seed,
+        milp_heuristics  = (None if (args.milp_heuristics is not None
+                                     and args.milp_heuristics < 0)
+                            else args.milp_heuristics),
+        milp_mip_focus   = args.milp_mip_focus,
         verbose          = not args.quiet,
         oracle_tee       = args.oracle_tee,
         m_man_h          = args.m_man,

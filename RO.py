@@ -96,6 +96,8 @@ def run_ro(full_data: dict,
            cv: float         = TRAVEL_TIME_CV,
            time_limit: int   = 2 * 3600,
            mip_gap: float    = 0.005,
+           heuristics: float | None = 0.2,
+           mip_focus: int | None    = None,
            tee: bool         = True,
            verbose: bool     = True,
            run_id: str       = None,
@@ -170,7 +172,8 @@ def run_ro(full_data: dict,
     model = _twosp.build_2sp_model(full_data, scen_set, objective="max",
                                    share_durations=True)
     info, status = _twosp.solve_2sp(model, time_limit=time_limit,
-                                    mip_gap=mip_gap, tee=tee)
+                                    mip_gap=mip_gap, tee=tee,
+                                    heuristics=heuristics, mip_focus=mip_focus)
     t_solve_total = time.perf_counter() - t0
     _p(f"  Solve status={status}  ({t_solve_total:.1f}s)")
 

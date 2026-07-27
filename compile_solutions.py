@@ -68,10 +68,12 @@ _ALT_ROW_BG  = "D6E4F0"   # light blue
 _SUMMARY_BG  = "E2EFDA"   # light green
 _BORDER_COL  = "B8CCE4"
 
-_INFEASIBLE_BG = "FFC7CE"   # red   — solver explicitly proved infeasible
+_INFEASIBLE_BG = "FFC7CE"   # red   — true infeasibility (certified plan fails)
 _INFEASIBLE_FG = "9C0006"
 _INCOMPLETE_BG = "FFEB9C"   # amber — run never finished, reason unknown
 _INCOMPLETE_FG = "9C6500"
+_UNSOLVED_BG   = "FCE4D6"   # peach — plan not certified (solver did not finish)
+_UNSOLVED_FG   = "833C00"
 _ALLFAIL_BG    = "FFC7CE"   # summary row where every run in the group failed
 _SOMEFAIL_BG   = "FFEB9C"   # summary row where some (not all) runs failed
 
@@ -83,6 +85,8 @@ _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 # anything else => numeric (percent formats show the stored fraction as %).
 _COLS = [
     ("status",           ("status",),                                     "@",     12),
+    ("outcome",          ("outcome",),                                    "@",     14),
+    ("solve_status",     ("solve_status",),                               "@",     12),
     ("run_id",           ("run_id",),                                     "@",     38),
     ("instance",         ("instance",),                                   "@",     22),
     ("route_class",      ("route_class",),                                "@",     11),
@@ -329,6 +333,34 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
     return rows
 
 
+def _dedup_latest(rows: list[dict]) -> tuple[list[dict], int]:
+    """
+    When the same instance was solved several times with the same method
+    (e.g. a rerun batch), keep only the LATEST run — ranked by the
+    timestamp+index in the run_id (file name as fallback) — and drop the
+    rest.  Keyed on (instance, method, supervised) so supervised and
+    unsupervised runs of the same instance/method are kept separately.
+    Returns (kept_rows, n_dropped).
+    """
+    def _rank(r):
+        m = _RUN_ID_RE.match(r.get("run_id") or "")
+        if m:
+            return (m.group("ts"), int(m.group("idx")))
+        return (r.get("_file", ""), 0)
+
+    best: dict = {}
+    n_dup = 0
+    for r in rows:
+        key = (r.get("instance"), r.get("method"), bool(r.get("supervised")))
+        if key in best:
+            n_dup += 1
+            if _rank(r) > _rank(best[key]):
+                best[key] = r
+        else:
+            best[key] = r
+    return list(best.values()), n_dup
+
+
 def _annotate_instance_tags(rows: list[dict]):
     """Add route_class / customers_class / window_class keys parsed from the
     instance id (e.g. "RshortCfewTtight_1" -> short / few / tight)."""
@@ -396,6 +428,101 @@ def _is_supervised(r):  return bool(r.get("supervised"))
 def _is_feasible(r):    return not bool(_get(r, ("metrics", "run_infeasible")))
 
 
+# ── outcome classification ───────────────────────────────────────────────────
+# Two independent axes are recorded per run so the paper never conflates a
+# solver that ran out of time with a plan that genuinely fails:
+#
+#   solve_status  — did the OFFLINE optimiser finish?  "optimal" (proven /
+#                   C&CG-converged), "time_limit" (valid incumbent returned but
+#                   optimality not proven), or "n/a" for the online policies
+#                   (greedy, LA), which have no offline optimum to prove.
+#
+#   outcome       — feasibility of the EXECUTED plan, but only counted as a
+#                   genuine method failure when the plan was a certified output:
+#                     "feasible"          simulated run respects every constraint
+#                     "infeasible"        run fails AND the plan was certified,
+#                                         so the failure is the method's own
+#                                         (true infeasibility / out-of-set
+#                                         realisation)
+#                     "unsolved"          run fails but the offline solve never
+#                                         certified the plan (ROBU C&CG did not
+#                                         converge) — the failure is a solve
+#                                         artifact, NOT a true infeasibility
+#                     "solver_infeasible" solver proved the model infeasible
+#                                         (recovered from logs/)
+#                     "incomplete"        crashed / interrupted (from logs/)
+
+def _solver_optimal(r):
+    """True/False when the offline optimiser's optimality is defined for this
+    method (RO, 2SP, ROBU), else None for the online policies.
+
+    ROBU is optimal only when the C&CG loop converged AND the final master was
+    proven optimal; a converged-but-time-limited master is a valid robust plan
+    but not a proven optimum, so it reads as time-limited."""
+    m = r.get("method")
+    if m == "RO":
+        return bool(r.get("ro_optimal"))
+    if m == "2SP":
+        return bool(r.get("twosp_optimal"))
+    if m == "ROBU":
+        return bool(r.get("robu_converged")) and bool(r.get("ro_optimal"))
+    return None
+
+
+def _plan_certified(r):
+    """Is the executed plan a feasibility-complete output of the method, so that
+    a simulated failure is the method's own rather than a solve artifact?
+
+    RO / 2SP incumbents always satisfy their own model's constraints (the time
+    limit costs optimality, not feasibility), so their failures are genuine.
+    ROBU's plan is certified only when the cutting-plane loop converged; a
+    non-converged plan still has outstanding feasibility cuts, so its stranding
+    is an artifact of the aborted solve.  Online policies always execute a
+    genuine plan."""
+    if r.get("method") == "ROBU":
+        return bool(r.get("robu_converged"))
+    return True
+
+
+def _solve_status(r):
+    opt = _solver_optimal(r)
+    if opt is None:
+        return "n/a"
+    return "optimal" if opt else "time_limit"
+
+
+def classify_outcome(r):
+    st = r.get("status")
+    if st == "INFEASIBLE":
+        return "solver_infeasible"
+    if st != "OK":
+        return "incomplete"
+    # An uncertified plan (ROBU C&CG did not converge) is not a valid method
+    # result at all: whether or not this particular realisation happened to
+    # survive, neither its feasibility nor its (optimistic, under-cut) gap
+    # should be reported as the method's — it is simply unsolved.
+    if not _plan_certified(r):
+        return "unsolved"
+    if _get(r, ("metrics", "run_infeasible")):
+        return "infeasible"
+    return "feasible"
+
+
+def _annotate_outcome(rows: list[dict]):
+    """Attach solve_status and outcome to every run (used by the sheets, the
+    LaTeX tables, and paper_figures)."""
+    for r in rows:
+        r["solve_status"] = _solve_status(r)
+        r["outcome"]      = classify_outcome(r)
+
+
+def _is_truly_infeasible(r):  return r.get("outcome") == "infeasible"
+def _is_unsolved(r):          return r.get("outcome") == "unsolved"
+def _gap_usable(r):
+    """A run contributes a gap only when it produced a feasible executed plan."""
+    return r.get("outcome") == "feasible"
+
+
 def _method_group(r):
     """Canonical method bucket for the gap-table columns."""
     m = r.get("method")
@@ -425,10 +552,12 @@ def _style_header(cell, bg=_HEADER_BG, fg=_HEADER_FG):
 
 
 def _style_data(cell, row_idx: int, num_fmt: str, status: str):
-    if status == "INFEASIBLE":
+    if status in ("INFEASIBLE", "infeasible"):
         bg, fg = _INFEASIBLE_BG, _INFEASIBLE_FG
     elif status == "INCOMPLETE":
         bg, fg = _INCOMPLETE_BG, _INCOMPLETE_FG
+    elif status == "unsolved":
+        bg, fg = _UNSOLVED_BG, _UNSOLVED_FG
     else:
         bg, fg = (_ALT_ROW_BG if row_idx % 2 == 0 else "FFFFFF"), "000000"
     cell.fill      = PatternFill("solid", start_color=bg)
@@ -449,7 +578,10 @@ def build_results_sheet(ws, rows: list[dict]):
     ws.row_dimensions[1].height = 30
 
     for row_idx, rec in enumerate(rows, start=2):
-        status = rec.get("status", "OK")
+        # rows that finished carry their outcome (feasible/infeasible/unsolved)
+        # into the colour; only unfinished runs keep the log-derived status
+        status = (rec.get("outcome", "feasible") if rec.get("status") == "OK"
+                  else rec.get("status", "OK"))
         for col_idx, (_, path, num_fmt, _) in enumerate(_COLS, start=1):
             raw = _get(rec, path)
             if num_fmt == "@":
@@ -473,16 +605,16 @@ def build_summary_sheet(ws, rows: list[dict]):
 
     headers = [
         "instance_family", "route_class", "customers_class", "window_class", "method",
-        "n_runs", "n_failed", "n_infeasible",
+        "n_runs", "n_failed", "n_infeasible", "n_unsolved", "n_time_limit",
         "duration_h mean", "oracle_dur_h mean",
         "gap_pen_% mean (feas)", "gap_nopen_% mean (feas)",
         "tw_misses mean", "tw_hit_rate mean",
         "hos_viol_rate", "stranding_rate", "repair_rate",
         "decision_mean_s mean", "offline_solve_s mean", "method_time_s mean",
     ]
-    col_widths = [22, 11, 13, 12, 9, 8, 9, 12,
+    col_widths = [22, 11, 13, 12, 9, 8, 9, 12, 11, 12,
                   16, 16, 19, 20, 13, 15, 13, 14, 12, 18, 18, 18]
-    num_fmts   = ["@", "@", "@", "@", "@", "0", "0", "0",
+    num_fmts   = ["@", "@", "@", "@", "@", "0", "0", "0", "0", "0",
                   "0.000", "0.000", "0.00%", "0.00%", "0.0", "0.0%",
                   "0.0%", "0.0%", "0.0%",
                   "0.0000", "0.0", "0.0"]
@@ -498,24 +630,29 @@ def build_summary_sheet(ws, rows: list[dict]):
 
     for ri, ((family, method), recs) in enumerate(sorted(groups.items()), start=2):
         ok_recs = [r for r in recs if _is_ok(r)]
-        feas    = [r for r in ok_recs if _is_feasible(r)]
-        n_runs   = len(recs)
-        n_failed = n_runs - len(ok_recs)
-        n_infeas = sum(1 for r in ok_recs if not _is_feasible(r))
+        feas    = [r for r in ok_recs if _gap_usable(r)]
+        # runs whose plan was actually certified — the denominator for the
+        # robustness rates, so ROBU's non-converged strandings do not pollute it
+        solved  = [r for r in ok_recs if not _is_unsolved(r)]
+        n_runs     = len(recs)
+        n_failed   = n_runs - len(ok_recs)
+        n_infeas   = sum(1 for r in ok_recs if _is_truly_infeasible(r))
+        n_unsolved = sum(1 for r in ok_recs if _is_unsolved(r))
+        n_tlimit   = sum(1 for r in ok_recs if r.get("solve_status") == "time_limit")
 
         tags = _parse_instance_tags(family)
         data_row = [
             family, tags["route_class"], tags["customers_class"], tags["window_class"],
-            method, n_runs, n_failed, n_infeas,
+            method, n_runs, n_failed, n_infeas, n_unsolved, n_tlimit,
             _mean([_safe_float(_get(r, ("duration_h",))) for r in ok_recs]),
             _mean([r.get("oracle_duration_h") for r in ok_recs]),
             _mean([r.get("gap_pen") for r in feas]),
             _mean([r.get("gap_nopen") for r in feas]),
             _mean([_mval(r, "tw_n_misses") for r in ok_recs]),
             _mean([_mval(r, "tw_hit_rate") for r in ok_recs]),
-            _rate(ok_recs, lambda r: (_mval(r, "n_hos_violations") or 0) > 0),
-            _rate(ok_recs, lambda r: (_mval(r, "n_stranding") or 0) > 0),
-            _rate(ok_recs, lambda r: (_mval(r, "n_repairs") or 0) > 0),
+            _rate(solved, lambda r: (_mval(r, "n_hos_violations") or 0) > 0),
+            _rate(solved, lambda r: (_mval(r, "n_stranding") or 0) > 0),
+            _rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0),
             _mean([_mval(r, "decision_time_mean_s") for r in ok_recs]),
             _mean([_mval(r, "offline_solve_time_s") for r in ok_recs]),
             _mean([_safe_float(_get(r, ("wall_clock_s",))) for r in ok_recs]),
@@ -606,8 +743,12 @@ def build_gap_latex(rows, metric: str = "gap_pen",
         if oobj is not None:
             oracle[cell][r.get("instance")] = oobj
         if mg is not None:
+            # unsolved runs (plan never certified) are neither a gap sample nor
+            # a genuine infeasibility — leave them out of the feas/total count
+            if _is_unsolved(r):
+                continue
             n_total[cell][mg] += 1
-            if _is_feasible(r) and r.get(metric) is not None:
+            if _gap_usable(r) and r.get(metric) is not None:
                 gaps[cell][mg].append(r[metric])
                 n_seeds[cell].add(r.get("instance"))
 
@@ -723,19 +864,31 @@ def build_gap_latex(rows, metric: str = "gap_pen",
 
 def build_feasibility_latex(rows) -> list[str]:
     """
-    Table 2 — feasibility / robustness by method over all OK runs:
-    HoS-violation rate, stranding rate, repair frequency, window hit rate.
+    Table 2 — feasibility / robustness by method.
+
+    The robustness rates (HoS violation, stranding, repairs, window hit) are
+    computed over CERTIFIED runs only — runs whose plan the offline solver
+    actually finished — so a solver that timed out without certifying its plan
+    (ROBU C&CG not converged) does not masquerade as a stranding failure.  Two
+    extra columns expose exactly what was set aside:
+
+      Not opt. (\%)   fraction of runs where the offline optimiser returned a
+                      valid plan but did not prove optimality (time limit);
+                      '--' for the online policies, which have no offline
+                      optimum.  These runs still count as feasible/infeasible.
+      Not solved (\%) fraction whose plan was never certified (ROBU did not
+                      converge); excluded from the robustness rates above.
     """
     ok = [r for r in rows if _is_ok(r)]
     labels = _method_labels(ok)
 
-    # (data method value, display label, repairs-applicable?)
+    # (data method value, display label, repairs-applicable?, has offline opt?)
     method_rows = [
-        ("greedy", labels["greedy"], False),
-        ("RO",     labels["RO"],     True),
-        ("ROBU",   labels.get("ROBU", "ROBU"), True),
-        ("LA",     labels["LA_mean"], False),
-        ("2SP",    labels["twosp"],  True),
+        ("greedy", labels["greedy"], False, False),
+        ("RO",     labels["RO"],     True,  True),
+        ("ROBU",   labels.get("ROBU", "ROBU"), True, True),
+        ("LA",     labels["LA_mean"], False, False),
+        ("2SP",    labels["twosp"],  True,  True),
     ]
 
     def _rate(recs, pred):
@@ -746,24 +899,34 @@ def build_feasibility_latex(rows) -> list[str]:
     L.append(r"\centering")
     L.append(r"\caption{Feasibility and robustness statistics by method: "
              r"HoS-violation rate, stranding rate, repair frequency (offline "
-             r"plans), and window hit rate.}")
+             r"plans), and window hit rate, computed over runs whose plan the "
+             r"solver certified.  ``Not opt.'' is the share of runs returned at "
+             r"the time limit without a proven optimum; ``Not solved'' the "
+             r"share whose plan was never certified (excluded from the rates "
+             r"to their left).}")
     L.append(r"\label{tab:feasibility}")
-    L.append(r"\begin{tabular}{lcccc}")
+    L.append(r"\begin{tabular}{lcccccc}")
     L.append(r"\toprule")
     L.append(r"\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{Stranding (\%)} "
-             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)}\\")
+             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)} "
+             r"& \textbf{Not opt. (\%)} & \textbf{Not solved (\%)}\\")
     L.append(r"\midrule")
 
-    for mval, label, has_repair in method_rows:
-        u = [r for r in ok if r.get("method") == mval]
-        hos  = _rate(u, lambda r: (_mval(r, "n_hos_violations") or 0) > 0)
-        strd = _rate(u, lambda r: (_mval(r, "n_stranding") or 0) > 0)
-        rep  = (_rate(u, lambda r: (_mval(r, "n_repairs") or 0) > 0)
+    for mval, label, has_repair, has_opt in method_rows:
+        u      = [r for r in ok if r.get("method") == mval]
+        solved = [r for r in u if not _is_unsolved(r)]
+        hos  = _rate(solved, lambda r: (_mval(r, "n_hos_violations") or 0) > 0)
+        strd = _rate(solved, lambda r: (_mval(r, "n_stranding") or 0) > 0)
+        rep  = (_rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0)
                 if has_repair else None)
-        twh  = _mean([_mval(r, "tw_hit_rate") for r in u])
-        rep_s = _pct(rep, 1) if has_repair else "--"
+        twh  = _mean([_mval(r, "tw_hit_rate") for r in solved])
+        nopt = (_rate(u, lambda r: r.get("solve_status") == "time_limit")
+                if has_opt else None)
+        nsol = _rate(u, _is_unsolved)
+        rep_s  = _pct(rep, 1) if has_repair else "--"
+        nopt_s = _pct(nopt, 1) if has_opt else "--"
         L.append(f"{label} & {_pct(hos,1)} & {_pct(strd,1)} & {rep_s} "
-                 f"& {_pct(twh,1)} \\\\")
+                 f"& {_pct(twh,1)} & {nopt_s} & {_pct(nsol,1)} \\\\")
 
     L.append(r"\bottomrule")
     L.append(r"\end{tabular}")
@@ -851,6 +1014,12 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     rows += find_failed_runs(logs_dir, solutions_dir)
     _annotate_instance_tags(rows)
     _annotate_gap_to_oracle(rows)
+    _annotate_outcome(rows)
+
+    rows, n_dup = _dedup_latest(rows)
+    if n_dup:
+        print(f"  Dropped {n_dup} superseded duplicate run(s) "
+              f"(same instance + method, older timestamp)")
 
     rows.sort(key=lambda r: (str(r.get("instance")), str(r.get("method")),
                              str(r.get("run_id"))))
