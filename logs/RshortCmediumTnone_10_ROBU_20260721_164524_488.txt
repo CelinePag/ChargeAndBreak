@@ -1,0 +1,78 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-25 11:26:09)
+  Instance : RshortCmediumTnone_10 — short route, medium customers, none windows, seed=10   run_id=RshortCmediumTnone_10_ROBU_20260721_164524_488
+  Route    : 44 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=17 of 44 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  [it 1] master: |scen|=1  theta=34.128h  status=optimal  (3.9s)
+  [it 1] adversary: 3 feasibility cut(s) [global, cd[0-13], cd[14-20]]  (0.7s)
+  [it 2] master: |scen|=4  theta=37.684h  status=optimal  (9.5s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[9-20], cd[33-43], shift[23-43]]  (3.6s)
+  [it 3] master: |scen|=7  theta=38.202h  status=optimal  (134.1s)
+  [it 3] adversary: 3 feasibility cut(s) [shift[0-27], tw[23], tw[26]]  (4.3s)
+  [it 4] master: |scen|=10  theta=38.435h  status=optimal  (194.5s)
+  [it 4] adversary: 2 feasibility cut(s) [soc[18-28], soc[29-37]]  (4.9s)
+  [it 5] master: |scen|=12  theta=38.506h  status=optimal  (178.5s)
+  [it 5] adversary: no violation, worst candidate obj=38.506h <= theta+tol — CONVERGED  (5.8s)
+
+  ROBU objective (worst-case arrival over U_Gamma) : 38.506 h   Gamma=17  scenarios=12  cuts: 11 feas / 0 opt   solve 539.7s
+  plan: 4 chg / 4 brk / 1 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.227h soc=477kWh  cd=0.23 sd=0.23 h=0.23  -> y=0 brk=--- rst=---
+  stop   2  t=8.467h soc=454kWh  cd=0.47 sd=0.47 h=0.47  -> y=0 brk=--- rst=---
+  stop   3  t=8.709h soc=432kWh  cd=0.71 sd=0.71 h=0.71  -> y=0 brk=--- rst=---
+  stop   4  t=8.930h soc=409kWh  cd=0.93 sd=0.93 h=0.93  -> y=0 brk=--- rst=---
+  stop   5  t=9.183h soc=388kWh  cd=1.18 sd=1.18 h=1.18  -> y=0 brk=--- rst=---
+  stop   6  t=9.444h soc=367kWh  cd=1.44 sd=1.44 h=1.44  -> y=0 brk=--- rst=---
+  stop   7  t=9.771h soc=342kWh  cd=1.77 sd=1.77 h=1.77  -> y=0 brk=--- rst=---
+  stop   8  t=10.043h soc=316kWh  cd=2.04 sd=2.04 h=2.04  -> y=0 brk=--- rst=---
+  stop   9  t=10.318h soc=291kWh  cd=2.32 sd=2.32 h=2.32  -> y=1 brk=b45 rst=---
+  stop  10  t=11.564h soc=401kWh  cd=0.26 sd=2.58 h=3.56  -> y=0 brk=--- rst=---
+  stop  11  t=11.855h soc=377kWh  cd=0.56 sd=2.87 h=3.85  -> y=0 brk=--- rst=---
+  stop  12  t=12.096h soc=356kWh  cd=0.80 sd=3.12 h=4.10  -> y=0 brk=--- rst=---
+  stop  13  t=12.359h soc=335kWh  cd=1.06 sd=3.38 h=4.36  -> y=0 brk=--- rst=---
+  stop  14  t=12.576h soc=312kWh  cd=1.28 sd=3.60 h=4.58  -> y=0 brk=--- rst=---
+  stop  15  t=13.453h soc=277kWh  cd=1.65 sd=3.97 h=5.45  -> y=0 brk=--- rst=---
+  stop  16  t=13.684h soc=256kWh  cd=1.88 sd=4.20 h=5.68  -> y=0 brk=--- rst=---
+  stop  17  t=13.902h soc=235kWh  cd=2.10 sd=4.42 h=5.90  -> y=0 brk=--- rst=---
+  stop  18  t=14.279h soc=214kWh  cd=2.48 sd=4.80 h=6.28  -> y=1 brk=b45 rst=---
+  stop  19  t=15.524h soc=378kWh  cd=0.23 sd=5.03 h=7.52  -> y=0 brk=--- rst=---
+  stop  20  t=15.743h soc=357kWh  cd=0.45 sd=5.24 h=7.74  -> y=0 brk=--- rst=---
+  stop  21  t=15.950h soc=336kWh  cd=0.65 sd=5.45 h=7.95  -> y=0 brk=--- rst=---
+  stop  22  t=16.238h soc=308kWh  cd=0.94 sd=5.74 h=8.24  -> y=0 brk=--- rst=---
+  stop  23  t=16.521h soc=280kWh  cd=1.23 sd=6.02 h=8.52  -> y=0 brk=--- rst=r2
+  stop  24  t=26.380h soc=256kWh  cd=0.36 sd=0.36 h=0.36  -> y=0 brk=--- rst=---
+  stop  25  t=26.661h soc=230kWh  cd=0.64 sd=0.64 h=0.64  -> y=0 brk=--- rst=---
+  stop  26  t=26.716h soc=225kWh  cd=0.70 sd=0.70 h=0.70  -> y=0 brk=--- rst=---
+  stop  27  t=27.629h soc=191kWh  cd=1.11 sd=1.11 h=1.61  -> y=0 brk=--- rst=---
+  stop  28  t=28.050h soc=147kWh  cd=1.53 sd=1.53 h=2.03  -> y=0 brk=--- rst=---
+  stop  29  t=28.647h soc=139kWh  cd=1.63 sd=1.63 h=2.63  -> y=1 brk=b45 rst=---
+  stop  30  t=29.985h soc=318kWh  cd=0.30 sd=1.93 h=3.96  -> y=0 brk=--- rst=---
+  stop  31  t=30.259h soc=292kWh  cd=0.58 sd=2.20 h=4.24  -> y=0 brk=--- rst=---
+  stop  32  t=30.518h soc=266kWh  cd=0.83 sd=2.46 h=4.50  -> y=0 brk=--- rst=---
+  stop  33  t=30.969h soc=236kWh  cd=1.29 sd=2.91 h=4.95  -> y=0 brk=--- rst=---
+  stop  34  t=31.260h soc=210kWh  cd=1.58 sd=3.20 h=5.24  -> y=0 brk=--- rst=---
+  stop  35  t=31.531h soc=182kWh  cd=1.85 sd=3.47 h=5.51  -> y=0 brk=--- rst=---
+  stop  36  t=31.817h soc=156kWh  cd=2.13 sd=3.76 h=5.80  -> y=1 brk=b45 rst=---
+  stop  37  t=33.316h soc=327kWh  cd=0.32 sd=4.08 h=7.30  -> y=0 brk=--- rst=---
+  stop  38  t=33.615h soc=300kWh  cd=0.62 sd=4.38 h=7.59  -> y=0 brk=--- rst=---
+  stop  39  t=33.916h soc=275kWh  cd=0.92 sd=4.68 h=7.90  -> y=0 brk=--- rst=---
+  stop  40  t=34.189h soc=249kWh  cd=1.19 sd=4.95 h=8.17  -> y=0 brk=--- rst=---
+  stop  41  t=34.506h soc=225kWh  cd=1.51 sd=5.27 h=8.49  -> y=0 brk=--- rst=---
+  stop  42  t=34.751h soc=200kWh  cd=1.75 sd=5.51 h=8.73  -> y=0 brk=--- rst=---
+  stop  43  t=34.996h soc=176kWh  cd=2.00 sd=5.76 h=8.98  -> y=0 brk=--- rst=---
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 35.250 h  (35:15)
+  Travel duration    : 27.250 h
+  Solve time         : 539.7 s
+  Wall-clock         : 539.7 s
+=================================================================
+  Oracle   : loaded from cache  solutions/oracle_RshortCmediumTnone_10.json
+  Scenarios: logs/RshortCmediumTnone_10_ROBU_20260721_164524_488_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : solutions/RshortCmediumTnone_10_ROBU_20260721_164524_488.json
