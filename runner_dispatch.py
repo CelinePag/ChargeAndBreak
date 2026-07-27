@@ -164,6 +164,7 @@ def run_algorithm(
     robu_eps: float        = 0.01,
     robu_gamma: Optional[int] = None,
     robu_max_iter: int     = 12,
+    robu_max_cuts: int     = 3,     # feasibility cuts appended per C&CG round
     robu_wall_limit: Optional[int] = None,   # total C&CG budget (s); None=2*master
     robu_seed_scenarios: bool = True,
     robu_warmstart: bool   = True,
@@ -318,6 +319,7 @@ def run_algorithm(
             eps        = robu_eps,
             gamma      = robu_gamma,
             max_iter   = robu_max_iter,
+            max_cuts   = robu_max_cuts,
             seed_scenarios = robu_seed_scenarios,
             warmstart  = robu_warmstart,
             tee        = False,
@@ -715,6 +717,12 @@ if __name__ == "__main__":
     parser.add_argument("--robu_max_iter",type=int,   default=12,
                         help="Max C&CG robustification-pessimization "
                              "iterations.")
+    parser.add_argument("--robu_max_cuts",type=int,   default=3,
+                        help="Feasibility cuts (violated budget scenarios) "
+                             "appended to the master per C&CG round. More = "
+                             "fewer iterations but a faster-growing, slower "
+                             "master; fewer = leaner masters, more iterations. "
+                             "Keep small (1-3) on long routes.")
     parser.add_argument("--robu_wall_limit", type=int, default=None,
                         help="Total C&CG wall-clock budget (s) across all "
                              "iterations; the loop stops before a master that "
@@ -793,6 +801,7 @@ if __name__ == "__main__":
         robu_eps         = args.robu_eps,
         robu_gamma       = args.robu_gamma,
         robu_max_iter    = args.robu_max_iter,
+        robu_max_cuts    = args.robu_max_cuts,
         robu_wall_limit     = args.robu_wall_limit,
         robu_seed_scenarios = args.robu_seed_scenarios,
         robu_warmstart      = args.robu_warmstart,
