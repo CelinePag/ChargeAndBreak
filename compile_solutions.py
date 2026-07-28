@@ -368,7 +368,31 @@ def _annotate_instance_tags(rows: list[dict]):
         rec.update(_parse_instance_tags(rec.get("instance")))
 
 
-def _annotate_gap_to_oracle(rows: list[dict]):
+_ORACLE_CACHE: dict = {}   # instance -> oracle dict (or None), memoized per run
+
+
+def _oracle_for(instance: str, solutions_dir: str):
+    """Load the shared oracle cache solutions/oracle_<instance>.json on demand.
+
+    The oracle is decoupled from method runs: a method's solution file no longer
+    embeds it, so the gap is computed here from this cache whenever it exists.
+    Returns None when the oracle has not been solved yet (gap stays undefined).
+    Kept dependency-light (plain JSON) so reporting needs no solver stack."""
+    if instance in _ORACLE_CACHE:
+        return _ORACLE_CACHE[instance]
+    path = os.path.join(solutions_dir, f"oracle_{instance}.json")
+    oracle = None
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                oracle = json.load(fh)
+        except Exception:
+            oracle = None
+    _ORACLE_CACHE[instance] = oracle
+    return oracle
+
+
+def _annotate_gap_to_oracle(rows: list[dict], solutions_dir: str = "solutions"):
     """
     Derive DURATION-based objectives and the two oracle gaps.
 
@@ -396,8 +420,12 @@ def _annotate_gap_to_oracle(rows: list[dict]):
         gap_pen = gap_nopen = None
         if rec.get("status") == "OK":
             t0   = (arr - dur) if (arr is not None and dur is not None) else None
-            oobj = _safe_float(_get(rec, ("oracle", "obj")))
-            osol = _get(rec, ("oracle", "sol")) or []
+            # oracle from the shared cache (decoupled); fall back to any block
+            # embedded by an older run for backward compatibility
+            oracle = _oracle_for(rec.get("instance"), solutions_dir) \
+                     or rec.get("oracle") or {}
+            oobj = _safe_float(oracle.get("obj"))
+            osol = oracle.get("sol") or []
             if oobj is not None and osol and t0 is not None:
                 ta_N = _safe_float(osol[-1].get("ta"))
                 if ta_N is not None:
@@ -1013,7 +1041,7 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     rows = load_solutions(solutions_dir)
     rows += find_failed_runs(logs_dir, solutions_dir)
     _annotate_instance_tags(rows)
-    _annotate_gap_to_oracle(rows)
+    _annotate_gap_to_oracle(rows, solutions_dir)
     _annotate_outcome(rows)
 
     rows, n_dup = _dedup_latest(rows)

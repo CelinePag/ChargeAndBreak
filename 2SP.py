@@ -613,7 +613,8 @@ def solve_2sp(model: pyo.ConcreteModel,
               warmstart: bool = False,
               heuristics: float | None = None,
               mip_focus: int | None    = None,
-              extra_options: dict | None = None) -> tuple[dict, str]:
+              extra_options: dict | None = None,
+              log_file: str | None = None) -> tuple[dict, str]:
     """Solve the 2SP extensive form with Gurobi.
 
     warmstart=True feeds the model's current variable values to Gurobi as a MIP
@@ -638,6 +639,10 @@ def solve_2sp(model: pyo.ConcreteModel,
         solver.options["Heuristics"] = heuristics
     if mip_focus is not None:
         solver.options["MIPFocus"] = mip_focus
+    if log_file is not None:
+        # persist Gurobi's full branch-and-bound log (incumbent / best-bound
+        # node table) so the bound evolution can be plotted from real runs
+        solver.options["LogFile"] = log_file
     for k, v in (extra_options or {}).items():
         solver.options[k] = v
 
@@ -895,6 +900,7 @@ def run_2sp(full_data: dict,
         fig = os.path.join("figures",   f"{run_id}.png"),
         sol = os.path.join("solutions", f"{run_id}.json"),
         scn = os.path.join("logs",      f"{run_id}_scenarios.json"),
+        gurobi = os.path.join("logs",   f"{run_id}_gurobi.log"),
     )
     log = open(paths["log"], "w", encoding="utf-8")
 
@@ -955,7 +961,8 @@ def run_2sp(full_data: dict,
     _p(f"  Solving...")
     info, status = solve_2sp(model, time_limit=time_limit, mip_gap=mip_gap,
                              tee=True, warmstart=warmstart_seed,
-                             heuristics=heuristics, mip_focus=mip_focus)
+                             heuristics=heuristics, mip_focus=mip_focus,
+                             log_file=paths["gurobi"])
     t_solve = time.perf_counter() - t_solve
 
     _p(f"  Status     : {status}  ({t_solve:.1f}s)")
@@ -1029,6 +1036,7 @@ def run_2sp(full_data: dict,
             twosp_optimal = info["optimal"],
             twosp_warmstart_seed = bool(warmstart_seed),
             twosp_heuristics     = heuristics,
+            gurobi_log    = paths["gurobi"],
             solve_time    = t_solve,
             supervised    = supervised,
             prune_quantile= prune_quantile,

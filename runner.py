@@ -63,7 +63,7 @@ import json
 import os
 from typing import Optional
 
-from oracle import oracle_solve, check_simulation_feasibility, \
+from oracle import check_simulation_feasibility, \
                    check_directive_compliance, \
                    print_simulation_log, print_oracle_log
 from plots import plot_simulation_results
@@ -130,67 +130,12 @@ def finalize_run(
             except Exception:
                 pass
 
-    # ── 1. Oracle solve (with file cache) ────────────────────────────────────
-    # The oracle depends only on the instance geometry + the realised travel
-    # times (D_real).  Both are fixed per precomputed JSON file, so the result
-    # is identical regardless of which algorithm ran.
-    # Cache file: solutions/oracle_<title>.json
-    _oracle_cache_path = os.path.join(
-        "solutions", f"oracle_{full_data.get('title', 'unknown')}.json"
-    )
-
-    def _load_oracle_cache(path):
-        if not os.path.isfile(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as _fh:
-                cached = json.load(_fh)
-            def _rik(obj):
-                if isinstance(obj, dict):
-                    return {(int(k) if isinstance(k, str) and
-                             k.lstrip("-").isdigit() else k): _rik(v)
-                            for k, v in obj.items()}
-                if isinstance(obj, list):
-                    return [_rik(v) for v in obj]
-                return obj
-            cached = _rik(cached)
-            _lp(f"  Oracle   : loaded from cache  {path}")
-            return cached
-        except Exception as _e:
-            _lp(f"  Oracle   : cache read failed ({_e}), re-solving")
-            return None
-
-    def _save_oracle_cache(path, result):
-        def _ser(o):
-            if isinstance(o, (int, float, bool, str, type(None))): return o
-            if isinstance(o, dict): return {str(k): _ser(v) for k, v in o.items()}
-            if isinstance(o, (list, tuple)): return [_ser(v) for v in o]
-            return str(o)
-        try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "w", encoding="utf-8") as _fh:
-                json.dump(_ser(result), _fh, indent=2)
-            _lp(f"  Oracle   : result cached to  {path}")
-        except Exception as _e:
-            _lp(f"  Oracle   : cache save failed ({_e})")
-
-    oracle = _load_oracle_cache(_oracle_cache_path)
-    if oracle is None:
-        oracle = oracle_solve(
-            full_data,
-            vehicle.D_actual_list,
-            sim_results=dict(
-                states         = vehicle.states,
-                actions        = vehicle.actions,
-                durations_list = vehicle.durations,
-                td_list        = vehicle.td_list,
-                total_time     = arr,
-            ),
-            verbose = verbose,
-            tee     = oracle_tee,
-            log_fh  = log_fh,
-        )
-        _save_oracle_cache(_oracle_cache_path, oracle)
+    # ── 1. Oracle is decoupled ───────────────────────────────────────────────
+    # Method solves no longer trigger the oracle.  The hindsight oracle is run
+    # independently as its own algorithm (runner_dispatch ORACLE), cached at
+    # solutions/oracle_<instance>.json, and the gap to oracle is computed on
+    # demand (compile_solutions / plots) from that cache whenever it exists.
+    # A method run therefore stands alone and does not wait on the oracle.
 
     # ── 2. Save scenario tracker ──────────────────────────────────────────────
     scn_path = paths["scn"]
@@ -303,7 +248,8 @@ def finalize_run(
         sim_arrival_h= arr,
         duration_h   = arr - T0,
         wall_clock_s = wall,
-        oracle       = _ser(oracle),
+        # oracle intentionally NOT embedded — see decoupling note above; the gap
+        # is derived from the shared solutions/oracle_<instance>.json cache
         sim_trajectory = [
             dict(stop=s.stop, t_arr=round(s.t_arr, 4),
                  e_arr=round(s.e_arr, 2), cd=round(s.cd, 4),
@@ -344,7 +290,7 @@ def finalize_run(
         durations_list   = vehicle.durations,
         total_time       = arr,
         wall_clock       = wall,
-        oracle           = oracle,
+        oracle           = None,   # decoupled — filled on demand from the cache
         metrics          = metrics,
         events           = events,
         scenario_tracker = tracker,
@@ -356,8 +302,8 @@ def finalize_run(
     )
 
     # ── 6. Print schedule tables ──────────────────────────────────────────────
+    # (oracle schedule is no longer printed here — the oracle is run separately)
     print_simulation_log(results, full_data)
-    print_oracle_log(oracle, full_data)
 
     # ── 7. Feasibility check ──────────────────────────────────────────────────
     feas_ok, issues = check_simulation_feasibility(results, full_data)
