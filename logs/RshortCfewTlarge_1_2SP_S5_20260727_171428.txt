@@ -1,0 +1,35 @@
+=================================================================
+  2SP SOLVE START   (2026-07-27 17:14:28)
+  Instance   : RshortCfewTlarge_1 — short route, few customers, large windows, seed=1   run_id=RshortCfewTlarge_1_2SP_S5_20260727_171428
+  Route      : 61 stops  departure=8:00
+  Settings   : S=5  cv=0.15  gap=0.5%  time_limit=150s
+=================================================================
+
+  Drew 5 full-route scenarios (cv=0.15)
+
+  Building 2SP extensive form (S=5, N=61)...
+  Warm-start seed: solving nominal 1-scenario model (<= 60s)...
+  Warm-start seed ready (optimal); priming full solve.
+  Solving...
+  Status     : optimal  (30.8s)
+  2SP objective (E[arrival]) : 38.201 h
+  Committed  : 4 charge(s),  3 break(s),  1 rest(s)
+  (structure only — durations re-optimised online, SP1)
+
+  Executing 2SP structure with online duration recourse...
+  [2SP-REPAIR] stop 19: 1 activity(ies) added (y@22=1)
+  [2SP-REPAIR] stop 31: 1 activity(ies) added (y@34=1)
+  [2SP-REPAIR] stop 49: 1 activity(ies) added (y@58=1)
+  Recourse   : 3 repair(s), 0 plan violation(s), 0 supervisor intervention(s)
+
+=================================================================
+  2SP SIMULATION COMPLETE
+  Arrival (absolute) : 39.798 h  (39:47)
+  Travel duration    : 31.798 h
+  Solve time (2SP)   : 30.8 s
+  Wall-clock total   : 55.8 s
+=================================================================
+  Oracle   : loaded from cache  solutions\oracle_RshortCfewTlarge_1.json
+  Scenarios: logs\RshortCfewTlarge_1_2SP_S5_20260727_171428_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=3
+  Solution : solutions\RshortCfewTlarge_1_2SP_S5_20260727_171428.json

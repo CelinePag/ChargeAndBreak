@@ -1,0 +1,32 @@
+=================================================================
+  ROBU SOLVE START   (2026-07-27 16:57:42)
+  Instance : RshortCfewTlarge_1 — short route, few customers, large windows, seed=1   run_id=RshortCfewTlarge_1_ROBU_20260727_165742
+  Route    : 61 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=20 of 61 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  Primed scenario set: 4 vertices (nominal + 3 worst-case).
+  Budget wall-clock limit: 150s (<= 60s per master solve).
+  [it 1] master: |scen|=4  theta=43.070h  status=optimal  (9.6s)
+  [it 1] adversary: 3 feasibility cut(s) [cd[0-14], cd[15-26], cd[39-50]]  (2.4s)
+  [it 2] master: |scen|=7  theta=43.584h  status=optimal  (120.7s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[6-17], cd[18-29], cd[48-60]]  (3.3s)
+  [it 3] wall-clock budget spent (136s / 150s) — stopping with the iteration-2 plan (robu_converged=False).
+  [!] Loop ended without adversary certification (max_iter=6 exhausted or master aborted); executing the last available plan (robu_converged=False).
+
+  ROBU objective (worst-case arrival over U_Gamma) : 43.584 h   Gamma=20  scenarios=10  cuts: 6 feas / 0 opt   solve 135.9s
+  plan: 5 chg / 4 brk / 1 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  Robust-plan failures (raw): 0 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 39.258 h  (39:15)
+  Travel duration    : 31.258 h
+  Solve time         : 135.9 s
+  Wall-clock         : 135.9 s
+=================================================================
+  Oracle   : loaded from cache  solutions\oracle_RshortCfewTlarge_1.json
+  Scenarios: logs\RshortCfewTlarge_1_ROBU_20260727_165742_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=67% (early=0, late=1)  interventions=0  repairs=0
+  Solution : solutions\RshortCfewTlarge_1_ROBU_20260727_165742.json
