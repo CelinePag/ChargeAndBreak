@@ -393,7 +393,7 @@ def run_algorithm(
         res = oracle_solve(
             full_data, D_real, sim_results=_ws_results,
             time_limit=oracle_time_limit, mip_gap=oracle_mip_gap,
-            tee=False, verbose=verbose, log_fh=_lfh, log_file=gurobi_log,
+            tee=oracle_tee, verbose=verbose, log_fh=_lfh, log_file=gurobi_log,
         )
         wall = _time.perf_counter() - t0
         # Persist the wall-clock next to the gap/stop_reason in the .txt log too.

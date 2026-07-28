@@ -134,6 +134,9 @@ if __name__ == "__main__":
     ap.add_argument("--warmstart", action="store_true", default=False,
                     help="seed the MIP with a quiet greedy run first, as the "
                          "ORACLE pipeline does (default: cold start)")
+    ap.add_argument("--tee", action="store_true", default=False,
+                    help="show the live Gurobi log on the console as well as "
+                         "writing it to the log file")
     args = ap.parse_args()
 
     full_data, D_real, E_real, _cv = load_instance_json(args.instance)
@@ -157,7 +160,7 @@ if __name__ == "__main__":
     print(f"  Solving oracle for {stem} (N={N}) with a {args.time_limit}s cap, "
           f"Gurobi log -> {log_path}")
     res = oracle_solve(full_data, D_actual_list, sim_results=sim_results,
-                       time_limit=args.time_limit, tee=False, verbose=True,
+                       time_limit=args.time_limit, tee=args.tee, verbose=True,
                        log_file=log_path)
 
     times, inc, bnd = parse_gurobi_log(log_path)
