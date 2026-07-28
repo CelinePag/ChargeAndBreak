@@ -843,6 +843,11 @@ def add_valid_inequalities(m: pyo.ConcreteModel,
     _add_vi6(m, I_list, D, N, Tdrv_s, sd_0, rho2_limit)
     _add_vi7(m, I_list, N, Tspr1, Tspr2, t0, h_0,
              is_subproblem=(init_state is not None))
+    # Window energy covers: integral charge-session mass per depletion
+    # window.  Each forced session drags its queue (Q·y) and stop overhead
+    # (v·Mstop) into the duty, which VI-7 then converts into rest mass —
+    # the LP otherwise pays these only fractionally through fractional y.
+    add_window_energy_covers(m, data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
