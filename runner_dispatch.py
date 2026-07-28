@@ -362,8 +362,14 @@ def run_algorithm(
         instance   = full_data.get("title", "unknown")
         os.makedirs("logs", exist_ok=True)
         gurobi_log = os.path.join("logs", f"oracle_{instance}_gurobi.log")
-        txt_log    = os.path.join("logs", f"{run_id}.txt") if run_id else None
-        _lfh = open(txt_log, "w", encoding="utf-8") if txt_log else None
+        # Always produce a summary .txt log: a single manual run (run_id=None)
+        # falls back to an instance-named file so the user still gets a log
+        # instead of only the per-instance Gurobi node table.
+        txt_stem   = run_id if run_id else f"{instance}_ORACLE"
+        txt_log    = os.path.join("logs", f"{txt_stem}.txt")
+        # line-buffered so the header/summary is readable while the (possibly
+        # multi-hour) solve is still running, not only after it closes.
+        _lfh = open(txt_log, "w", encoding="utf-8", buffering=1)
         t0 = _time.perf_counter()
         res = oracle_solve(
             full_data, D_real, sim_results=None,
@@ -371,17 +377,29 @@ def run_algorithm(
             tee=False, verbose=verbose, log_fh=_lfh, log_file=gurobi_log,
         )
         wall = _time.perf_counter() - t0
-        if _lfh:
-            _lfh.close()
+        # Persist the wall-clock next to the gap/stop_reason in the .txt log too.
+        try:
+            print(f"  Wall clock : {wall:.1f} s\n"
+                  f"  stop_reason={res.get('stop_reason')}  "
+                  f"gap={res.get('gap')}  best_bound={res.get('best_bound')}",
+                  file=_lfh)
+            _lfh.flush()
+        except Exception:
+            pass
+        _lfh.close()
+        res = dict(res)
+        res["wall_clock"] = wall          # cache the wall-clock alongside gap etc.
         cache_path = save_oracle_cache(instance, res)
         if verbose:
-            print(f"  Oracle   : {res.get('status')}  obj={res.get('obj')}  "
+            print(f"  Oracle   : stop_reason={res.get('stop_reason')}  "
+                  f"gap={res.get('gap')}  obj={res.get('obj')}  "
                   f"cached -> {cache_path}")
         out = dict(res)
         out["total_time"] = res.get("obj", float("inf"))
         out["wall_clock"] = wall
         out["sol_path"]   = cache_path
         out["gurobi_log"] = gurobi_log
+        out["log_path"]   = txt_log
         return out
 
     else:  # LA

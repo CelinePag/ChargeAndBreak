@@ -557,6 +557,72 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SOLVER-RESULT INTROSPECTION  (gap + why the solve stopped)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _bounds_from_results(res):
+    """Best incumbent (upper_bound) and best proven bound (lower_bound) from a
+    Pyomo results object, or (None, None) if unavailable."""
+    if res is None:
+        return None, None
+    try:
+        prob = res.problem[0] if hasattr(res.problem, "__getitem__") else res.problem
+        def _f(x):
+            try:
+                x = float(x)
+                return x if abs(x) < 1e18 else None
+            except (TypeError, ValueError):
+                return None
+        return _f(getattr(prob, "lower_bound", None)), \
+               _f(getattr(prob, "upper_bound", None))
+    except Exception:
+        return None, None
+
+
+def _relative_gap(incumbent, best_bound):
+    """Gurobi-style relative MIP gap |inc - bnd| / |inc|, or nan if unknown."""
+    if incumbent is None or best_bound is None:
+        return float("nan")
+    denom = max(abs(incumbent), 1e-10)
+    return abs(incumbent - best_bound) / denom
+
+
+def _classify_stop_reason(status: str, gap_val: float, mip_gap: float,
+                          has_solution: bool) -> str:
+    """
+    Map the solver termination + gap onto WHY the solve stopped:
+
+      'optimal'       — proven optimal (gap ~ 0)
+      'gap_threshold' — stopped because the MIPGap tolerance was reached
+      'time_limit'    — the wall-clock TimeLimit was hit
+      'aborted'       — user interrupt / other early termination
+      'infeasible'    — model proven infeasible (no schedule exists)
+      'no_solution'   — stopped with no incumbent (e.g. time limit, 0 feasible)
+    """
+    st = (status or "").lower()
+    if "infeasible" in st:
+        return "infeasible"
+    if not has_solution:
+        # stopped without ever finding a feasible schedule
+        return "time_limit" if ("time" in st or "limit" in st) else "no_solution"
+    if "time" in st and "limit" in st:      # maxTimeLimit
+        return "time_limit"
+    if st in ("optimal",):
+        # Gurobi returns OPTIMAL both when proven optimal AND when it merely
+        # reaches the MIPGap tolerance; separate the two on the realised gap.
+        if not np.isnan(gap_val):
+            if gap_val <= 1e-6:
+                return "optimal"
+            if gap_val <= mip_gap * (1.0 + 1e-6):
+                return "gap_threshold"
+        return "optimal"
+    if st in ("userinterrupt", "interrupted", "maxiterations", "other",
+              "unknown", "solverfailure", "internalsolvererror"):
+        return "aborted"
+    return st or "unknown"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ORACLE SOLVE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -590,13 +656,18 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     Returns
     -------
     dict with keys:
-        feasible : bool
-        optimal  : bool  — True only if proven optimal within time_limit
-        obj      : float — best arrival time found (h), or inf if infeasible
-        gap      : float — MIP optimality gap at termination (0.0 if optimal)
-        sol      : list  — per-stop dicts from MILP.extract_solution
-        status   : str   — HiGHS termination condition string
-        D_actual : dict  — {leg_index: duration_h} (the realised travel times)
+        feasible    : bool
+        optimal     : bool  — True only if proven optimal (gap ~ 0)
+        obj         : float — best arrival time found (h), or inf if infeasible
+        gap         : float — relative MIP optimality gap at termination
+        best_bound  : float — best proven lower bound (None if unavailable)
+        stop_reason : str   — WHY the solve stopped: 'optimal', 'gap_threshold',
+                              'time_limit', 'aborted', 'infeasible', 'no_solution'
+        time_limit  : int   — the wall-clock limit (s) the solve ran under
+        mip_gap     : float — the MIPGap tolerance the solve ran under
+        status      : str   — raw solver termination-condition string
+        sol         : list  — per-stop dicts from MILP.extract_solution
+        D_actual    : dict  — {leg_index: duration_h} (realised travel times)
     """
     N = full_data["N"]
     assert len(D_actual_list) == N, (
@@ -635,7 +706,11 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     def _op(msg):
         if verbose: print(msg)
         if log_fh:
-            try: print(msg, file=log_fh)
+            try:
+                print(msg, file=log_fh)
+                log_fh.flush()   # flush per line so the .txt is readable MID-run,
+                                 # not only after the (possibly hour-long) solve
+                                 # finishes and the handle is closed.
             except Exception: pass
 
     ws_str = " + sim warm-start" if sim_results is not None else ""
@@ -705,30 +780,46 @@ def oracle_solve(full_data: dict, D_actual_list: list,
         except Exception:
             pass
 
-    if not has_solution:
-        _op("  No feasible solution found within time limit.")
-        return dict(feasible=False, optimal=False, obj=float("inf"),
-                    gap=float("inf"), sol=[], status=status,
-                    D_actual=D_actual_dict)
+    # Best proven bound + gap, taken from the solver's reported bounds where
+    # available (reliable), falling back to the termination message regex.
+    best_bound, _ub = _bounds_from_results(res)
+    incumbent = obj_val if has_solution else _ub
+    gap_val   = _relative_gap(incumbent, best_bound)
+    if np.isnan(gap_val):
+        try:
+            gap_raw = res.solver.termination_condition_message
+            m_      = re.search(r"gap[^0-9]*([0-9.e+-]+)%", str(gap_raw), re.I)
+            if m_:
+                gap_val = float(m_.group(1)) / 100
+            elif status == "optimal":
+                gap_val = 0.0
+        except Exception:
+            if status == "optimal":
+                gap_val = 0.0
 
-    is_optimal = (status == "optimal")
+    stop_reason = _classify_stop_reason(status, gap_val, mip_gap, has_solution)
+
+    if not has_solution:
+        _op(f"  No feasible solution found (stop_reason={stop_reason}, "
+            f"best_bound={best_bound}).")
+        return dict(feasible=False, optimal=False, obj=float("inf"),
+                    gap=float("inf"), best_bound=best_bound,
+                    stop_reason=stop_reason, status=status,
+                    time_limit=time_limit, mip_gap=mip_gap,
+                    sol=[], D_actual=D_actual_dict)
+
+    is_optimal = (stop_reason == "optimal")
     sol        = extract_solution(model, oracle_data)
 
-    try:
-        gap_raw = res.solver.termination_condition_message
-        m_      = re.search(r"gap[^0-9]*([0-9.e+-]+)%", str(gap_raw), re.I)
-        gap_val = float(m_.group(1)) / 100 if m_ else (
-                  0.0 if is_optimal else float("nan"))
-    except Exception:
-        gap_val = 0.0 if is_optimal else float("nan")
-
     if verbose:
-        opt_str = (" (optimal)" if is_optimal else
-                   f" (gap ≈ {gap_val:.1%})" if not np.isnan(gap_val) else "")
-        _op(f"  Oracle arrival : {obj_val:.3f} h{opt_str}")
+        gap_str = "" if np.isnan(gap_val) else f", gap ≈ {gap_val:.2%}"
+        _op(f"  Oracle arrival : {obj_val:.3f} h  "
+            f"[stop_reason={stop_reason}{gap_str}]")
 
     return dict(feasible=True, optimal=is_optimal, obj=obj_val,
-                gap=gap_val, sol=sol, status=status, D_actual=D_actual_dict)
+                gap=gap_val, best_bound=best_bound, stop_reason=stop_reason,
+                status=status, time_limit=time_limit, mip_gap=mip_gap,
+                sol=sol, D_actual=D_actual_dict)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
