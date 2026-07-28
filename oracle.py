@@ -39,6 +39,7 @@ import io as _io
 import json
 import os
 import re
+import sys
 import warnings
 
 import numpy as np
@@ -704,7 +705,14 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     oracle_data["ub_t"] = ub_t
 
     def _op(msg):
-        if verbose: print(msg)
+        if verbose:
+            try:
+                print(msg)
+            except UnicodeEncodeError:
+                # Windows consoles default to cp1252; never let a stray glyph
+                # in a status line abort an hours-long solve.
+                enc = getattr(sys.stdout, "encoding", None) or "ascii"
+                print(msg.encode(enc, "replace").decode(enc, "replace"))
         if log_fh:
             try:
                 print(msg, file=log_fh)
@@ -812,7 +820,7 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     sol        = extract_solution(model, oracle_data)
 
     if verbose:
-        gap_str = "" if np.isnan(gap_val) else f", gap ≈ {gap_val:.2%}"
+        gap_str = "" if np.isnan(gap_val) else f", gap ~ {gap_val:.2%}"
         _op(f"  Oracle arrival : {obj_val:.3f} h  "
             f"[stop_reason={stop_reason}{gap_str}]")
 
@@ -870,7 +878,7 @@ def print_oracle_log(oracle: dict, full_data: dict):
 
     gap   = oracle.get("gap", float("nan"))
     opt_s = (" (optimal)" if oracle.get("optimal") else
-             f" (gap ≈ {gap:.1%})" if not np.isnan(gap) else " (feasible)")
+             f" (gap ~ {gap:.1%})" if not np.isnan(gap) else " (feasible)")
 
     hdr = (f"  {'stop':>4}  {'type':>5}  {'t_arr':>7}  {'soc':>6}  "
            f"{'cd':>5}  {'sd':>5}  {'sw':>5}  "
