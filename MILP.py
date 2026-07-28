@@ -767,8 +767,22 @@ def _add_time_constraints(m, N, data=None):
         m.delta_zero = pyo.Constraint(m.Cset, rule=lambda m, i:
             m.delta[i] == 0)
     else:
-        m.tw_early = pyo.Constraint(m.Cset, rule=lambda m, i:
-            m.ta[i] >= m.Wha[i] - m.H * m.delta[i])
+        # Early side: per-stop big-M.  With ta[i] ≥ lb_t[i] as a variable
+        # bound, M_i = Wha[i] − lb_t[i] is valid (and if Wha ≤ lb_t the
+        # early violation is impossible, so the row is skipped — never
+        # emitted with M = 0, which would wrongly enforce the window at
+        # δ = 1).  This is the side the minimizing LP exploits under the
+        # global H (fractional δ ≈ (Wha−ta)/H relieves the window for free).
+        _lb_t = data.get("lb_t", {}) or {}
+
+        def _tw_early(m, i):
+            M_i = pyo.value(m.Wha[i]) - float(_lb_t.get(i, 0.0))
+            if M_i <= 1e-9:
+                return pyo.Constraint.Skip
+            return m.ta[i] >= m.Wha[i] - M_i * m.delta[i]
+        m.tw_early = pyo.Constraint(m.Cset, rule=_tw_early)
+        # Late side: the global H stays — there is no valid smaller M
+        # without arrival upper bounds (rest durations are unbounded).
         m.tw_late = pyo.Constraint(m.Cset, rule=lambda m, i:
             m.ta[i] <= m.Whf[i] + m.H * m.delta[i])
 
@@ -776,7 +790,8 @@ def _add_time_constraints(m, N, data=None):
 
 def add_valid_inequalities(m: pyo.ConcreteModel,
                            data: dict,
-                           init_state: dict | None = None) -> None:
+                           init_state: dict | None = None,
+                           rho2_limit: int | None = None) -> None:
     """
     Add valid inequalities to model *m* in-place.
 
@@ -784,9 +799,13 @@ def add_valid_inequalities(m: pyo.ConcreteModel,
     ----------
     m          : Pyomo ConcreteModel from build_model() or build_horizon_model().
     data       : The same data dict passed to the build function (full or sub).
-    init_state : dict with keys 'sd' (from init_state passed to
-                 build_horizon_model).  Required for subproblems; omit (or
-                 pass None) for the full-route model where sd=0 at stop 0.
+    init_state : dict with keys 'sd' / 'ta' / optional 'h' (from init_state
+                 passed to build_horizon_model).  Required for subproblems;
+                 omit (or pass None) for the full-route model where sd=0 and
+                 the route starts fresh at t0.
+    rho2_limit : reduced-rest budget in effect for THIS model (the horizon
+                 subproblem passes its remaining budget); None → the
+                 full-route budget data["rho_bar"] (default 3).
     """
     N       = data["N"]
     I_list  = list(data["I"])       # local indices [0, 1, ..., N]
@@ -798,19 +817,32 @@ def add_valid_inequalities(m: pyo.ConcreteModel,
     D_total = sum(D.get(i, 0.0) for i in range(N))
 
     sd_0  = 0.0
+    h_0   = 0.0
     if init_state is not None:
-        sd_0  = float(init_state.get("sd",  0.0))
+        sd_0  = float(init_state.get("sd", 0.0))
+        h_0   = float(init_state.get("h",  0.0))
+        t0    = float(init_state["ta"])
+    else:
+        t0    = float(data.get("t0", data.get("T_START", 8.0)))
+
+    if rho2_limit is None:
+        rho2_limit = int(data.get("rho_bar", 3))
 
     Tdrv_c  = float(pyo.value(m.Tdrv_cons))
     # M1: a valid inequality must hold for ALL feasible schedules, including
     # those legally using the 10 h extended-driving allowance — so the
     # shift-driving VIs use Tdrv_sh2, never the regular 9 h limit.
     Tdrv_s  = float(pyo.value(m.Tdrv_sh2))
+    Tspr1   = float(pyo.value(m.Tspr1))
+    Tspr2   = float(pyo.value(m.Tspr2))
 
     _add_vi1(m, usable)
     _add_vi3(m, I_list, D, N, Tdrv_s)
     _add_vi4(m, I_list, D, N, Tdrv_c)
     _add_vi5(m, I_list, D_total, sd_0, Tdrv_s)
+    _add_vi6(m, I_list, D, N, Tdrv_s, sd_0, rho2_limit)
+    _add_vi7(m, I_list, N, Tspr1, Tspr2, t0, h_0,
+             is_subproblem=(init_state is not None))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -943,6 +975,97 @@ def _add_vi5(m, I_list, D_total, sd_0, Tdrv_sh1):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# VI-6  Rest-mix count (regular 11 h rests forced beyond the reduced budget)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_vi6(m, I_list, D, N, Tdrv_sh1, sd_0, rho2_limit):
+    """
+    Σ ρ1                ≥  n_rho − rho2_limit                       (global)
+    Σ_{l<i} ρ1[l]       ≥  n_i   − rho2_limit          (prefix, for each i)
+
+    with n_rho / n_i the VI-5 / VI-3 right-hand sides
+    (⌈(sd_0 + Σ D)/T_drv_sh⌉ − 1).
+
+    Validity: linear consequence of the model's reduced-rest budget
+    Σρ2 ≤ rho2_limit (rst_lim) combined with the VI-3/VI-5 rest counts —
+    every rest beyond the reduced budget must be a REGULAR (11 h) one.
+    Not LP-implied: the relaxation otherwise satisfies the count with the
+    cheaper 9 h reduced rests only.
+    """
+    if Tdrv_sh1 <= 0:
+        return
+
+    active = {}
+    cum_D = sd_0
+    for i in I_list:
+        if i > 0:
+            cum_D += D.get(i - 1, 0.0)
+        rhs = max(0, _mi.ceil(cum_D / Tdrv_sh1) - 1) - int(rho2_limit)
+        if rhs <= 0:
+            continue
+        stops_before = [l for l in I_list if l < i]
+        if not stops_before:
+            continue
+        active[i] = (stops_before, int(rhs))
+
+    # global version = prefix at the destination is included via i = N
+    if not active:
+        return
+
+    def _rule(m, i):
+        if i not in active:
+            return pyo.Constraint.Skip
+        stops_before, rhs = active[i]
+        return sum(m.rho1[l] for l in stops_before) >= rhs
+
+    m.vi6 = pyo.Constraint(m.I, rule=_rule,
+                           doc="VI-6: prefix regular-rest count")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VI-7  Shift-spread partition (duty length forces the rest COUNT)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_vi7(m, I_list, N, Tspr1, Tspr2, t0, h_0, is_subproblem=False):
+    """
+    For each stop i ≥ 1:
+
+        ta[i] − t0 − Σ_{l<i} taur[l]
+            ≤  Tspr1·Σ_{l<i} ρ1[l] + Tspr2·Σ_{l<i} ρ2[l] + T_last − h_0
+
+    T_last = Tspr1 at the destination in the full-route model (h_term caps the
+    unfinished final shift at the regular 13 h spread), Tspr2 otherwise.
+
+    Validity (partition argument): the wall-clock from t0 to arrival at i,
+    minus rest durations, is exactly the sum of the shift spreads, and the
+    model itself caps each span — R24 gives ≤ Tspr1 before a regular rest and
+    ≤ Tspr2 before a reduced one; the trailing span is capped by R25
+    (h ≤ Tspr2), or by h_term (≤ Tspr1) at the full-route destination.  The
+    first span has h_0 of its spread already consumed at the window start.
+    Feasible set unchanged — every term is implied by existing constraints.
+
+    This is the reverse direction the LP lacks: rests adding duration is in
+    the time chain, but duration forcing MORE rests is not, which is exactly
+    how the relaxation certifies 4 rests on routes whose optimum needs 5.
+    """
+    if Tspr2 <= 0:
+        return
+
+    def _rule(m, i):
+        if i <= 0:
+            return pyo.Constraint.Skip
+        stops_before = [l for l in I_list if l < i]
+        t_last = Tspr1 if (i == N and not is_subproblem) else Tspr2
+        return (m.ta[i] - t0 - sum(m.taur[l] for l in stops_before)
+                <= Tspr1 * sum(m.rho1[l] for l in stops_before)
+                 + Tspr2 * sum(m.rho2[l] for l in stops_before)
+                 + t_last - h_0)
+
+    m.vi7 = pyo.Constraint(m.I, rule=_rule,
+                           doc="VI-7: prefix shift-spread partition")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Optional: window energy cover cuts (extension of VI-3)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1031,9 +1154,11 @@ def build_model(data: dict) -> pyo.ConcreteModel:
         expr=m.ta[N] + m.beta * sum(m.delta[i] for i in C),
         sense=pyo.minimize)
 
-    #for i in data["I"]:
-     #   m.ta[i].setlb(lb_t.get(i, 0.0))
-      #  m.ta[i].setub(ub_t.get(i, data["T_hor"]))
+    # Earliest-arrival lower bounds (valid: forward pass over mandatory
+    # dwell — service at customers, zero elsewhere).  Upper bounds stay OFF:
+    # ub_t is not valid while rest durations are unbounded above.
+    for i in data["I"]:
+        m.ta[i].setlb(lb_t.get(i, 0.0))
 
     # ── Initial conditions ────────────────────────────────────────────────────
     m.init_ta  = pyo.Constraint(expr=m.ta[0] == data.get("T_START", 0.0))
@@ -1354,9 +1479,9 @@ def build_horizon_model(sub_data: dict, init_state: dict,
         _obj_expr = _obj_expr + repair_penalty * sum(_added)
     m.obj = pyo.Objective(expr=_obj_expr, sense=pyo.minimize)
 
-    #for i in sub_data["I"]:
-     #   m.ta[i].setlb(lb_t.get(i, 0.0))
-      #  m.ta[i].setub(ub_t.get(i, sub_data["T_hor"]))
+    # Earliest-arrival lower bounds (see build_model; ub_t deliberately off).
+    for i in sub_data["I"]:
+        m.ta[i].setlb(lb_t.get(i, 0.0))
 
     # ── Initial conditions from init_state ────────────────────────────────────
     m.init_ta  = pyo.Constraint(expr=m.ta[0]  == init_state["ta"])
@@ -1464,7 +1589,8 @@ def build_horizon_model(sub_data: dict, init_state: dict,
                                     ext_budget=ext_remaining,
                                     M_lay_dict=sub_data.get("M_lay"))
 
-    add_valid_inequalities(m, sub_data, init_state=init_state)
+    add_valid_inequalities(m, sub_data, init_state=init_state,
+                           rho2_limit=rho2_remaining)
 
 
     # DEBUG

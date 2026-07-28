@@ -179,7 +179,7 @@ def run_algorithm(
     milp_heuristics: Optional[float] = 0.2,
     milp_mip_focus: Optional[int]    = None,
     # ORACLE options (the hindsight MILP, run as its own algorithm)
-    oracle_time_limit: int = 12 * 3600,
+    oracle_time_limit: int = 2 * 3600,
     oracle_mip_gap: float  = 0.005,
     oracle_warmstart: bool = True,   # seed the MIP with a quiet greedy run
     # common
@@ -814,8 +814,10 @@ if __name__ == "__main__":
                              "a Gurobi MIP start.")
 
     # ORACLE (hindsight MILP, run as its own algorithm)
-    parser.add_argument("--oracle_time_limit", type=int, default=12 * 3600,
-                        help="ORACLE solver time limit s (default: 12h).")
+    parser.add_argument("--oracle_time_limit", type=int, default=2 * 3600,
+                        help="ORACLE solver time limit s (default: 2h; bound "
+                             "traces show solves certify within ~1h or "
+                             "flatline, so longer caps buy nothing).")
     parser.add_argument("--oracle_mip_gap", type=float, default=0.005,
                         help="ORACLE MIP gap tolerance (default: 0.005). Raise "
                              "for long routes where proving the last %% is slow.")

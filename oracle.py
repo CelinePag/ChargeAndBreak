@@ -422,8 +422,14 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
         rho  = rho1 + rho2
 
         _brk_active = bool(b45 + b15 + b30)
-        # sigma from the recorded execution; M4 forces charge+rest sequential
-        sigma_val = int(dur.get("sigma", 1 if (y and (rho1 + rho2)) else 0))
+        # sigma from the recorded execution — but (44) sigma >= y+rho1+rho2-1
+        # makes charge+rest ALWAYS sequential in the model, so override the
+        # recorded value when both are present (the sim may log sigma=0
+        # there, which is a binary infeasibility that gets the whole MIP
+        # start rejected).
+        sigma_val = int(dur.get("sigma", 0))
+        if y and (rho1 + rho2):
+            sigma_val = 1
         v_val     = int(is_CS and (bool(y) or _brk_active or bool(rho1 + rho2)))
 
         # M2: g = credited charging — full tauc only when a break is declared
@@ -629,7 +635,7 @@ def _classify_stop_reason(status: str, gap_val: float, mip_gap: float,
 
 def oracle_solve(full_data: dict, D_actual_list: list,
                  sim_results: dict = None,
-                 time_limit: int   = 12 * 3600,
+                 time_limit: int   = 2 * 3600,
                  mip_gap: float    = 0.005,
                  tee: bool         = True,
                  verbose: bool     = True,
@@ -649,7 +655,9 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     D_actual_list : list[float], length N — realised leg travel times (h)
     sim_results   : dict from run_simulation / run_greedy (for warm-start),
                     or None to solve without warm-start
-    time_limit    : int  — solver wall-clock limit in seconds (default 6 h)
+    time_limit    : int  — solver wall-clock limit in seconds (default 2 h;
+                           bound traces show solves either certify within
+                           ~1 h or flatline — longer caps buy nothing)
     tee           : bool — print HiGHS solver log to stdout
     verbose       : bool — print summary lines to stdout and log_fh
     log_fh        : open file handle for log output (optional)
@@ -740,8 +748,22 @@ def oracle_solve(full_data: dict, D_actual_list: list,
 
     if sim_results is not None:
         _warmstart_oracle(model, oracle_data, sim_results)
-        _op(f"  Warm-start: sim arrival {sim_results['total_time']:.3f}h "
-            f"injected as incumbent")
+        # Keep only the DISCRETE skeleton of the start (partial MIP start).
+        # The simulation's continuous values (energies, times) differ from
+        # the MILP's PWL arithmetic by ~1e-5 — above Gurobi's feasibility
+        # tolerance — so a full start gets rejected outright ("User MIP
+        # start violates constraint ...").  Gurobi completes a partial
+        # start by solving an LP with the integers fixed, deriving exact
+        # continuous values itself (and LP-optimal timing for the greedy
+        # skeleton, which is at least as good as the simulated one).
+        for _v in model.component_data_objects(pyo.Var, active=True):
+            if _v.fixed:                    # fixed values are part of the
+                continue                    # model itself — never clear them
+            if not (_v.is_binary() or _v.is_integer()):
+                _v.value = None
+        _op(f"  Warm-start: sim schedule (arrival "
+            f"{sim_results['total_time']:.3f}h) injected as partial MIP "
+            f"start (binary skeleton; Gurobi completes the LP)")
 
     solver = pyo.SolverFactory("gurobi")
     solver.options["MIPGap"]     = mip_gap

@@ -142,10 +142,15 @@ def plot_class(route_class: str, items: list, out_base: str,
         ax.plot(x, lb, color=col, lw=1.0, alpha=0.22, ls="--", dashes=(4, 2))
         groups.setdefault(col, []).append((x, ub, lb))
 
-    # full-colour average per optimality group, on a shared log-time grid
-    grid_log = np.linspace(np.log10(xlim[0]), np.log10(xlim[1]), 240)
-    grid_x   = 10.0 ** grid_log
+    # full-colour average per optimality group, on a shared log-time grid.
+    # The average only exists once EVERY member has produced a sample, so
+    # start the grid at the group's latest first-sample time — otherwise the
+    # left edge mixes real data with values clamped back from later samples.
     for col, group in groups.items():
+        t_start  = max(g[0][0] for g in group)
+        grid_log = np.linspace(np.log10(max(t_start, xlim[0])),
+                               np.log10(xlim[1]), 240)
+        grid_x   = 10.0 ** grid_log
         avg_ub, avg_lb = _group_average(group, grid_log)
         ax.fill_between(grid_x, avg_lb, avg_ub, color=col, alpha=0.08)
         ax.plot(grid_x, avg_ub, color=col, lw=2.4, alpha=1.0,
