@@ -1,0 +1,55 @@
+
+=================================================================
+  LA SIMULATION START  (2026-07-27 17:41:35)
+  Instance : RshortCfewTnone_18   run_id=RshortCfewTnone_18_LA_20260727_174134_001
+  Route    : 53 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 50/53 stops done, continuing from stop 50
+
+[LA] stop 50 (LAYBY)  t=37.345h  soc=169kWh  cd=3.66h  sd=3.66h  sw=5.60h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [50->53]  travel=0.80h  4 actions × 25 scen  8w  [mean,lp]  pruned=2
+  y=0  brk=0    rst=0   960000001.529h (0.000h)  ok=1/25  ws=0/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=0    rst=r2  960000001.895h (0.000h)  ok=1/25  ws=0/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=b45  rst=0   960000001.565h (0.000h)  ok=1/25  ws=0/25  tauc=0m  taub=45m  (0.9s)
+  y=0  brk=b30  rst=0   960000001.555h (0.000h)  ok=1/25  ws=0/25  tauc=0m  taub=30m  (0.9s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=37.345h  td=37.345h  (mean=960000001.529h)  3.4s
+  [!] FORCED REST (r2) at stop 50
+
+[LA] stop 51 (LAYBY)  t=46.762h  soc=145kWh  cd=0.25h  sd=0.25h  sw=0.25h  phi=0  r2=2  ext_sh=1/2  sd_lim=9h
+     horizon [51->53]  travel=0.53h  5 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.8s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.8s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=46.762h  td=46.762h  (mean=1000000000.000h)  4.0s
+  [!] FORCED REST (r2) at stop 51
+
+[LA] stop 52 (LAYBY)  t=56.170h  soc=120kWh  cd=0.24h  sd=0.24h  sw=0.24h  phi=0  r2=3  ext_sh=1/2  sd_lim=9h
+     horizon [52->53]  travel=0.27h  4 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.0s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=56.170h  td=56.170h  (mean=1000000000.000h)  3.4s
+  [!] FORCED REST (r1) at stop 52
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 67.581 h  (67:34)
+  Duration : 59.581 h
+  Wall     : 11.5 s
+=================================================================
+
+  Oracle   : loaded from cache  solutions/oracle_RshortCfewTnone_18.json
+  Scenarios: logs/RshortCfewTnone_18_LA_20260727_174134_001_scenarios.json  (coverage=100.0%)
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : solutions/RshortCfewTnone_18_LA_20260727_174134_001.json
