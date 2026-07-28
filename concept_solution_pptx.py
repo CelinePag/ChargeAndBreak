@@ -111,8 +111,12 @@ def _soc_charge_path(t_start, e_arr, e_dep):
     soc_pts.append((t_start + (e2t(e_dep) - t0c), e_dep))
 
 if SOURCE == "oracle":
-    # ---- hindsight-optimal plan stored in the solution file ----------------
-    osol = sol["oracle"]["sol"]
+    # ---- hindsight-optimal plan: embedded (old runs) or shared cache --------
+    _oracle = sol.get("oracle")
+    if not _oracle:
+        from oracle import load_oracle_cache
+        _oracle = load_oracle_cache(sol.get("instance", "")) or {}
+    osol = _oracle["sol"]
     soc_pts.append((osol[0]["ta"], osol[0]["ea"]))
     for k in range(len(osol) - 1):
         s, s1 = osol[k], osol[k + 1]

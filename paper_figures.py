@@ -136,7 +136,7 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
     """
     rows = cs.load_solutions(solutions_dir)
     cs._annotate_instance_tags(rows)
-    cs._annotate_gap_to_oracle(rows)
+    cs._annotate_gap_to_oracle(rows, solutions_dir)
     cs._annotate_outcome(rows)
     rows, n_dup = _dedup_latest(rows)
     if n_dup:

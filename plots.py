@@ -491,7 +491,12 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     L_set = set(full_data.get("L", []))     # layby / rest-area nodes (M8)
 
     tend        = states[-1].t_arr          # physical arrival at N, NO penalty
-    oracle      = results.get("oracle", {})
+    # oracle is decoupled from method runs: prefer any embedded block (old
+    # runs), else load the shared cache solutions/oracle_<instance>.json
+    oracle      = results.get("oracle")
+    if not oracle:
+        from oracle import load_oracle_cache
+        oracle = load_oracle_cache(full_data.get("title", "")) or {}
     oracle_sol  = oracle.get("sol",      [])
     oracle_obj  = oracle.get("obj",      None)   # includes beta·Σdelta (MILP obj)
     oracle_feas = oracle.get("feasible", False)
@@ -1164,6 +1169,7 @@ def load_run(run_ref: str,
     actions = sol["actions"]
     states  = [SimpleNamespace(**s) for s in traj]
     N       = full_data["N"]
+    from oracle import load_oracle_cache as _load_oracle_cache
 
     D_actual = sol.get("D_actual_list") or list(D_real)
     td_list  = sol.get("td_list") or [
@@ -1182,7 +1188,9 @@ def load_run(run_ref: str,
         durations_list   = durations,
         total_time       = traj[-1]["t_arr"],
         wall_clock       = sol.get("wall_clock_s", 0.0),
-        oracle           = sol.get("oracle", {}),
+        oracle           = (sol.get("oracle")
+                            or _load_oracle_cache(sol.get("instance", ""))
+                            or {}),
         metrics          = sol.get("metrics", {}),
         sol_path         = sol_path,
         run_id           = run_id,

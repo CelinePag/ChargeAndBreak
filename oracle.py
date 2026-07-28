@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import contextlib as _ctx
 import io as _io
+import json
+import os
 import re
 import warnings
 
@@ -45,6 +47,60 @@ import pyomo.environ as pyo
 from BEHDV     import _energy_after_charging
 from MILP      import build_model, extract_solution
 from instances import compute_time_bounds
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ORACLE CACHE  (shared by the ORACLE runner, compile_solutions, plots)
+# ══════════════════════════════════════════════════════════════════════════════
+# The oracle depends only on the instance geometry + the realised travel times
+# (D_real), both fixed per instance, so ONE oracle per instance is shared by
+# every method.  It is stored at solutions/oracle_<instance>.json and is NOT
+# recomputed by method runs — methods and the oracle are solved independently;
+# the gap to oracle is derived on demand (compile_solutions / plots) from this
+# cache, whenever it exists.
+
+def oracle_cache_path(instance: str, solutions_dir: str = "solutions") -> str:
+    return os.path.join(solutions_dir, f"oracle_{instance}.json")
+
+
+def _reint_keys(obj):
+    """Recursively turn digit string keys back into ints (JSON loses int keys)."""
+    if isinstance(obj, dict):
+        return {(int(k) if isinstance(k, str) and k.lstrip("-").isdigit() else k):
+                _reint_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_reint_keys(v) for v in obj]
+    return obj
+
+
+def load_oracle_cache(instance: str, solutions_dir: str = "solutions"):
+    """Return the cached oracle dict for an instance, or None if not solved yet."""
+    path = oracle_cache_path(instance, solutions_dir)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return _reint_keys(json.load(fh))
+    except Exception:
+        return None
+
+
+def save_oracle_cache(instance: str, result: dict,
+                      solutions_dir: str = "solutions") -> str:
+    """Write an oracle result to its per-instance cache file; returns the path."""
+    def _ser(o):
+        if isinstance(o, (int, float, bool, str, type(None))):
+            return o
+        if isinstance(o, dict):
+            return {str(k): _ser(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [_ser(v) for v in o]
+        return str(o)
+    path = oracle_cache_path(instance, solutions_dir)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(_ser(result), fh, indent=2)
+    return path
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -507,9 +563,11 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
 def oracle_solve(full_data: dict, D_actual_list: list,
                  sim_results: dict = None,
                  time_limit: int   = 12 * 3600,
+                 mip_gap: float    = 0.005,
                  tee: bool         = True,
                  verbose: bool     = True,
-                 log_fh            = None) -> dict:
+                 log_fh            = None,
+                 log_file: str | None = None) -> dict:
     """
     Solve the full deterministic MILP with the travel times that actually
     occurred during the simulation (perfect hindsight).
@@ -596,9 +654,14 @@ def oracle_solve(full_data: dict, D_actual_list: list,
             f"injected as incumbent")
 
     solver = pyo.SolverFactory("gurobi")
-    solver.options["MIPGap"]     = 0.005
+    solver.options["MIPGap"]     = mip_gap
     solver.options["TimeLimit"]  = time_limit
     solver.options["Heuristics"] = 0.2
+    if log_file is not None:
+        # Persist Gurobi's full branch-and-bound log (incumbent / best-bound
+        # node table) to disk so the bound evolution can be traced/plotted; the
+        # normal pipeline leaves this None and the solver log is not saved.
+        solver.options["LogFile"] = log_file
 
     if tee:
         # Write solver output directly to stdout.

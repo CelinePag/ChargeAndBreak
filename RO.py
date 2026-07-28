@@ -146,6 +146,7 @@ def run_ro(full_data: dict,
         fig = os.path.join("figures",   f"{run_id}.png"),
         sol = os.path.join("solutions", f"{run_id}.json"),
         scn = os.path.join("logs",      f"{run_id}_scenarios.json"),
+        gurobi = os.path.join("logs",   f"{run_id}_gurobi.log"),
     )
     log = open(paths["log"], "w", encoding="utf-8")
 
@@ -173,7 +174,8 @@ def run_ro(full_data: dict,
                                    share_durations=True)
     info, status = _twosp.solve_2sp(model, time_limit=time_limit,
                                     mip_gap=mip_gap, tee=tee,
-                                    heuristics=heuristics, mip_focus=mip_focus)
+                                    heuristics=heuristics, mip_focus=mip_focus,
+                                    log_file=paths["gurobi"])
     t_solve_total = time.perf_counter() - t0
     _p(f"  Solve status={status}  ({t_solve_total:.1f}s)")
 
@@ -243,6 +245,7 @@ def run_ro(full_data: dict,
             ro_status    = info.get("status"),
             ro_optimal   = info.get("optimal"),
             solve_time   = t_solve_total,
+            gurobi_log   = paths["gurobi"],
             supervised   = supervised,
             prune_quantile = prune_quantile,
         ),

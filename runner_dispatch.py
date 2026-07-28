@@ -178,6 +178,9 @@ def run_algorithm(
     # shared MILP solver tuning (RO / 2SP); None → Gurobi defaults
     milp_heuristics: Optional[float] = 0.2,
     milp_mip_focus: Optional[int]    = None,
+    # ORACLE options (the hindsight MILP, run as its own algorithm)
+    oracle_time_limit: int = 12 * 3600,
+    oracle_mip_gap: float  = 0.005,
     # common
     verbose: bool          = True,
     oracle_tee: bool       = False,
@@ -242,10 +245,10 @@ def run_algorithm(
     dict -- canonical results dict (same schema for all three algorithms)
     """
     alg = algorithm.upper().strip()
-    if alg not in ("LA", "RO", "ROBU", "GREEDY", "2SP"):
+    if alg not in ("LA", "RO", "ROBU", "GREEDY", "2SP", "ORACLE"):
         raise ValueError(
-            f"algorithm must be 'LA', 'RO', 'ROBU', 'greedy', or '2SP'; "
-            f"got '{algorithm}'"
+            f"algorithm must be 'LA', 'RO', 'ROBU', 'greedy', '2SP', or "
+            f"'ORACLE'; got '{algorithm}'"
         )
 
     # ── Load precomputed instance ──────────────────────────────────────────────
@@ -349,6 +352,38 @@ def run_algorithm(
             prune_quantile = prune_quantile,
         )
 
+    elif alg == "ORACLE":
+        # The hindsight oracle, run independently of any method.  It solves the
+        # full-route MILP on the instance's realised travel times, writes the
+        # shared cache solutions/oracle_<instance>.json (consumed on demand for
+        # the gap to oracle) and a Gurobi bound log for plotting.
+        import time as _time
+        from oracle import oracle_solve, save_oracle_cache
+        instance   = full_data.get("title", "unknown")
+        os.makedirs("logs", exist_ok=True)
+        gurobi_log = os.path.join("logs", f"oracle_{instance}_gurobi.log")
+        txt_log    = os.path.join("logs", f"{run_id}.txt") if run_id else None
+        _lfh = open(txt_log, "w", encoding="utf-8") if txt_log else None
+        t0 = _time.perf_counter()
+        res = oracle_solve(
+            full_data, D_real, sim_results=None,
+            time_limit=oracle_time_limit, mip_gap=oracle_mip_gap,
+            tee=False, verbose=verbose, log_fh=_lfh, log_file=gurobi_log,
+        )
+        wall = _time.perf_counter() - t0
+        if _lfh:
+            _lfh.close()
+        cache_path = save_oracle_cache(instance, res)
+        if verbose:
+            print(f"  Oracle   : {res.get('status')}  obj={res.get('obj')}  "
+                  f"cached -> {cache_path}")
+        out = dict(res)
+        out["total_time"] = res.get("obj", float("inf"))
+        out["wall_clock"] = wall
+        out["sol_path"]   = cache_path
+        out["gurobi_log"] = gurobi_log
+        return out
+
     else:  # LA
         from Simulation import run_simulation_precomputed
         return run_simulation_precomputed(
@@ -430,9 +465,12 @@ def _expand_algorithms(spec: str) -> list:
             out.extend(_ALL_ALGORITHMS)
             continue
         alg = part.upper()
-        if alg not in _ALL_ALGORITHMS:
+        # ORACLE is a valid explicit algorithm but is excluded from "all"
+        # (it is the hindsight reference, not a policy under comparison)
+        if alg not in _ALL_ALGORITHMS and alg != "ORACLE":
             raise SystemExit(f"unknown algorithm '{part}' "
-                              f"(expected LA, RO, ROBU, greedy, 2SP, or all)")
+                              f"(expected LA, RO, ROBU, greedy, 2SP, ORACLE, "
+                              f"or all)")
         out.append(alg)
     seen = set()
     uniq = []
@@ -738,6 +776,13 @@ if __name__ == "__main__":
                         help="Disable feeding each master the previous plan as "
                              "a Gurobi MIP start.")
 
+    # ORACLE (hindsight MILP, run as its own algorithm)
+    parser.add_argument("--oracle_time_limit", type=int, default=12 * 3600,
+                        help="ORACLE solver time limit s (default: 12h).")
+    parser.add_argument("--oracle_mip_gap", type=float, default=0.005,
+                        help="ORACLE MIP gap tolerance (default: 0.005). Raise "
+                             "for long routes where proving the last %% is slow.")
+
     # 2SP
     parser.add_argument("--twosp_time_limit", type=int,   default=7200)
     parser.add_argument("--twosp_mip_gap",    type=float, default=0.005)
@@ -807,6 +852,8 @@ if __name__ == "__main__":
         robu_warmstart      = args.robu_warmstart,
         safety_buffer    = args.safety,
         queue_threshold  = args.queue_thresh,
+        oracle_time_limit = args.oracle_time_limit,
+        oracle_mip_gap    = args.oracle_mip_gap,
         twosp_time_limit = args.twosp_time_limit,
         twosp_mip_gap    = args.twosp_mip_gap,
         twosp_warmstart_seed = args.twosp_warmstart_seed,
@@ -841,7 +888,10 @@ if __name__ == "__main__":
             print(f"  Arrival    : {results['total_time']:.3f} h")
             print(f"  Wall clock : {results['wall_clock']:.1f} s")
             print(f"  Solution   : {results['sol_path']}")
-            print(f"  Log        : {results['log_path']}")
+            if results.get("log_path"):
+                print(f"  Log        : {results['log_path']}")
+            if results.get("gurobi_log"):
+                print(f"  Gurobi log : {results['gurobi_log']}")
     else:
         if args.run_id:
             print(f"  [!] --run_id ('{args.run_id}') ignored for batch runs; "
