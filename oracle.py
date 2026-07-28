@@ -46,7 +46,7 @@ import numpy as np
 import pyomo.environ as pyo
 
 from BEHDV     import _energy_after_charging
-from MILP      import build_model, extract_solution
+from MILP      import build_model, extract_solution, add_valid_inequalities
 from instances import compute_time_bounds
 
 
@@ -730,6 +730,13 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     _op(f"{'='*65}")
 
     model = build_model(oracle_data)
+    # build_model does NOT attach the valid inequalities (only the rolling-
+    # horizon subproblem path does).  VI-3/4/5 force integral prefix/global
+    # break and rest counts, which is what lifts the dual bound on long
+    # routes — without them the LP satisfies the HoS constraints with
+    # fractional rests and the bound stalls far below the incumbent.
+    # init_state=None is correct here: the full route starts with sd = 0.
+    add_valid_inequalities(model, oracle_data)
 
     if sim_results is not None:
         _warmstart_oracle(model, oracle_data, sim_results)
@@ -739,7 +746,14 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     solver = pyo.SolverFactory("gurobi")
     solver.options["MIPGap"]     = mip_gap
     solver.options["TimeLimit"]  = time_limit
-    solver.options["Heuristics"] = 0.2
+    # Long routes stall on the DUAL bound, not the incumbent (a near-final
+    # incumbent appears within minutes; the bound then flatlines ~9% below
+    # it for hours).  So effort goes to bound movement: bound-focused search
+    # and aggressive cuts, with heuristics dialled down — the warm start /
+    # early heuristics already supply the incumbent.
+    solver.options["Heuristics"] = 0.05
+    solver.options["MIPFocus"]   = 3
+    solver.options["Cuts"]       = 2
     if log_file is not None:
         # Persist Gurobi's full branch-and-bound log (incumbent / best-bound
         # node table) to disk so the bound evolution can be traced/plotted; the
@@ -834,6 +848,17 @@ def oracle_solve(full_data: dict, D_actual_list: list,
 # SCHEDULE REPORTING
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _safe_print(msg: str):
+    """print() that survives cp1252 consoles (Windows default): box-drawing
+    glyphs in the tables would otherwise raise UnicodeEncodeError and kill
+    the calling run (same guard as _op inside oracle_solve)."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(msg.encode(enc, "replace").decode(enc, "replace"))
+
+
 def print_simulation_log(results: dict, full_data: dict):
     """Print the simulation trajectory as a formatted table."""
     N     = full_data["N"]
@@ -843,8 +868,8 @@ def print_simulation_log(results: dict, full_data: dict):
     hdr = (f"  {'stop':>4}  {'type':>5}  {'t_arr':>7}  {'soc':>6}  "
            f"{'cd':>5}  {'sd':>5}  {'sw':>5}  "
            f"{'y':>2}  {'brk':>4}  {'rst':>4}  action")
-    print(f"\n  === SIMULATION TRAJECTORY ===")
-    print(f"{hdr}\n  {'─'*95}")
+    _safe_print(f"\n  === SIMULATION TRAJECTORY ===")
+    _safe_print(f"{hdr}\n  {'─'*95}")
 
     for state, action in zip(results["states"], results["actions"]):
         stop = state.stop
@@ -858,7 +883,7 @@ def print_simulation_log(results: dict, full_data: dict):
         if brk != "—":  acts.append(f"BRK-{brk.upper()}")
         if rst != "—":  acts.append(f"REST-{rst.upper()}")
 
-        print(f"  {stop:>4}  {typ:>5}  "
+        _safe_print(f"  {stop:>4}  {typ:>5}  "
               f"{state.t_arr:>7.3f}  {state.e_arr:>6.1f}  "
               f"{state.cd:>5.2f}  {state.sd:>5.2f}  {state.sw:>5.2f}  "
               f"{y:>2}  {brk:>4}  {rst:>4}  "
@@ -868,7 +893,7 @@ def print_simulation_log(results: dict, full_data: dict):
 def print_oracle_log(oracle: dict, full_data: dict):
     """Print the oracle (hindsight-optimal) schedule as a formatted table."""
     if not oracle.get("feasible") or not oracle.get("sol"):
-        print("  Oracle: no feasible solution available.")
+        _safe_print("  Oracle: no feasible solution available.")
         return
 
     N     = full_data["N"]
@@ -883,8 +908,8 @@ def print_oracle_log(oracle: dict, full_data: dict):
     hdr = (f"  {'stop':>4}  {'type':>5}  {'t_arr':>7}  {'soc':>6}  "
            f"{'cd':>5}  {'sd':>5}  {'sw':>5}  "
            f"{'y':>2}  {'brk':>4}  {'rst':>4}  action")
-    print(f"\n  === ORACLE SCHEDULE  (arrival {oracle['obj']:.3f}h{opt_s}) ===")
-    print(f"{hdr}\n  {'─'*95}")
+    _safe_print(f"\n  === ORACLE SCHEDULE  (arrival {oracle['obj']:.3f}h{opt_s}) ===")
+    _safe_print(f"{hdr}\n  {'─'*95}")
 
     for s in sol:
         stop = s["i"]
@@ -899,7 +924,7 @@ def print_oracle_log(oracle: dict, full_data: dict):
         if brk != "—":  acts.append(f"BRK-{brk.upper()}")
         if rst != "—":  acts.append(f"REST-{rst.upper()}")
 
-        print(f"  {stop:>4}  {typ:>5}  "
+        _safe_print(f"  {stop:>4}  {typ:>5}  "
               f"{s['ta']:>7.3f}  {s['ea']:>6.1f}  "
               f"{s['cd']:>5.2f}  {s['sd']:>5.2f}  {s['sw']:>5.2f}  "
               f"{y:>2}  {brk:>4}  {rst:>4}  "

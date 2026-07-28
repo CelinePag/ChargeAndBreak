@@ -181,6 +181,7 @@ def run_algorithm(
     # ORACLE options (the hindsight MILP, run as its own algorithm)
     oracle_time_limit: int = 12 * 3600,
     oracle_mip_gap: float  = 0.005,
+    oracle_warmstart: bool = True,   # seed the MIP with a quiet greedy run
     # common
     verbose: bool          = True,
     oracle_tee: bool       = False,
@@ -370,9 +371,27 @@ def run_algorithm(
         # line-buffered so the header/summary is readable while the (possibly
         # multi-hour) solve is still running, not only after it closes.
         _lfh = open(txt_log, "w", encoding="utf-8", buffering=1)
+        # Warm start: run the (deterministic, seconds-fast) greedy policy on
+        # the same realised travel times and inject its schedule as the MIP
+        # start.  This hands the solver a feasible incumbent immediately so
+        # all effort goes into the dual bound.  Never let a greedy failure
+        # (e.g. an infeasible-as-recorded run) kill an hours-long oracle
+        # solve — fall back to a cold start.
+        _ws_results = None
+        if oracle_warmstart:
+            try:
+                from greedy import run_greedy
+                _ws_results = run_greedy(
+                    full_data, D_real, E_real,
+                    verbose=False, oracle_tee=False, supervised=supervised,
+                )
+            except Exception as e:
+                print(f"  Oracle warm-start greedy failed ({e}); "
+                      f"solving cold.", file=_lfh)
+                _ws_results = None
         t0 = _time.perf_counter()
         res = oracle_solve(
-            full_data, D_real, sim_results=None,
+            full_data, D_real, sim_results=_ws_results,
             time_limit=oracle_time_limit, mip_gap=oracle_mip_gap,
             tee=False, verbose=verbose, log_fh=_lfh, log_file=gurobi_log,
         )
@@ -800,6 +819,10 @@ if __name__ == "__main__":
     parser.add_argument("--oracle_mip_gap", type=float, default=0.005,
                         help="ORACLE MIP gap tolerance (default: 0.005). Raise "
                              "for long routes where proving the last %% is slow.")
+    parser.add_argument("--no_oracle_warmstart", dest="oracle_warmstart",
+                        action="store_false", default=True,
+                        help="Disable the greedy warm start of the ORACLE MIP "
+                             "(default: enabled).")
 
     # 2SP
     parser.add_argument("--twosp_time_limit", type=int,   default=7200)
@@ -872,6 +895,7 @@ if __name__ == "__main__":
         queue_threshold  = args.queue_thresh,
         oracle_time_limit = args.oracle_time_limit,
         oracle_mip_gap    = args.oracle_mip_gap,
+        oracle_warmstart  = args.oracle_warmstart,
         twosp_time_limit = args.twosp_time_limit,
         twosp_mip_gap    = args.twosp_mip_gap,
         twosp_warmstart_seed = args.twosp_warmstart_seed,

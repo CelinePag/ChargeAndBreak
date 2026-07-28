@@ -41,22 +41,38 @@ _GAP_RE  = re.compile(r"([0-9]+(?:\.[0-9]+)?)%")
 _FLOAT   = re.compile(r"[-+]?\d+\.\d+")
 _SUMMARY = re.compile(
     r"Best objective\s+([0-9.eE+-]+),\s+best bound\s+([0-9.eE+-]+)")
+# total solve time from Gurobi's "Explored N nodes ... in 42.34 seconds" line,
+# used to place the closure point (many instances close in cutting planes, so
+# the last node-table line still shows a gap while the solve ended at ub = lb)
+_RUNTIME = re.compile(r"\bin\s+([0-9]+(?:\.[0-9]+)?)\s+seconds\b")
 
 
 def parse_gurobi_log(path: str):
-    """Return (times, incumbents, bounds) sampled from the node table."""
+    """Return (times, incumbents, bounds) sampled from the node table, with a
+    final closure point appended from the summary line so proved-optimal solves
+    end at ub = lb even when they closed in cutting planes."""
     times, inc, bnd = [], [], []
+    final_time = None
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             mt = _TIME_RE.search(line.rstrip())
             mg = _GAP_RE.search(line)
             if not (mt and mg):
+                mr = _RUNTIME.search(line)
+                if mr:
+                    try:
+                        final_time = float(mr.group(1))
+                    except ValueError:
+                        pass
                 # final summary line (proves-optimal / final incumbent+bound)
                 ms = _SUMMARY.search(line)
                 if ms:
                     try:
                         ub, lb = float(ms.group(1)), float(ms.group(2))
-                        t = times[-1] if times else 0.0
+                        # prefer the true solve time; never go backwards
+                        t = final_time if final_time is not None else 0.0
+                        if times:
+                            t = max(t, times[-1])
                         times.append(t); inc.append(ub); bnd.append(lb)
                     except ValueError:
                         pass
@@ -115,6 +131,9 @@ if __name__ == "__main__":
                          "stop before the cap once it hits 0.5%.")
     ap.add_argument("--out", default=None,
                     help="output path base (default figures/bound_trace_<inst>)")
+    ap.add_argument("--warmstart", action="store_true", default=False,
+                    help="seed the MIP with a quiet greedy run first, as the "
+                         "ORACLE pipeline does (default: cold start)")
     args = ap.parse_args()
 
     full_data, D_real, E_real, _cv = load_instance_json(args.instance)
@@ -128,9 +147,16 @@ if __name__ == "__main__":
     # oracle solves on
     D_actual_list = list(D_real)
 
+    sim_results = None
+    if args.warmstart:
+        from greedy import run_greedy
+        print(f"  Greedy warm-start run for {stem} ...")
+        sim_results = run_greedy(full_data, D_real, E_real,
+                                 verbose=False, oracle_tee=False)
+
     print(f"  Solving oracle for {stem} (N={N}) with a {args.time_limit}s cap, "
           f"Gurobi log -> {log_path}")
-    res = oracle_solve(full_data, D_actual_list, sim_results=None,
+    res = oracle_solve(full_data, D_actual_list, sim_results=sim_results,
                        time_limit=args.time_limit, tee=False, verbose=True,
                        log_file=log_path)
 
