@@ -170,7 +170,8 @@ if __name__ == "__main__":
         from greedy import run_greedy
         print(f"  Greedy warm-start run for {stem} ...")
         sim_results = run_greedy(full_data, D_real, E_real,
-                                 verbose=False, oracle_tee=False)
+                                 verbose=False, oracle_tee=False,
+                                 persist=False)   # warm start, not a result
 
     print(f"  Solving oracle for {stem} (N={N}) with a {args.time_limit}s cap, "
           f"Gurobi log -> {log_path}")

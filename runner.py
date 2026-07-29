@@ -138,12 +138,14 @@ def finalize_run(
     # A method run therefore stands alone and does not wait on the oracle.
 
     # ── 2. Save scenario tracker ──────────────────────────────────────────────
-    scn_path = paths["scn"]
-    tracker.save(scn_path)
+    scn_path = paths.get("scn")
+    if scn_path:
+        tracker.save(scn_path)
     scn_summary = tracker.summary()
     coverage = scn_summary.get("coverage_fraction")
-    _lp(f"  Scenarios: {scn_path}"
-        + (f"  (coverage={coverage:.1%})" if coverage is not None else ""))
+    if scn_path:
+        _lp(f"  Scenarios: {scn_path}"
+            + (f"  (coverage={coverage:.1%})" if coverage is not None else ""))
 
     # ── 2.5. S2/S3 metrics block ──────────────────────────────────────────────
     violations = list(getattr(vehicle, "violations", []))
@@ -277,10 +279,18 @@ def finalize_run(
     if method_meta:
         payload.update(_ser(method_meta))
 
-    sol_path = paths["sol"]
-    with open(sol_path, "w") as fj:
-        json.dump(payload, fj, indent=2)
-    _lp(f"  Solution : {sol_path}")
+    # paths["sol"] = None marks a run whose result must NOT be persisted as a
+    # method result — currently the greedy warm start of the ORACLE solve.
+    # Writing it created a newer, UNGUARDED greedy solution for that instance,
+    # which then won the latest-run dedup and silently replaced the real
+    # greedy run in every table and figure.
+    sol_path = paths.get("sol")
+    if sol_path:
+        with open(sol_path, "w") as fj:
+            json.dump(payload, fj, indent=2)
+        _lp(f"  Solution : {sol_path}")
+    else:
+        _lp("  Solution : not persisted (internal warm-start run)")
 
     # ── 4. Close log ──────────────────────────────────────────────────────────
     if log_fh and not log_fh.closed:
@@ -320,7 +330,7 @@ def finalize_run(
             print(f"     {iss}")
 
     # ── 8. Save figure (opt-in; plot later with `python plots.py <run_id>`) ──
-    if plot:
+    if plot and paths.get("fig"):
         fig_path = paths["fig"]
         try:
             plot_simulation_results(

@@ -406,7 +406,8 @@ def run_greedy(full_data: dict,
                run_id: str                      = None,
                oracle_tee: bool                 = True,
                supervised: bool                 = False,
-               prune_quantile: float | None     = GUARD_QUANTILE) -> dict:
+               prune_quantile: float | None     = GUARD_QUANTILE,
+               persist: bool                    = True) -> dict:
     """
     Run the greedy benchmark simulation from stop 0 to stop N.
 
@@ -450,11 +451,16 @@ def run_greedy(full_data: dict,
     if run_id is None:
         ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"{full_data.get('title', 'inst')}_GREEDY_{ts}"
+    # persist=False -> an INTERNAL run (the ORACLE MIP warm start): keep the
+    # log for traceability but write no solution/figure/scenario artefacts, so
+    # it can never be mistaken for a greedy method result by the dedup, the
+    # tables, or the figures.
     paths = dict(
         log = os.path.join("logs",      f"{run_id}.txt"),
-        fig = os.path.join("figures",   f"{run_id}.png"),
-        sol = os.path.join("solutions", f"{run_id}.json"),
-        scn = os.path.join("logs",      f"{run_id}_scenarios.json"),
+        fig = os.path.join("figures",   f"{run_id}.png") if persist else None,
+        sol = os.path.join("solutions", f"{run_id}.json") if persist else None,
+        scn = (os.path.join("logs", f"{run_id}_scenarios.json")
+               if persist else None),
     )
     log = open(paths["log"], "w", encoding="utf-8")
 

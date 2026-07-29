@@ -384,6 +384,10 @@ def run_algorithm(
                 _ws_results = run_greedy(
                     full_data, D_real, E_real,
                     verbose=False, oracle_tee=False, supervised=supervised,
+                    # persist=False: this is a MIP warm start, not a greedy
+                    # method result.  Persisting it wrote a newer, unguarded
+                    # greedy solution that hijacked the latest-run dedup.
+                    persist=False,
                 )
             except Exception as e:
                 print(f"  Oracle warm-start greedy failed ({e}); "
