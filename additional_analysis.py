@@ -87,6 +87,11 @@ DEFAULT_COMBOS = ["RshortCfew", "RshortCmany", "RmediumCfew", "RmediumCmany"]
 DEFAULT_TW      = ["tight", "medium", "large", "none"]
 DEFAULT_SEEDS   = "1-10"          # sensitivity does not need the full 50
 DEFAULT_ALGOS   = "greedy,LA,2SP,ORACLE"   # reduced method set for sweeps
+# Greedy baseline guard (2026-07-29): the base case runs greedy with a 0.95
+# departure quantile ("a driver keeps a few minutes in hand"), so every greedy
+# run launched here must match or the sweep deltas mix a guard change with the
+# axis change.
+DEFAULT_GUARD   = 0.95
 DIESEL_ALGOS    = "greedy,ORACLE"          # 8.4 needs the hindsight optimum
                                            # + the practice baseline
 
@@ -175,12 +180,35 @@ def _run(cmd: list[str], dry: bool) -> None:
 
 
 def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
-              extra: list[str] | None = None) -> None:
-    cmd = [sys.executable, "runner_dispatch.py", pattern, algos,
-           "--jobs", str(jobs), "--skip-existing"]
-    if extra:
-        cmd += extra
-    _run(cmd, dry)
+              extra: list[str] | None = None,
+              guard: float | None = None) -> None:
+    """Launch runner_dispatch for one instance pattern.
+
+    ``guard`` is the greedy departure quantile (--prune_quantile).  Because
+    that flag is SHARED — it also drives LA's action pruning and the opt-in
+    supervisor — it must not leak onto the other algorithms, whose base runs
+    were made without it.  So when greedy is requested alongside others, the
+    batch is split: greedy runs guarded, the rest run untouched.
+    """
+    def _go(alg_spec: str, guarded: bool) -> None:
+        cmd = [sys.executable, "runner_dispatch.py", pattern, alg_spec,
+               "--jobs", str(jobs), "--skip-existing"]
+        if guarded and guard is not None:
+            cmd += ["--prune_quantile", str(guard)]
+        if extra:
+            cmd += extra
+        _run(cmd, dry)
+
+    algo_list = [a.strip() for a in algos.split(",") if a.strip()]
+    greedy    = [a for a in algo_list if a.lower() == "greedy"]
+    others    = [a for a in algo_list if a.lower() != "greedy"]
+
+    if greedy and guard is not None:
+        _go(",".join(greedy), True)
+        if others:
+            _go(",".join(others), False)
+    else:
+        _go(algos, False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -297,7 +325,8 @@ def cmd_sensitivity(args) -> None:
         else:
             pattern = _materialise_patch(args.axis, v, combos, tws, seeds,
                                          out_dir, args.dry_run)
-        _dispatch(pattern, args.algorithms, args.jobs, args.dry_run)
+        _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
+                  guard=args.prune_quantile)
 
 
 def cmd_diesel(args) -> None:
@@ -310,7 +339,7 @@ def cmd_diesel(args) -> None:
     pattern = _materialise_copy("diesel", combos, tws, seeds,
                                 out_dir, args.dry_run)
     _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-              extra=["--diesel"])
+              extra=["--diesel"], guard=args.prune_quantile)
 
 
 def cmd_gamma(args) -> None:
@@ -323,7 +352,7 @@ def cmd_gamma(args) -> None:
         pattern = _materialise_copy(f"g{g}", combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, "ROBU", args.jobs, args.dry_run,
-                  extra=["--robu_gamma", str(g)])
+                  extra=["--robu_gamma", str(g)])   # ROBU: no greedy guard
 
 
 def _latest_2sp_solution(stem: str) -> str | None:
@@ -349,7 +378,7 @@ def cmd_guard(args) -> None:
         pattern = _materialise_copy(tag, combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  extra=["--prune_quantile", str(q)])
+                  guard=q)
 
 
 def cmd_vss(args) -> None:
@@ -413,6 +442,13 @@ def _add_common(p: argparse.ArgumentParser, algos_default: str) -> None:
                         f"(default: {algos_default})")
     p.add_argument("--jobs", type=int, default=2,
                    help="Concurrent (instance, algorithm) runs (default: 2)")
+    p.add_argument("--prune_quantile", type=float, default=DEFAULT_GUARD,
+                   help="Greedy departure guard: depart only if the leg still "
+                        f"fits at this xi quantile (default: {DEFAULT_GUARD}, "
+                        "matching the base case). Applied to GREEDY only — "
+                        "the flag is shared with LA pruning, so other "
+                        "algorithms are dispatched without it. Pass an empty "
+                        "value via --prune_quantile nan to disable.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands / files without executing anything")
 
