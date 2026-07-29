@@ -361,7 +361,22 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, kind: str = "box",
     if kind == "bar":
         tops = [np.mean(v) + (np.std(v, ddof=1) if len(v) > 1 else 0.0)
                 for v in gaps.values() if v]
+    elif kind == "box":
+        # Boxes are drawn with showfliers=False, so the raw maximum would
+        # scale the axis to outliers that are never plotted (leaving a large
+        # empty band above the data).  The highest mark actually drawn is the
+        # upper whisker: the largest point within Q3 + 1.5 IQR.  The mean
+        # diamond is always inside the box, so it cannot exceed it.
+        tops = []
+        for v in gaps.values():
+            if not v:
+                continue
+            a = np.asarray(v, dtype=float)
+            q1, q3 = np.percentile(a, [25, 75])
+            inside = a[a <= q3 + 1.5 * (q3 - q1)]
+            tops.append(float(inside.max()) if inside.size else float(a.max()))
     else:
+        # violin draws the full distribution, extremes included
         tops = [v for vals in gaps.values() for v in vals]
     y_top = 1.06 * max(tops) if tops else 1.0
 

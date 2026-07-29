@@ -50,7 +50,7 @@ from oracle_bound_trace import parse_gurobi_log
 
 _CLASS_ORDER = ["short", "medium", "long"]
 _CLASS_TITLE = {"short": "Short", "medium": "Medium", "long": "Long"}
-_PROD_CAP_S = 12 * 3600
+_PROD_CAP_S = 2 * 3600     # ORACLE default wall-clock cap (runner_dispatch)
 
 # optimality colours
 _COL_OPT    = "#000000"   # final gap < threshold
@@ -58,8 +58,10 @@ _COL_NONOPT = "#D62728"   # final gap >= threshold
 
 # defaults (overridable on the CLI)
 _DEF_OPT_GAP_PCT = 0.5    # final-gap threshold in % for "optimal" (= oracle MIPGap)
-_DEF_XMIN        = 1.0    # s
-_DEF_YLIM        = (-5.0, 5.0)
+_DEF_XMIN        = 1.0    # s — Gurobi logs node times in whole seconds, so
+                          # anything faster is "within the first second"
+_DEF_YLIM        = (-10.0, 5.0)   # asymmetric: stalled bounds sit near -8%,
+                                  # incumbents converge to 0 from just above
 
 
 def _route_class(name: str) -> str:
@@ -163,7 +165,7 @@ def plot_class(route_class: str, items: list, out_base: str,
             fontsize=7.5, color="#555")
     if xlim[0] < _PROD_CAP_S < xlim[1]:
         ax.axvline(_PROD_CAP_S, color="#999", lw=1.0, ls=":")
-        ax.text(_PROD_CAP_S, ylim[1], "12 h cap ",
+        ax.text(_PROD_CAP_S, ylim[1], "2 h cap ",
                 rotation=90, va="top", ha="right", fontsize=7.2, color="#999")
 
     ax.set_xscale("log")
@@ -225,10 +227,11 @@ if __name__ == "__main__":
                          f"as optimal (default: {_DEF_OPT_GAP_PCT}, = the oracle "
                          "MIPGap). Lower it for a stricter proof criterion.")
     ap.add_argument("--xmin", type=float, default=_DEF_XMIN,
-                    help=f"x-axis start in s (default: {_DEF_XMIN}). x-axis end "
-                         "is the max time present in each class's data.")
+                    help=f"x-axis start in s (default: {_DEF_XMIN}). All class "
+                         "figures share one x-axis so they can be compared.")
     ap.add_argument("--xmax", type=float, default=None,
-                    help="x-axis end in s (default: max time in the data).")
+                    help="x-axis end in s (default: max time across ALL "
+                         "classes, so every figure uses the same axis).")
     ap.add_argument("--ylim", type=float, nargs=2, default=list(_DEF_YLIM),
                     metavar=("YMIN", "YMAX"),
                     help=f"y-axis (%% from best). Default {_DEF_YLIM}")
@@ -246,19 +249,22 @@ if __name__ == "__main__":
         by_class.setdefault(tup[0], []).append((inst, *tup[1:]))
 
     ylim = tuple(args.ylim)
+    # ONE x-axis for every class figure: the three plots are meant to be read
+    # side by side, so a per-class axis would make short routes (which finish
+    # in ~10 s) look identical to long ones (hours) and would also reshape
+    # every figure whenever a new log is added.  Span the whole dataset.
+    data_xmax = max(max(t) for _, t, *_ in data.values())
+    xmax = args.xmax if args.xmax is not None else data_xmax
+    xmin = max(args.xmin, 1e-3)
+    if xmax <= xmin:
+        xmax = xmin * 10
+    xlim = (xmin, xmax)
+    print(f"  shared x-axis: [{xmin:g}, {xmax:g}] s")
     for rc in _CLASS_ORDER:
         items = by_class.get(rc)
         if not items:
             continue
-        # x ends at the max time present in this class's data (unless overridden)
-        data_xmax = max(max(t) for _, t, *_ in items)
-        xmax = args.xmax if args.xmax is not None else data_xmax
-        xmin = max(args.xmin, 1e-3)
-        if xmax <= xmin:
-            xmax = xmin * 10
-        xlim = (xmin, xmax)
         out_base = os.path.join(args.out_dir, f"oracle_bounds_opt_{rc}")
-        print(f"  {rc:6}: {len(items)} instance(s), x=[{xmin:g},{xmax:g}]s "
-              f"-> {out_base}.png")
+        print(f"  {rc:6}: {len(items)} instance(s) -> {out_base}.png")
         for p in plot_class(rc, items, out_base, xlim, ylim):
             print(f"    {p}")

@@ -47,45 +47,60 @@ _SUMMARY = re.compile(
 _RUNTIME = re.compile(r"\bin\s+([0-9]+(?:\.[0-9]+)?)\s+seconds\b")
 
 
+_RUN_START = re.compile(r"logging started")
+
+
 def parse_gurobi_log(path: str):
     """Return (times, incumbents, bounds) sampled from the node table, with a
     final closure point appended from the summary line so proved-optimal solves
-    end at ub = lb even when they closed in cutting planes."""
+    end at ub = lb even when they closed in cutting planes.
+
+    Gurobi APPENDS to LogFile, so re-solving an instance concatenates several
+    B&B logs into one file.  Only the MOST RECENT run is parsed: otherwise the
+    series jumps backwards in time and the incumbent appears to increase,
+    which corrupts both the per-instance curve and any average taken over it.
+    """
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.readlines()
+
+    starts = [k for k, ln in enumerate(lines) if _RUN_START.search(ln)]
+    if starts:
+        lines = lines[starts[-1]:]
+
     times, inc, bnd = [], [], []
     final_time = None
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            mt = _TIME_RE.search(line.rstrip())
-            mg = _GAP_RE.search(line)
-            if not (mt and mg):
-                mr = _RUNTIME.search(line)
-                if mr:
-                    try:
-                        final_time = float(mr.group(1))
-                    except ValueError:
-                        pass
-                # final summary line (proves-optimal / final incumbent+bound)
-                ms = _SUMMARY.search(line)
-                if ms:
-                    try:
-                        ub, lb = float(ms.group(1)), float(ms.group(2))
-                        # prefer the true solve time; never go backwards
-                        t = final_time if final_time is not None else 0.0
-                        if times:
-                            t = max(t, times[-1])
-                        times.append(t); inc.append(ub); bnd.append(lb)
-                    except ValueError:
-                        pass
-                continue
-            t = float(mt.group(1))
-            head = line[:mg.start()]
-            floats = _FLOAT.findall(head)
-            if len(floats) < 2:
-                continue
-            ub, lb = float(floats[-2]), float(floats[-1])
-            if ub < lb - 1e-6:            # mis-parse (UB must dominate LB); skip
-                continue
-            times.append(t); inc.append(ub); bnd.append(lb)
+    for line in lines:
+        mt = _TIME_RE.search(line.rstrip())
+        mg = _GAP_RE.search(line)
+        if not (mt and mg):
+            mr = _RUNTIME.search(line)
+            if mr:
+                try:
+                    final_time = float(mr.group(1))
+                except ValueError:
+                    pass
+            # final summary line (proves-optimal / final incumbent+bound)
+            ms = _SUMMARY.search(line)
+            if ms:
+                try:
+                    ub, lb = float(ms.group(1)), float(ms.group(2))
+                    # prefer the true solve time; never go backwards
+                    t = final_time if final_time is not None else 0.0
+                    if times:
+                        t = max(t, times[-1])
+                    times.append(t); inc.append(ub); bnd.append(lb)
+                except ValueError:
+                    pass
+            continue
+        t = float(mt.group(1))
+        head = line[:mg.start()]
+        floats = _FLOAT.findall(head)
+        if len(floats) < 2:
+            continue
+        ub, lb = float(floats[-2]), float(floats[-1])
+        if ub < lb - 1e-6:            # mis-parse (UB must dominate LB); skip
+            continue
+        times.append(t); inc.append(ub); bnd.append(lb)
     return times, inc, bnd
 
 
