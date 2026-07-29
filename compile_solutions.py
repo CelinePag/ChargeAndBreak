@@ -135,9 +135,14 @@ _COLS = [
 
 # run_id pattern produced by runner_dispatch.run_batch:
 #   <instance>_<ALGO>_<YYYYMMDD>_<HHMMSS>_<idx>
+# The batch runner appends a per-combination index ("_000"), single runs do
+# not — so the index MUST be optional here.  When it was mandatory, every
+# single run failed to match and fell back to a path-string ranking in
+# _dedup_latest, which made stale runs beat newer ones (a path starting with
+# "s"/"R" sorts above a "2026..." timestamp).
 _RUN_ID_RE = re.compile(
     r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP)_"
-    r"(?P<ts>\d{8}_\d{6})_(?P<idx>\d+)$"
+    r"(?P<ts>\d{8}_\d{6})(?:_(?P<idx>\d+))?$"
 )
 _ALGO_TO_METHOD = {"GREEDY": "greedy", "LA": "LA", "RO": "RO",
                    "ROBU": "ROBU", "2SP": "2SP"}
@@ -343,10 +348,13 @@ def _dedup_latest(rows: list[dict]) -> tuple[list[dict], int]:
     Returns (kept_rows, n_dropped).
     """
     def _rank(r):
+        """Recency key: (timestamp, batch index).  Runs whose id carries no
+        parseable timestamp rank below every timestamped run (empty string
+        sorts first) rather than above them by accident of path spelling."""
         m = _RUN_ID_RE.match(r.get("run_id") or "")
         if m:
-            return (m.group("ts"), int(m.group("idx")))
-        return (r.get("_file", ""), 0)
+            return (m.group("ts"), int(m.group("idx") or 0))
+        return ("", 0)
 
     best: dict = {}
     n_dup = 0
@@ -453,7 +461,39 @@ def _annotate_gap_to_oracle(rows: list[dict], solutions_dir: str = "solutions"):
 
 def _is_ok(r):          return r.get("status") == "OK"
 def _is_supervised(r):  return bool(r.get("supervised"))
-def _is_feasible(r):    return not bool(_get(r, ("metrics", "run_infeasible")))
+
+# M9 (2026-07-29) — the weekly working-time cap is out of problem scope (the
+# paper models the daily provisions only), so a stored "hos_weekly" violation
+# is a diagnostic, never grounds for infeasibility.  Runs written before the
+# change still carry it inside metrics.violations / run_infeasible; the
+# helpers below reclassify them on the fly so no re-run is needed.
+_NONFATAL_VIOL = {"hos_weekly"}
+
+
+def _fatal_viol_count(r) -> int:
+    """Number of run-infeasibility-grounds violations (excludes diagnostics)."""
+    byt = _get(r, ("metrics", "violations_by_type"))
+    if isinstance(byt, dict):
+        return sum(int(v) for k, v in byt.items() if k not in _NONFATAL_VIOL)
+    # very old runs without the by-type dict: trust the stored flag
+    return 1 if _get(r, ("metrics", "run_infeasible")) else 0
+
+
+def _run_infeasible(r) -> bool:
+    return (bool(_get(r, ("metrics", "run_infeasible")))
+            and _fatal_viol_count(r) > 0)
+
+
+def _hos_viol_count(r) -> int:
+    """HoS violations excluding out-of-scope diagnostics (hos_weekly)."""
+    byt = _get(r, ("metrics", "violations_by_type"))
+    if isinstance(byt, dict):
+        return sum(int(v) for k, v in byt.items()
+                   if k.startswith("hos") and k not in _NONFATAL_VIOL)
+    return int(_get(r, ("metrics", "n_hos_violations")) or 0)
+
+
+def _is_feasible(r):    return not _run_infeasible(r)
 
 
 # ── outcome classification ───────────────────────────────────────────────────
@@ -531,7 +571,7 @@ def classify_outcome(r):
     # should be reported as the method's — it is simply unsolved.
     if not _plan_certified(r):
         return "unsolved"
-    if _get(r, ("metrics", "run_infeasible")):
+    if _run_infeasible(r):
         return "infeasible"
     return "feasible"
 
@@ -678,7 +718,7 @@ def build_summary_sheet(ws, rows: list[dict]):
             _mean([r.get("gap_nopen") for r in feas]),
             _mean([_mval(r, "tw_n_misses") for r in ok_recs]),
             _mean([_mval(r, "tw_hit_rate") for r in ok_recs]),
-            _rate(solved, lambda r: (_mval(r, "n_hos_violations") or 0) > 0),
+            _rate(solved, lambda r: _hos_viol_count(r) > 0),
             _rate(solved, lambda r: (_mval(r, "n_stranding") or 0) > 0),
             _rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0),
             _mean([_mval(r, "decision_time_mean_s") for r in ok_recs]),
@@ -761,7 +801,8 @@ def build_gap_latex(rows, metric: str = "gap_pen",
 
     # aggregate: gaps[(route,cust,tw)][method_group] = [gaps]; oracle by instance
     gaps:    dict = defaultdict(lambda: defaultdict(list))
-    n_total: dict = defaultdict(lambda: defaultdict(int))   # feasible + infeasible
+    n_total: dict = defaultdict(lambda: defaultdict(int))   # ASSESSABLE runs
+    n_nobnd: dict = defaultdict(lambda: defaultdict(int))   # feasible, no oracle
     oracle:  dict = defaultdict(dict)
     n_seeds: dict = defaultdict(set)
     for r in pop:
@@ -775,20 +816,35 @@ def build_gap_latex(rows, metric: str = "gap_pen",
             # a genuine infeasibility — leave them out of the feas/total count
             if _is_unsolved(r):
                 continue
-            n_total[cell][mg] += 1
             if _gap_usable(r) and r.get(metric) is not None:
+                n_total[cell][mg] += 1
                 gaps[cell][mg].append(r[metric])
                 n_seeds[cell].add(r.get("instance"))
+            elif not _is_feasible(r):
+                # a genuine failure: no gap exists for it BY DEFINITION, so it
+                # belongs in the denominator as a missing sample
+                n_total[cell][mg] += 1
+            else:
+                # FEASIBLE but no oracle bound cached for this instance yet:
+                # the run simply cannot be assessed.  Counting it as a missing
+                # gap sample (the pre-2026-07-29 behaviour) made oracle-poor
+                # cells read as near-total infeasibility, e.g. "(0/50)" for
+                # 50 perfectly feasible long-route runs.
+                n_nobnd[cell][mg] += 1
 
     def _cell_str(cell, mg):
         vals = gaps[cell].get(mg, [])
         tot  = n_total[cell].get(mg, 0)
+        nb   = n_nobnd[cell].get(mg, 0)
         if tot == 0:
-            return "--"
-        nf  = len(vals)
-        cnt = f"{nf}" if nf == tot else f"{nf}/{tot}"
+            # no assessable run; [n] flags feasible runs still awaiting an
+            # oracle bound, so "no data yet" never looks like "all failed"
+            return rf"--~{{\scriptsize[{nb}]}}" if nb else "--"
+        nf   = len(vals)
+        cnt  = f"{nf}" if nf == tot else f"{nf}/{tot}"
         body = _pct(_mean(vals), 1) if nf else "--"
-        return rf"{body}~{{\scriptsize({cnt})}}"
+        pend = rf"[{nb}]" if nb else ""
+        return rf"{body}~{{\scriptsize({cnt}){pend}}}"
 
     # full_grid=True draws the complete canonical layout (every route,
     # customer and TW class), with '--' where no run exists yet, so the table
@@ -843,7 +899,10 @@ def build_gap_latex(rows, metric: str = "gap_pen",
              rf"travel-time multiplier $\xi_i$ shifted-lognormal on "
              rf"$[0.889, 1.6]$ with $\mathrm{{E}}[\xi]=1$, "
              rf"$\mathrm{{CV}} = {cv_s}$.  Parentheses give the feasible/total "
-             rf"run count per cell (a single number when all were feasible)."
+             rf"run count per cell among runs the oracle bound can assess "
+             rf"(a single number when all were feasible); square brackets "
+             rf"give feasible runs still awaiting an oracle bound, which are "
+             rf"excluded from both counts."
              rf"{cfg_txt}}}")
     L.append(rf"\label{{{lbl}}}")
     L.append(r"\begin{tabular}{lll c ccccc}")
@@ -943,7 +1002,7 @@ def build_feasibility_latex(rows) -> list[str]:
     for mval, label, has_repair, has_opt in method_rows:
         u      = [r for r in ok if r.get("method") == mval]
         solved = [r for r in u if not _is_unsolved(r)]
-        hos  = _rate(solved, lambda r: (_mval(r, "n_hos_violations") or 0) > 0)
+        hos  = _rate(solved, lambda r: _hos_viol_count(r) > 0)
         strd = _rate(solved, lambda r: (_mval(r, "n_stranding") or 0) > 0)
         rep  = (_rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0)
                 if has_repair else None)

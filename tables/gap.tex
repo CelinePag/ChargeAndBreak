@@ -1,0 +1,52 @@
+\begin{table}[htbp]
+\centering
+\caption{Gap to oracle (\%) in route duration (window penalties included) by instance class and method, averaged over 1--50 seed(s) per instance class; travel-time multiplier $\xi_i$ shifted-lognormal on $[0.889, 1.6]$ with $\mathrm{E}[\xi]=1$, $\mathrm{CV} = 0.15$.  Parentheses give the feasible/total run count per cell among runs the oracle bound can assess (a single number when all were feasible); square brackets give feasible runs still awaiting an oracle bound, which are excluded from both counts.  LA uses 25 scenarios over a 24\,h horizon; SP uses 25 scenarios.}
+\label{tab:gap}
+\begin{tabular}{lll c ccccc}
+\toprule
+\multirow{2}{*}{\textbf{\small Route}} & \multirow{2}{*}{\textbf{\small Cust.}} & \multirow{2}{*}{\textbf{\small TW}} & \multirow{2}{*}{\textbf{Oracle (h)}} &
+\multicolumn{5}{c}{\textbf{Gap to Oracle \%}} \\
+\cmidrule(lr){5-9}
+ & & & & Greedy & RO & ROBU & LA & SP \\
+\midrule
+\multirow{12}{*}{\small Short} & \multirow{4}{*}{\small Few} & {\small None} & 26.5 & 13.0~{\scriptsize(50)} & 21.5~{\scriptsize(50)} & 14.1~{\scriptsize(48/50)} & 6.8~{\scriptsize(48/50)} & 3.7~{\scriptsize(48/50)} \\
+ &  & {\small Tight} & 26.1 & 18.9~{\scriptsize(49/50)} & 27.2~{\scriptsize(50)} & 15.8~{\scriptsize(50)} & 10.3~{\scriptsize(50)} & 4.3~{\scriptsize(44/50)} \\
+ &  & {\small Medium} & 26.3 & 17.2~{\scriptsize(49/50)} & 23.8~{\scriptsize(50)} & 16.1~{\scriptsize(48/50)} & 10.2~{\scriptsize(50)} & 4.1~{\scriptsize(45/50)} \\
+ &  & {\small Large} & 26.2 & 15.8~{\scriptsize(50)} & 22.2~{\scriptsize(50)} & 14.3~{\scriptsize(46/49)} & 9.0~{\scriptsize(50)} & 4.1~{\scriptsize(46/50)} \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 28.0 & 12.7~{\scriptsize(50)} & 20.9~{\scriptsize(50)} & 16.1~{\scriptsize(49/50)} & 8.8~{\scriptsize(50)} & 4.3~{\scriptsize(46/50)} \\
+ &  & {\small Tight} & 28.0 & 28.3~{\scriptsize(49/50)} & 36.9~{\scriptsize(50)} & 27.7~{\scriptsize(48/50)} & 15.2~{\scriptsize(50)} & 5.7~{\scriptsize(46/50)} \\
+ &  & {\small Medium} & 27.6 & 22.1~{\scriptsize(49/50)} & 30.6~{\scriptsize(50)} & 19.0~{\scriptsize(50)} & 11.6~{\scriptsize(49)} & 4.6~{\scriptsize(45/50)} \\
+ &  & {\small Large} & 28.2 & 17.2~{\scriptsize(49/50)} & 34.0~{\scriptsize(50)} & 24.2~{\scriptsize(48/50)} & 11.5~{\scriptsize(50)} & 3.6~{\scriptsize(46/50)} \\
+ & \multirow{4}{*}{\small Many} & {\small None} & 31.3 & 14.8~{\scriptsize(50)} & 26.8~{\scriptsize(50)} & 22.1~{\scriptsize(49/50)} & 5.9~{\scriptsize(50)} & 4.7~{\scriptsize(49/50)} \\
+ &  & {\small Tight} & 31.3 & 41.7~{\scriptsize(50)} & 52.0~{\scriptsize(50)} & 45.9~{\scriptsize(47/49)} & 17.0~{\scriptsize(47/50)} & 10.4~{\scriptsize(44/50)} \\
+ &  & {\small Medium} & 31.7 & 33.6~{\scriptsize(49/50)} & 48.0~{\scriptsize(50)} & 36.4~{\scriptsize(48/49)} & 22.0~{\scriptsize(49/50)} & 5.2~{\scriptsize(45/50)} \\
+ &  & {\small Large} & 30.5 & 18.5~{\scriptsize(50)} & 39.0~{\scriptsize(50)} & 24.2~{\scriptsize(46/50)} & 11.8~{\scriptsize(50)} & 3.9~{\scriptsize(46/50)} \\
+\midrule
+\multirow{12}{*}{\small Medium} & \multirow{4}{*}{\small Few} & {\small None} & 54.3 & 16.3~{\scriptsize(47/50)} & 37.2~{\scriptsize(50)} & -- & 10.8~{\scriptsize(45/48)} & 12.6~{\scriptsize(42/50)} \\
+ &  & {\small Tight} & 55.9 & 18.0~{\scriptsize(48/50)} & 33.9~{\scriptsize(50)} & -- & 10.3~{\scriptsize(47/48)} & 11.0~{\scriptsize(44/50)} \\
+ &  & {\small Medium} & 54.1 & 17.0~{\scriptsize(50)} & 36.2~{\scriptsize(50)} & -- & 10.6~{\scriptsize(47/48)} & 8.9~{\scriptsize(46/50)} \\
+ &  & {\small Large} & 54.4 & 14.6~{\scriptsize(48/50)} & 34.3~{\scriptsize(50)} & -- & 9.6~{\scriptsize(49/50)} & 7.9~{\scriptsize(41/49)} \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 57.3 & 12.8~{\scriptsize(50)} & 30.1~{\scriptsize(50)} & -- & 8.1~{\scriptsize(47/48)} & 8.8~{\scriptsize(25/30)} \\
+ &  & {\small Tight} & 56.2 & 22.0~{\scriptsize(49/50)} & 36.4~{\scriptsize(50)} & -- & 15.0~{\scriptsize(45/46)} & -- \\
+ &  & {\small Medium} & 55.8 & 19.4~{\scriptsize(49/50)} & 38.8~{\scriptsize(50)} & -- & 13.8~{\scriptsize(47)} & 11.1~{\scriptsize(39/49)} \\
+ &  & {\small Large} & 55.0 & 16.5~{\scriptsize(50)} & 36.8~{\scriptsize(50)} & -- & 10.0~{\scriptsize(48)} & 10.8~{\scriptsize(41/50)} \\
+ & \multirow{4}{*}{\small Many} & {\small None} & 60.8 & 13.1~{\scriptsize(49/50)} & 25.9~{\scriptsize(50)} & -- & 8.1~{\scriptsize(45/46)} & 9.6~{\scriptsize(42/49)} \\
+ &  & {\small Tight} & 60.3 & 32.1~{\scriptsize(50)} & 43.8~{\scriptsize(50)} & -- & 24.5~{\scriptsize(45)} & 24.3~{\scriptsize(34/41)} \\
+ &  & {\small Medium} & 60.5 & 27.7~{\scriptsize(50)} & 40.1~{\scriptsize(50)} & -- & 18.8~{\scriptsize(45/46)} & 17.5~{\scriptsize(36/47)} \\
+ &  & {\small Large} & 58.8 & 20.0~{\scriptsize(49/50)} & 40.0~{\scriptsize(50)} & -- & 14.1~{\scriptsize(47/49)} & 14.7~{\scriptsize(40/48)} \\
+\midrule
+\multirow{12}{*}{\small Long} & \multirow{4}{*}{\small Few} & {\small None} & 102.8 & 11.7~{\scriptsize(49/50)} & 35.3~{\scriptsize(6)} & -- & 11.0~{\scriptsize(8)} & -- \\
+ &  & {\small Tight} & 105.7 & 14.7~{\scriptsize(26/32)[18]} & -- & -- & 9.9~{\scriptsize(9)} & -- \\
+ &  & {\small Medium} & 105.5 & 14.2~{\scriptsize(50)} & 35.9~{\scriptsize(9)} & -- & 8.9~{\scriptsize(8)} & -- \\
+ &  & {\small Large} & 104.8 & 12.3~{\scriptsize(48/50)} & 37.0~{\scriptsize(9)} & -- & 9.2~{\scriptsize(9)} & -- \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 104.7 & 12.0~{\scriptsize(47/48)[2]} & -- & -- & 9.6~{\scriptsize(4)[2]} & -- \\
+ &  & {\small Tight} & 103.0 & 17.9~{\scriptsize(10/12)[38]} & -- & -- & --~{\scriptsize(0/1)[6]} & -- \\
+ &  & {\small Medium} & 105.6 & 15.3~{\scriptsize(49/50)} & -- & -- & 11.5~{\scriptsize(7)} & -- \\
+ &  & {\small Large} & 104.3 & 14.0~{\scriptsize(49/50)} & -- & -- & 10.4~{\scriptsize(8)} & -- \\
+ & \multirow{4}{*}{\small Many} & {\small None} & -- & --~{\scriptsize[50]} & -- & -- & --~{\scriptsize(0/1)[7]} & -- \\
+ &  & {\small Tight} & -- & --~{\scriptsize(0/2)[48]} & -- & -- & --~{\scriptsize[8]} & -- \\
+ &  & {\small Medium} & 106.5 & 28.2~{\scriptsize(1/3)[47]} & -- & -- & 21.5~{\scriptsize(1)[6]} & -- \\
+ &  & {\small Large} & 111.1 & 13.5~{\scriptsize(22)[28]} & -- & -- & 9.5~{\scriptsize(6)[2]} & -- \\
+\bottomrule
+\end{tabular}
+\end{table}

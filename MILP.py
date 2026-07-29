@@ -1211,15 +1211,15 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     m.spread_term = pyo.Constraint(expr=m.h[N] <= m.Tspr1)
 
     # ── M9 (R21): weekly working-time cap (Directive 2002/15/EC, 60 h) ────────
-    # NOT enforced in the offline model.  The weekly working time is dominated
-    # by total driving, which is fixed by the route and is not a plan decision,
-    # so imposing the cap here shapes no decision and only creates spurious
-    # infeasibility when driving is priced at a worst case (box RO).  Legal
-    # compliance is instead verified on the REALIZED trajectory in the
-    # simulator (BEHDV.advance records a "hos_weekly" violation when the
-    # executed weekly working time exceeds Twk60), consistent with the other
-    # realized HoS checks.  Twk60 is still declared as a parameter and consumed
-    # by the simulator via full_data.
+    # OUT OF PROBLEM SCOPE (2026-07-29).  The paper models the DAILY provisions
+    # of Reg. 561/2006 / Dir. 2002/15/EC only; weekly-level accounting (weekly
+    # rests, 56/90 h driving totals, the 60 h working-time week) is excluded
+    # throughout — no model enforces it and the simulator does not treat a
+    # breach as infeasible.  BEHDV still accumulates realized weekly working
+    # time (sw_week) and records a breach as a DIAGNOSTIC note (weekly_notes /
+    # metrics.weekly_cap_exceeded), reported in the paper as a compliance-
+    # margin statistic on long routes.  Twk60 stays declared as a parameter
+    # for that diagnostic.
     return m
 
 

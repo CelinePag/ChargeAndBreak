@@ -577,13 +577,10 @@ def build_2sp_model(data: dict, scenarios: list[dict],
         m.h[N, s] <= Tspr1)
 
     # ── M9 (R21): weekly working-time cap per scenario ────────────────────────
-    # NOT enforced in the offline extensive form (RO / ROBU / 2SP).  The weekly
-    # working time is dominated by total driving, which is fixed by the route
-    # and not a plan decision, so the cap shapes no decision and only produces
-    # spurious infeasibility when driving is priced at a worst case (box RO).
-    # Legal compliance is checked on the REALIZED trajectory in the simulator
-    # (BEHDV.advance -> "hos_weekly" violation), like the other realized HoS
-    # checks.
+    # OUT OF PROBLEM SCOPE (2026-07-29): the weekly working-time cap is not
+    # enforced in any model (daily provisions only — see MILP.py M9 note).
+    # The simulator records a breach as a diagnostic (BEHDV.weekly_notes),
+    # never as a run-infeasible violation.
 
     # ── C3: non-anticipativity — one shared duration vector (static robust) ───
     # Tie tauc/taub/taur across scenarios to the reference scenario 0; sigma,

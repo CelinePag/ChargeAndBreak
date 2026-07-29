@@ -197,6 +197,13 @@ def finalize_run(
         n_stranding           = _by_type.get("stranding", 0),
         n_hos_violations      = sum(v for k, v in _by_type.items()
                                     if k.startswith("hos")),
+        # M9 diagnostics — weekly working time is out of problem scope (daily
+        # provisions only); a cap breach is reported, never run-infeasible.
+        weekly_work_h         = (getattr(vehicle, "sw_week_history", None)
+                                 or [None])[-1],
+        weekly_cap_exceeded   = bool(getattr(vehicle, "_weekly_flagged",
+                                             False)),
+        weekly_notes          = list(getattr(vehicle, "weekly_notes", [])),
         tw_n_customers        = _n_cust,
         tw_n_misses           = _n_miss,
         tw_n_early            = _n_early,

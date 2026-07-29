@@ -146,6 +146,7 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
     gaps   = defaultdict(list)
     n_infe = defaultdict(int)
     n_unsl = defaultdict(int)
+    n_feas = defaultdict(int)
     for r in rows:
         if r.get("status") != "OK":
             continue
@@ -162,19 +163,28 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
         if outcome == "infeasible":
             n_infe[key] += 1
             continue
+        # Every feasible run counts toward reliability, even when no oracle
+        # bound exists for its instance (such a run yields no gap sample but
+        # is NOT a failure).  Keeping the two counters separate stops
+        # oracle-poor cells from reading as near-total infeasibility.
+        n_feas[key] += 1
         g = r.get(metric)
         if g is not None:
             gaps[key].append(100.0 * g)
-    return gaps, n_infe, n_unsl
+    return gaps, n_infe, n_unsl, n_feas
 
 
-def write_stats_csv(gaps, n_infe, n_unsl, path: str):
-    """One row per (route, cust, tw, method): n, mean, std, median, quartiles."""
-    keys = sorted(set(gaps) | set(n_infe) | set(n_unsl))
+def write_stats_csv(gaps, n_infe, n_unsl, n_feas, path: str):
+    """One row per (route, cust, tw, method): n, mean, std, median, quartiles.
+
+    n_feasible counts every feasible run; n_gap_samples counts those that also
+    had an oracle bound (the mean/quartiles rest on those only)."""
+    keys = sorted(set(gaps) | set(n_infe) | set(n_unsl) | set(n_feas))
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["route_class", "customers_class", "window_class", "method",
-                    "n_feasible", "n_infeasible_excluded", "n_unsolved_excluded",
+                    "n_feasible", "n_gap_samples",
+                    "n_infeasible_excluded", "n_unsolved_excluded",
                     "gap_mean_%", "gap_std_%", "gap_median_%",
                     "gap_q1_%", "gap_q3_%", "gap_min_%", "gap_max_%"])
         for key in keys:
@@ -185,7 +195,8 @@ def write_stats_csv(gaps, n_infe, n_unsl, path: str):
                           np.percentile(vals, 75), vals.min(), vals.max())]
                      if len(vals) else [""] * 7)
             w.writerow(list(key)
-                       + [len(vals), n_infe.get(key, 0), n_unsl.get(key, 0)]
+                       + [n_feas.get(key, len(vals)), len(vals),
+                          n_infe.get(key, 0), n_unsl.get(key, 0)]
                        + stats)
     print(f"  Stats CSV : {path}")
 
@@ -261,7 +272,7 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
         raise ValueError(f"unknown kind '{kind}'")
 
 
-def plot_gap_figure(gaps, n_infe, n_unsl=None, kind: str = "box",
+def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     metric: str = "gap_pen", out_dir: str = "figures",
                     annotate_n: bool = True, full_grid: bool = True,
                     layout: str = "row", inner: str = "tw") -> list:
@@ -484,8 +495,11 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, kind: str = "box",
             "infeas", ["#009E73", "#F0E442", "#D55E00"])
 
         def _infeas_frac(route, cust, tw, m):
-            nf  = len(gaps.get((route, cust, tw, m), []))
-            ni  = n_infe.get((route, cust, tw, m), 0)
+            key = (route, cust, tw, m)
+            # denominator = ALL feasible runs (fall back to gap samples for
+            # callers that pass no n_feas), never just the ones with a bound
+            nf  = (n_feas or {}).get(key, len(gaps.get(key, [])))
+            ni  = n_infe.get(key, 0)
             tot = nf + ni
             return (ni / tot) if tot else None
 
@@ -725,7 +739,7 @@ if __name__ == "__main__":
                              "'grid' = 3x3 facet grid")
     args = parser.parse_args()
 
-    gaps, n_infe, n_unsl = collect_gaps(args.dir, metric=args.metric)
+    gaps, n_infe, n_unsl, n_feas = collect_gaps(args.dir, metric=args.metric)
 
     n_groups = len(gaps)
     n_runs   = sum(len(v) for v in gaps.values())
@@ -744,7 +758,7 @@ if __name__ == "__main__":
                   f"{'/'.join(key[:3])} [{key[3]}]")
 
     os.makedirs(args.out_dir, exist_ok=True)
-    write_stats_csv(gaps, n_infe, n_unsl,
+    write_stats_csv(gaps, n_infe, n_unsl, n_feas,
                     os.path.join(args.out_dir, "paper_gap_stats.csv"))
 
     if args.all:
@@ -754,7 +768,7 @@ if __name__ == "__main__":
                   else [args.kind])
         combos = [(k, args.inner) for k in kinds]
     for kind, inner in combos:
-        for p in plot_gap_figure(gaps, n_infe, n_unsl, kind=kind,
+        for p in plot_gap_figure(gaps, n_infe, n_unsl, n_feas, kind=kind,
                                  metric=args.metric, out_dir=args.out_dir,
                                  full_grid=not args.present_only,
                                  layout=args.layout, inner=inner):

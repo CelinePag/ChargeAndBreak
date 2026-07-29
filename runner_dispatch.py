@@ -607,10 +607,34 @@ def _find_matching_run(json_file: str, alg: str, kw: dict,
     """Return the path of a finished solution with matching params, else None."""
     import glob as _glob
     import json as _json
+
+    stem = os.path.splitext(os.path.basename(json_file))[0]
+
+    # ORACLE writes no per-run solution file — its result IS the shared cache
+    # solutions/oracle_<title>.json, so match on that instead.  The runner
+    # normalises a tagged file stem ("X__diesel") to a single-underscore title
+    # ("X_diesel"), hence the two candidates.  Without this branch
+    # --skip-existing never skipped an oracle and silently re-solved hours of
+    # already-cached instances.
+    if alg == "ORACLE":
+        for cand in dict.fromkeys((stem, stem.replace("__", "_"))):
+            path = os.path.join(solutions_dir, f"oracle_{cand}.json")
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    cache = _json.load(fh)
+            except Exception:
+                continue            # corrupt cache -> re-solve
+            # a cache is reusable when it carries a schedule; a time-limited
+            # solve still yields a valid incumbent (reported certified-to-X%)
+            if cache.get("feasible") and cache.get("sol"):
+                return path
+        return None
+
     req = _requested_sig(alg, kw)
     if req is None:
         return None
-    stem        = os.path.splitext(os.path.basename(json_file))[0]
     want_diesel = bool(kw.get("diesel_mode", False))
     for path in _glob.glob(os.path.join(solutions_dir, f"{stem}_{alg}_*.json")):
         if os.path.basename(path).startswith("oracle_"):

@@ -334,6 +334,24 @@ def _latest_2sp_solution(stem: str) -> str | None:
     return hits[-1] if hits else None
 
 
+def cmd_guard(args) -> None:
+    """Section 8.2/8.3 — guarded-greedy sweep (departure guard at the xi
+    q-quantile).  Runs on TAGGED instance copies (__q95 etc.) because the
+    compile dedup is keyed on (instance, method, supervised) only: running
+    guarded greedy on the base instances would silently displace the
+    unguarded base runs in every table at the next compile."""
+    seeds  = _expand_seeds(args.seeds)
+    combos = args.combos.split(",")
+    tws    = args.tw.split(",")
+    for q in [float(x) for x in args.quantiles.split(",")]:
+        tag     = f"q{int(round(q * 100))}"
+        out_dir = os.path.join(SENS_DIR, f"guard_{tag}")
+        pattern = _materialise_copy(tag, combos, tws, seeds,
+                                    out_dir, args.dry_run)
+        _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
+                  extra=["--prune_quantile", str(q)])
+
+
 def cmd_vss(args) -> None:
     """Section 8.5 — VSS / EVPI decomposition, one call of the harness per
     instance (see experiments/vss_evpi.py for the EEV/RP/WS definitions).
@@ -426,6 +444,13 @@ def main() -> None:
                         "base case already covers Gamma = sqrt(N))")
     _add_common(p, "ROBU")
     p.set_defaults(func=cmd_gamma)
+
+    p = sub.add_parser("guard", help="8.2 guarded-greedy quantile sweep")
+    p.add_argument("--quantiles", default="0.9,0.95,1.0",
+                   help="Comma-separated prune quantiles (default: "
+                        "0.9,0.95,1.0; 1.0 = worst-case corner)")
+    _add_common(p, "greedy")
+    p.set_defaults(func=cmd_guard)
 
     p = sub.add_parser("vss", help="8.5 VSS / EVPI decomposition")
     p.add_argument("--n-scenarios", type=int, default=20,

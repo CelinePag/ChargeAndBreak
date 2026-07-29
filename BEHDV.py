@@ -212,11 +212,13 @@ class BEHDV:
         self.ext_shift_used_history : list[int]   = [0]
         # M9 — cumulative weekly working time.  Unlike sw, this is NOT reset by
         # a daily rest (only a weekly rest, out of model scope, would reset it).
-        # The offline solve no longer caps it; the realized total is checked
-        # against Twk60 here and a breach is a run-infeasible "hos_weekly"
-        # violation.
+        # The weekly cap (Twk60) is OUT OF PROBLEM SCOPE (2026-07-29): the
+        # paper models the daily provisions only, so a breach is recorded as a
+        # DIAGNOSTIC note (weekly_notes), never as a run-infeasible violation.
+        # The counter itself is kept for the compliance-margin statistic.
         self.sw_week_history        : list[float] = [0.0]
         self._weekly_flagged        : bool        = False
+        self.weekly_notes           : list[dict]  = []
 
         # ── Execution history (index = stop departed from) ────────────────────
         self.actions       : list[dict]  = []   # action taken at each stop
@@ -325,6 +327,7 @@ class BEHDV:
         ck["violations"]      = list(self.violations)
         ck["tw_misses"]       = {str(k): v for k, v in self.tw_misses.items()}
         ck["_weekly_flagged"] = bool(self._weekly_flagged)
+        ck["weekly_notes"]    = list(self.weekly_notes)
         # stops advanced past the origin == completed loop iterations
         ck["n_done"]          = len(self.stop_history) - 1
         return ck
@@ -337,6 +340,7 @@ class BEHDV:
         self.tw_misses       = {int(k): v
                                 for k, v in ck.get("tw_misses", {}).items()}
         self._weekly_flagged = bool(ck.get("_weekly_flagged", False))
+        self.weekly_notes    = list(ck.get("weekly_notes", []))
 
     # ── State transition ──────────────────────────────────────────────────────
 
@@ -606,14 +610,16 @@ class BEHDV:
             self.violations.append(dict(
                 type="hos_spread", stop=stop + 1, amount=h_new - _Tspr2,
                 detail=f"spread h={h_new:.3f}h > {_Tspr2}h after leg {stop}"))
-        # M9 — realized weekly working-time cap (flagged once, at first breach)
+        # M9 — weekly working-time cap: OUT OF SCOPE (daily provisions only).
+        # A breach is recorded once as a diagnostic note, NOT a violation —
+        # it never marks the run infeasible (see class comment).
         _Twk60 = full_data.get("Twk60", 60.0)
         if sw_week_new > _Twk60 + 1e-3 and not self._weekly_flagged:
             self._weekly_flagged = True
-            self.violations.append(dict(
+            self.weekly_notes.append(dict(
                 type="hos_weekly", stop=stop + 1, amount=sw_week_new - _Twk60,
                 detail=(f"weekly working time {sw_week_new:.3f}h > {_Twk60}h "
-                        f"after leg {stop}")))
+                        f"after leg {stop} (diagnostic only)")))
 
         # ── 7. phi (split-break flag) and rho2_used ───────────────────────────
         if ri or rho:
