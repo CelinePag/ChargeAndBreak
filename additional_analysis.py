@@ -215,6 +215,30 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
 # VARIANT INSTANCE MATERIALISATION
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+def _retitle(path: str, tagged_stem: str) -> None:
+    """Stamp the tagged stem into the instance's own ``title``.
+
+    CRITICAL: every run records ``instance = full_data["title"]``, and BOTH the
+    compile dedup (keyed on instance+method) and the oracle cache file name
+    (oracle_<title>.json) derive from it.  A variant that keeps the BASE title
+    therefore (a) displaces the base run in every table and figure and (b)
+    would overwrite the base oracle cache with a variant result.  Diesel is
+    exempt: _apply_diesel_mode appends its own "_diesel" suffix at run time.
+    """
+    if tagged_stem.endswith("__diesel"):
+        return
+    with open(path, "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    inst = payload.get("instance", {})
+    old  = inst.get("title", "")
+    inst["title"] = tagged_stem
+    if isinstance(inst.get("label"), str) and old:
+        inst["label"] = inst["label"].replace(old, tagged_stem, 1)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+
+
 def _materialise_regen(axis: str, value, combos, tws, seeds,
                        out_dir: str, dry: bool) -> str:
     """Re-generate variant instances with one axis changed; returns glob."""
@@ -240,6 +264,7 @@ def _materialise_regen(axis: str, value, combos, tws, seeds,
                     output_dir=out_dir, verbose=False,
                     **{spec["kw"]: value})
                 os.replace(path, target)
+                _retitle(target, _tagged(stem, tag))
                 print(f"generated {target}")
     return os.path.join(out_dir, f"*__{tag}.json")
 
@@ -270,6 +295,7 @@ def _materialise_patch(axis: str, value, combos, tws, seeds,
                 payload["meta"][f"variant_{axis}"] = float(value)
                 with open(target, "w", encoding="utf-8") as fh:
                     json.dump(payload, fh, indent=2)
+                _retitle(target, _tagged(stem, tag))
                 print(f"patched   {target}")
     return os.path.join(out_dir, f"*__{tag}.json")
 
@@ -293,6 +319,7 @@ def _materialise_copy(tag: str, combos, tws, seeds,
                     print(f"DRY-RUN  copy {src} -> {target}")
                     continue
                 shutil.copyfile(src, target)
+                _retitle(target, _tagged(stem, tag))
     return os.path.join(out_dir, f"*__{tag}.json")
 
 

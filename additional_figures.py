@@ -100,12 +100,21 @@ def _oracle(stem: str, tag: str | None = None) -> dict | None:
               f"solutions/oracle_{stem}_{tag}.json"])
     for n in names:
         d = _load(n)
-        if d and d.get("feasible") and d.get("sol"):
-            sol = d["sol"]
+        if not (d and d.get("feasible")):
+            continue
+        sol = d.get("sol") or []
+        if sol:
             ta_N = float(sol[-1]["ta"])
             tauc = sum(float(s.get("tauc") or 0.0) for s in sol)
             g    = sum(float(s.get("g")    or 0.0) for s in sol)
             return dict(duration=ta_N - T_START, tauc=tauc, g=g,
+                        gap=float(d.get("gap") or 0.0))
+        # cache recovered from a run log (see recover_variant_oracles.py):
+        # the objective survives, the schedule does not — usable for duration
+        # deltas, not for per-stop quantities like the coupling fraction.
+        if d.get("obj") is not None:
+            return dict(duration=float(d["obj"]) - T_START,
+                        tauc=None, g=None,
                         gap=float(d.get("gap") or 0.0))
     return None
 
@@ -163,9 +172,11 @@ def section_diesel():
                 pen_o = pen_g = naive = coup = None
                 if ev_o and di_o and di_o["duration"] > 0:
                     pen_o = 100 * (ev_o["duration"] / di_o["duration"] - 1)
-                    naive = 100 * (ev_o["tauc"] / di_o["duration"])
-                    coup  = (100 * ev_o["g"] / ev_o["tauc"]
-                             if ev_o["tauc"] > 1e-6 else None)
+                    # tauc/g are None for a log-recovered cache (no schedule)
+                    if ev_o["tauc"] is not None:
+                        naive = 100 * (ev_o["tauc"] / di_o["duration"])
+                        coup  = (100 * ev_o["g"] / ev_o["tauc"]
+                                 if ev_o["tauc"] > 1e-6 else None)
                 if (ev_g and di_g and not ev_g["infeasible"]
                         and not di_g["infeasible"] and di_g["duration"] > 0):
                     pen_g = 100 * (ev_g["duration"] / di_g["duration"] - 1)

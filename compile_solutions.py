@@ -296,6 +296,12 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
         if run_id in finished_ids:
             continue
 
+        # ORACLE runs write no solution file — their result IS the shared cache
+        # solutions/oracle_<instance>.json.  Counting their logs here reported
+        # every completed oracle as an "unfinished run".
+        if "_ORACLE_" in run_id or run_id.endswith("_ORACLE"):
+            continue
+
         m = _RUN_ID_RE.match(run_id)
         if m:
             instance, method = m.group("instance"), _ALGO_TO_METHOD[m.group("algo")]
