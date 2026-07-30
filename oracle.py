@@ -697,7 +697,15 @@ def oracle_solve(full_data: dict, D_actual_list: list,
     E_actual_dict = {}
     for i in range(N):
         d = D_actual_dict[i]
-        if i in _km and d > 1e-9:
+        # A leg with ZERO nominal energy has no battery to drain — this is the
+        # diesel mode (_apply_diesel_mode sets E = 0 on every leg).  Rebuilding
+        # it from the ECR curve would silently turn the diesel benchmark back
+        # into an electric problem: before this guard, every "diesel" oracle
+        # scheduled 14-21 charging stops and its objective was no longer a
+        # valid diesel reference.
+        if _Enom.get(i, 0.0) <= 0.0:
+            E_actual_dict[i] = 0.0
+        elif i in _km and d > 1e-9:
             L = _km[i]
             E_actual_dict[i] = L * _ecr(L / d)
         else:
