@@ -379,30 +379,62 @@ To separate the cost of \emph{electrification} from the cost of
 \emph{scheduling}, every instance of the subset in
 Section~\ref{sec:additional-protocol} is re-solved as a diesel vehicle.  Diesel
 mode removes the energy dimension entirely, that is per-leg consumption, the
-battery, the charging curve, and the station access overheads, while keeping the
-node set, the customer windows and the full Hours-of-Service machinery intact.
-Former charging stations remain as break-eligible waypoints, so the diesel
-problem is a genuine relaxation of the electric one on the same corridor and the
-same travel-time realization, and the two are solved by the same oracle and the
-same greedy policy.  All 160 instance pairs completed in both worlds, and every
-oracle solve closed to within 0.5\%.
+battery and the charging curve, while keeping the node set, the customer windows
+and the full Hours-of-Service machinery intact.  Former charging stations remain
+as break-eligible waypoints, so the diesel problem is a genuine relaxation of
+the electric one on the same corridor and the same travel-time realization, and
+the two are solved by the same oracle and the same greedy policy.  The long
+routes are included here on the Greedy comparison only.  Both oracles stall
+there on the \emph{dual} bound, the electric one to 9.3\% and the diesel one
+to 7.7\% within a two-hour budget, and the stall is driven by the rest-packing
+structure rather than by the energy dimension, which is why removing the
+battery does not relieve it.  A ratio of two loosely certified incumbents
+compounds rather than cancels the two errors, so no hindsight optimum is
+reported for that class; Greedy carries no optimality gap and is unaffected.
+
+Of the station overheads, only the charger-specific ones are removed: the
+queue, and the repositioning move off the charging bay before a break.  The
+access manoeuvre is \emph{not}, because it is not charger-specific --- a diesel
+driver taking a mandatory break also has to leave the motorway, park and
+re-enter, and pays the same $M^{\text{stop}}$ for doing so.  Charging it to
+only one of the two vehicles would credit the diesel with taking every one of
+its breaks at no access cost, which overstates the electrification penalty by
+roughly two percentage points and, as the decomposition below shows, misassigns
+the single largest non-charging term.  All 160 instance pairs completed in both
+worlds, and every oracle solve closed to within 0.5\%.
+
+Refuelling is credited post hoc rather than modelled.  Unlike charging it has
+no binding location choice, any truck stop serving, and on these corridors it
+happens at most once: route lengths are 824--1219\,km (short) and
+1541--2536\,km (medium) against a usable tank range of 1636--3240\,km across
+the specifications in Table~\ref{tab:diesel-refuel}, so no fuel stop is
+required on the short routes under any specification and at most one on the
+medium routes.  We therefore credit the diesel with no fuel stop on the short
+routes and one on the medium ones, at 19~minutes for access manoeuvre, queue
+and pumping.  This is an assumption, not a derivation: the medium-route count
+follows from the two smaller-tank specifications but not from the largest, and
+crediting the stop lengthens the diesel makespan and so \emph{shrinks} the
+reported penalty, by 0.67 percentage points.  Table~\ref{tab:diesel-refuel}
+reports the zero-stop figures alongside, as the conservative bound.
 
 \begin{table}[htbp]
 \centering
 \caption{Electric versus diesel route duration on identical instances and
-realizations.  ``Naive'' adds the EV's total charging time to the diesel
-makespan, i.e.\ the penalty predicted by a planner who ignores that charging can
-share time with a mandatory rest.  ``Coupling'' is the share of charging time
-credited inside a mandatory break, $\sum_i g_i / \sum_i \tau^c_i$, at the
-hindsight optimum.  $n = 80$ instances per route class.}
+realizations.  ``Coupling'' is the share of charging time credited inside a
+mandatory break, $\sum_i g_i / \sum_i \tau^c_i$, at the hindsight optimum.
+``EV cert.'' is the worst remaining MIP gap on the electric oracle: where it
+exceeds the solver tolerance the electric schedule is an incumbent rather than
+a proven optimum, so the penalty is an upper bound on the true optimal one.
+$n = 80$ instances per route class.}
 \label{tab:diesel}
-\begin{tabular}{lrrrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
 \textbf{Route} & \textbf{Diesel (h)} & \textbf{EV (h)} & \textbf{Charging (h)}
- & \textbf{Naive (\%)} & \textbf{Oracle (\%)} & \textbf{Greedy (\%)} & \textbf{Coupling (\%)} \\
+ & \textbf{Oracle (\%)} & \textbf{Greedy (\%)} & \textbf{Coupling (\%)} \\
 \midrule
-Short  & 26.4 & 28.7 & 2.69 & $+10.2$ & $+8.6$  & $+20.7$ & 76 \\
-Medium & 52.4 & 58.2 & 6.80 & $+13.0$ & $+11.1$ & $+24.2$ & 70 \\
+Short  & 26.6 & 28.7 & 2.69 & $+8.0$ & $+20.0$ & 76 \\
+Medium & 53.2 & 58.2 & 6.80 & $+9.4$ & $+23.0$ & 70 \\
+Long   & --   & --   & --   & --     & $+21.0$ & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -411,64 +443,117 @@ Medium & 52.4 & 58.2 & 6.80 & $+13.0$ & $+11.1$ & $+24.2$ & 70 \\
     \centering
     \includegraphics[width=0.75\linewidth]{figures/additional_diesel_gap.png}
     \caption{Electrification penalty in route duration, per route class: the
-    naive estimate (diesel makespan plus the EV's total charging time) against
-    the penalty actually realized by the greedy policy and by the hindsight
-    optimum.  The annotation below each group gives the mean coupling share
-    $\sum_i g_i/\sum_i \tau^c_i$ and the number of instances.}
+    penalty realized by the greedy policy against the one realized by the
+    hindsight optimum.  The annotation below each group gives the mean coupling
+    share $\sum_i g_i/\sum_i \tau^c_i$ and the number of instances.}
     \label{fig:diesel}
 \end{figure}
 
 Electrification carries a real and irreducible makespan penalty on these
-corridors: $+8.6\%$ on the short routes and $+11.1\%$ on the medium ones at the
-hindsight optimum, positive on every one of the 160 instances (range $+2.9$ to
-$+28.0\%$).  Break/charge coupling is effective in the sense the model
+corridors: $+8.0\%$ on the short routes and $+9.4\%$ on the medium ones at the
+hindsight optimum, positive on every one of the 160 instances (range $+2.2$ to
+$+25.3\%$).  Break/charge coupling is effective in the sense the model
 predicts, since 70--76\% of charging time is credited inside a mandatory break,
-yet it removes only about 15\% of the naive penalty, which is $+10.2\%$ and
-$+13.0\%$.  Decomposing the short-route penalty of 2.24\,h shows why:
+but it is far from cancelling the cost of charging.  Decomposing the penalty
+shows why.  Both schedules are broken into
+the terms of their own departure equations and differenced; driving is identical
+within each pair, so the modelled rows below close the gap exactly, and the
+diesel's fuel stop is then credited against that subtotal:
 
 \begin{center}
 \begin{tabular}{lrr}
 \toprule
  & \textbf{Short (h)} & \textbf{Medium (h)} \\
 \midrule
-Total charging time                 & $+2.69$ & $+6.80$ \\
-Charging-station queueing           & $+0.33$ & $+0.78$ \\
-Charging-station manoeuvring        & $+0.55$ & $+1.38$ \\
-Break time no longer taken separately & $-1.28$ & $-3.35$ \\
-Rest time                            & $-0.05$ & $+0.18$ \\
+Total charging time                   & $+2.69$ & $+6.80$ \\
+Charging-station queueing             & $+0.33$ & $+0.78$ \\
+Stop manoeuvring, net of diesel       & $+0.37$ & $+0.63$ \\
+Repositioning off the charging bay    & $+0.01$ & $+0.06$ \\
+Break time no longer taken separately & $-1.25$ & $-3.19$ \\
+Rest time                             & $-0.06$ & $+0.20$ \\
 \midrule
-\textbf{Net penalty vs.\ diesel}     & $\mathbf{+2.24}$ & $\mathbf{+5.79}$ \\
+Modelled subtotal                     & $+2.09$ & $+5.28$ \\
+Diesel refuelling (post hoc)          & $-0.00$ & $-0.32$ \\
+\midrule
+\textbf{Net penalty vs.\ diesel}      & $\mathbf{+2.09}$ & $\mathbf{+4.97}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 The coupling credit, that is the break time the driver no longer has to take
-separately, is 1.28\,h and 3.35\,h, but it is bounded above by the break
+separately, is 1.25\,h and 3.19\,h, but it is bounded above by the break
 duration that the regulation requires in the first place: charging for longer
-than 45~minutes at a stop earns no further credit.  Meanwhile the electric
-truck pays 0.88\,h and 2.16\,h of pure station-access overhead in queueing and
-manoeuvring, which are absent for diesel and which consume roughly two thirds of
-the credit.  The net effect is that optimal scheduling recovers about a sixth of
-the naive estimate rather than all of it.  This qualifies, rather than
-contradicts, the finding of \citet{brockmann_break-and-charge_2025} that
-mandatory breaks create natural charging windows: the windows exist and the
-model exploits them, but the access overheads of a fast-charging stop, which
-that work does not price, absorb most of the gain.
+than 45~minutes at a stop earns no further credit.  Against it the electric
+truck pays 0.71\,h and 1.47\,h of station access that the diesel does not: the
+queue, the bay repositioning, and the residual manoeuvring of the stops it makes
+\emph{only} to charge.  Note how small that last term is once the diesel is
+charged for its own break access --- the manoeuvring row falls from 0.55\,h and
+1.38\,h in absolute terms to 0.37\,h and 0.63\,h net, so roughly half of what
+looks like an electric access penalty is simply the cost of stopping, which any
+vehicle subject to the same break regime pays.  The genuinely electric access
+overhead nonetheless consumes about half the coupling credit, so barely half of
+the credit survives to offset the charging time itself.  This qualifies, rather
+than contradicts, the finding of
+\citet{brockmann_break-and-charge_2025} that mandatory breaks create natural
+charging windows: the windows exist and the model exploits them, but the access
+overheads of a fast-charging stop, which that work does not price, absorb a
+substantial part of the gain.
 
-The greedy comparison isolates the remaining half of the story.  Greedy's
-electric schedule is 20.7\% longer than its own diesel schedule on the short
-routes and 24.2\% longer on the medium ones, roughly double the optimal
-penalty.  The excess is not electrification but planning quality: measured
-against its own hindsight optimum, Greedy loses 13.2\% (short) and 14.1\%
-(medium) on the electric problem, but only 2.0\% and 1.8\% on the diesel
+The greedy comparison isolates the remaining half of the story, and it is the
+only one available on the long routes.  Greedy's electric schedule is 20.0\%
+longer than its own diesel schedule on the short routes, 23.0\% longer on the
+medium ones and 21.0\% longer on the long ones ($n = 67$; the remainder are
+instances where the myopic rule violates Hours-of-Service in one world or the
+other and is recorded as infeasible).  The penalty is thus flat in route
+length once the corridor is long enough to be rest-dominated.  On the two
+classes where the optimum is certified this is about two and a half times the
+optimal penalty.  The excess is not electrification but planning quality:
+measured against its own hindsight optimum, Greedy loses 13.2\% (short) and
+14.4\% (medium) on the electric problem, but only 2.1\% and 1.6\% on the diesel
 problem, where the myopic rule is nearly optimal because the sole remaining
 decision is when to rest.  Electrification is thus what turns a scheduling
 problem that a rule of thumb solves almost optimally into one where a rule of
-thumb costs a further 12 percentage points of makespan.  Of the roughly 21--24\%
-that an operator would observe when switching a myopically-scheduled corridor
-from diesel to battery-electric, about half is the physical cost of charging
-and about half would be recovered by adopting a planner such as the ones
-compared in Section~\ref{sec:basecase}.
+thumb costs a further 11--13 percentage points of makespan.  Of the roughly
+20--23\% that an operator would observe when switching a myopically-scheduled
+corridor from diesel to battery-electric, about half is the physical cost of
+charging and about half would be recovered by adopting a planner such as the
+ones compared in Section~\ref{sec:basecase}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{figures/additional_diesel_tw.png}
+    \caption{Electrification penalty by time-window class.  The optimized
+    penalty rises monotonically as windows loosen; the myopic one does not
+    respond to windows at all.  Long routes carry no certified oracle
+    (Section~\ref{sec:diesel}), so only Greedy is shown there.}
+    \label{fig:diesel-tw}
+\end{figure}
+
+The penalty is not uniform across window classes, and the variation identifies
+its mechanism.  At the hindsight optimum it rises monotonically as windows
+loosen, from $+6.7\%$ to $+9.2\%$ on the short routes and from $+6.6\%$ to
+$+11.3\%$ on the medium ones (Figure~\ref{fig:diesel-tw},
+Table~\ref{tab:diesel-tw}), while the Greedy penalty is flat in the window
+class on all three route classes.  What changes is not the electric truck.  It
+takes \emph{zero} standalone break time in every single cell, charging through
+every break the regulation requires, and its coupling share stays between 68
+and 80\% throughout.  What changes is the diesel.  Idle waiting is disabled, so
+a vehicle arriving before a window opens must either stretch a break or accept
+the out-of-window penalty, and the diesel, being the faster of the two, is the
+one that arrives early: 30 of its 35 out-of-window service starts are early
+arrivals, against none of the electric truck's seven, which are all late.  Its
+standalone break time accordingly rises from 2.74\,h under no windows to
+3.90\,h under tight ones on the medium routes, while the electric truck, parked
+at a charger for that break in either case, absorbs the same delay for free.
+Tight windows do not make electrification cheaper; they make the diesel's speed
+advantage unusable.
+
+This is a makespan comparison throughout, and the window penalty does not drive
+it.  Charging each vehicle $\beta_{TW}$ per missed window changes the ordering
+nowhere and the magnitude by at most 1.9 percentage points --- on the medium
+routes under medium windows, where the diesel misses 0.95 windows per instance
+on average against the electric truck's zero --- and the monotone trend
+survives unchanged.
 
 
 \subsubsection{Effect of uncertainty}

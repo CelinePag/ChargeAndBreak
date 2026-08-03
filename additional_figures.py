@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from settings import T_START
+from settings import T_START, BETA_TW
 
 # Shared palette + chrome (see paper_style.py): colour follows the entity, so
 # Greedy is the same blue here as in the base-case figures.
@@ -53,6 +53,12 @@ ps.apply_rc()
 
 COMBOS = [("short", "few"), ("short", "many"), ("medium", "few"),
           ("medium", "many")]
+# §8.4 only.  Long routes are excluded from the sweeps (intractable under the
+# full protocol) but the diesel comparison needs just Greedy and the oracle,
+# and the diesel oracle is cheap there because it carries no energy dimension
+# — the hardest long instance closes to 0.4% in under a minute.
+DIESEL_COMBOS = COMBOS + [("long", "few"), ("long", "many")]
+DIESEL_ROUTES = ("short", "medium", "long")
 TWS    = ["tight", "medium", "large", "none"]
 SEEDS  = range(1, 11)
 
@@ -107,14 +113,19 @@ def _oracle(stem: str, tag: str | None = None) -> dict | None:
             ta_N = float(sol[-1]["ta"])
             tauc = sum(float(s.get("tauc") or 0.0) for s in sol)
             g    = sum(float(s.get("g")    or 0.0) for s in sol)
-            return dict(duration=ta_N - T_START, tauc=tauc, g=g,
+            # delta = out-of-window service starts (early OR late, §3.1).  The
+            # objective is ta[N] + BETA_TW*sum(delta), so a schedule can buy
+            # makespan by missing a window; reporting duration alone would hide
+            # that trade, hence both are carried.
+            delta = sum(int(round(float(s.get("delta") or 0.0))) for s in sol)
+            return dict(duration=ta_N - T_START, tauc=tauc, g=g, delta=delta,
                         gap=float(d.get("gap") or 0.0))
         # cache recovered from a run log (see recover_variant_oracles.py):
         # the objective survives, the schedule does not — usable for duration
         # deltas, not for per-stop quantities like the coupling fraction.
         if d.get("obj") is not None:
             return dict(duration=float(d["obj"]) - T_START,
-                        tauc=None, g=None,
+                        tauc=None, g=None, delta=None,
                         gap=float(d.get("gap") or 0.0))
     return None
 
@@ -243,7 +254,7 @@ def section_diesel():
     print("== Sec 8.4 diesel ==")
     per_class: dict[str, dict[str, list]] = {}
     detail = []
-    for route, cust in COMBOS:
+    for route, cust in DIESEL_COMBOS:
         for tw in TWS:
             for seed in SEEDS:
                 st       = _stem(route, cust, tw, seed)
@@ -252,47 +263,79 @@ def section_diesel():
                 ev_g     = _greedy(st)
                 di_g     = _greedy(st, "diesel")
 
-                pen_o = pen_g = naive = coup = None
-                if ev_o and di_o and di_o["duration"] > 0:
-                    pen_o = 100 * (ev_o["duration"] / di_o["duration"] - 1)
+                fuel  = _refuel_h(route)         # post-hoc diesel fuel stop(s)
+                dur_d = (di_o["duration"] + fuel) if di_o else None
+
+                pen_o = pen_g = coup = None
+                if ev_o and dur_d and dur_d > 0:
+                    pen_o = 100 * (ev_o["duration"] / dur_d - 1)
                     # tauc/g are None for a log-recovered cache (no schedule)
-                    if ev_o["tauc"] is not None:
-                        naive = 100 * (ev_o["tauc"] / di_o["duration"])
-                        coup  = (100 * ev_o["g"] / ev_o["tauc"]
-                                 if ev_o["tauc"] > 1e-6 else None)
+                    if ev_o["tauc"] is not None and ev_o["tauc"] > 1e-6:
+                        coup = 100 * ev_o["g"] / ev_o["tauc"]
                 if (ev_g and di_g and not ev_g["infeasible"]
                         and not di_g["infeasible"] and di_g["duration"] > 0):
-                    pen_g = 100 * (ev_g["duration"] / di_g["duration"] - 1)
+                    pen_g = 100 * (ev_g["duration"] / (di_g["duration"] + fuel) - 1)
+
+                # The EV oracle is only an incumbent where the solve hit its
+                # wall budget (long routes stall on the DUAL bound), so the
+                # penalty there is an upper bound on the true optimal one.
+                ev_gap = 100 * ev_o["gap"] if ev_o else None
 
                 detail.append([route, cust, tw, seed,
-                               _fmt(di_o and di_o["duration"], ".3f", ""),
+                               _fmt(dur_d, ".3f", ""),
                                _fmt(ev_o and ev_o["duration"], ".3f", ""),
                                _fmt(pen_o, ".2f", ""), _fmt(pen_g, ".2f", ""),
-                               _fmt(naive, ".2f", ""), _fmt(coup, ".1f", "")])
+                               _fmt(coup, ".1f", ""),
+                               _fmt(fuel, ".3f", ""), _fmt(ev_gap, ".2f", "")])
                 d = per_class.setdefault(route, dict(pen_o=[], pen_g=[],
-                                                     naive=[], coup=[],
-                                                     dur_d=[], dur_e=[]))
+                                                     coup=[],
+                                                     dur_d=[], dur_e=[],
+                                                     ev_gap=[]))
                 d["pen_o"].append(pen_o); d["pen_g"].append(pen_g)
-                d["naive"].append(naive); d["coup"].append(coup)
-                d["dur_d"].append(di_o and di_o["duration"])
+                d["coup"].append(coup)
+                d["dur_d"].append(dur_d)
                 d["dur_e"].append(ev_o and ev_o["duration"])
+                d["ev_gap"].append(ev_gap)
 
     _write_csv("additional_diesel_stats.csv",
                ["route", "cust", "tw", "seed", "diesel_oracle_h",
                 "ev_oracle_h", "pen_oracle_%", "pen_greedy_%",
-                "naive_pen_%", "coupling_%"], detail)
+                "coupling_%", "refuel_h",
+                "ev_oracle_gap_%"], detail)
 
-    # ── figure: naive vs greedy vs oracle penalty, per route class ───────────
-    routes = [r for r in ("short", "medium") if r in per_class]
+    # ── Oracle coverage guard ────────────────────────────────────────────────
+    # On long routes BOTH oracles stall on the dual bound (the rest-packing
+    # structure, not the energy dimension), so the class is reported from
+    # Greedy alone.  The instances that DO finish there are the easy tail, so
+    # averaging whatever happens to be cached would silently report a biased
+    # subset as if it were the class.  Oracle-derived quantities are therefore
+    # suppressed for any class whose oracle coverage is incomplete; the
+    # per-instance values stay in the CSV above with their own n.
+    oracle_ok = []
+    for r, d in per_class.items():
+        have = sum(1 for v in d["pen_o"] if v is not None)
+        want = len(TWS) * len(SEEDS) * sum(1 for rr, _ in DIESEL_COMBOS
+                                           if rr == r)
+        if have < want:
+            print(f"  Oracle coverage {r}: {have}/{want} — reporting Greedy "
+                  f"only for this class")
+            for key in ("pen_o", "coup", "ev_gap", "dur_d", "dur_e"):
+                d[key] = [None] * len(d[key])
+        else:
+            oracle_ok.append(r)
+
+    # ── figure: greedy vs oracle penalty, per route class ────────────────────
+    routes = [r for r in DIESEL_ROUTES if r in per_class]
     fig, ax = plt.subplots(figsize=(4.6, 2.8))
-    w, x = 0.26, np.arange(len(routes))
-    series = [("naive (+ total charging time)", "naive", "#b0b0b0"),
-              ("greedy EV vs greedy diesel",    "pen_g", BLUE),
-              ("oracle EV vs oracle diesel",    "pen_o", INK)]
+    w, x = 0.34, np.arange(len(routes))
+    series = [("greedy EV vs greedy diesel", "pen_g", BLUE),
+              ("oracle EV vs oracle diesel", "pen_o", INK)]
     for k, (lbl, key, col) in enumerate(series):
         vals = [_mean(per_class[r][key]) for r in routes]
-        pos  = x + (k - 1) * w
-        ax.bar(pos, [v or 0 for v in vals], w, color=col,
+        pos  = x + (k - 0.5) * w
+        # nan, not 0: a suppressed class must leave a gap, not draw a bar at
+        # zero that reads as "no penalty".
+        ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
                edgecolor="white", label=lbl)
         for p, v in zip(pos, vals):
             if v is not None:
@@ -301,44 +344,190 @@ def section_diesel():
     for xi, r in enumerate(routes):
         c = _mean(per_class[r]["coup"])
         n = sum(1 for v in per_class[r]["pen_o"] if v is not None)
-        ax.text(xi, -0.14, f"{_fmt(c, '.0f')}% coupled  (n={n})",
-                ha="center", va="top", fontsize=6.5, color=MUT,
-                transform=ax.get_xaxis_transform())
+        if n:
+            note = f"{_fmt(c, '.0f')}% coupled  (n={n})"
+        else:   # oracle suppressed for this class — label the Greedy sample
+            n = sum(1 for v in per_class[r]["pen_g"] if v is not None)
+            note = f"greedy only  (n={n})"
+        ax.text(xi, -0.14, note, ha="center", va="top", fontsize=6.5,
+                color=MUT, transform=ax.get_xaxis_transform())
     ax.set_xticks(x, [f"{r.capitalize()} route" for r in routes])
     ax.set_ylabel("Route duration vs diesel (%)")
     ax.yaxis.grid(True, color=GRID, lw=0.6)
     ax.set_axisbelow(True)
+    # Headroom so the legend clears the tallest bar's value label.
+    _top = max((v for s in series for v in
+                (_mean(per_class[r][s[1]]) for r in routes)
+                if v is not None), default=1.0)
+    ax.set_ylim(0, _top * 1.32)
     ax.legend(frameon=False, fontsize=7, loc="upper left")
-    ax.set_title("Electrification penalty: naive estimate vs optimized "
-                 "schedules", loc="left")
+    ax.set_title("Electrification penalty: myopic vs optimized schedules",
+                 loc="left")
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
+    def _maxgap(r):
+        v = [x for x in per_class[r]["ev_gap"] if x is not None]
+        return max(v) if v else None
+
     lines = [
         r"\begin{table}[ht]\centering",
-        r"\caption{EV vs diesel route duration (\%), same instances and "
-        r"realizations; naive = diesel + total EV charging time. "
-        r"Coupling = share of charging time credited inside a mandatory "
-        r"break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum).}",
+        r"\caption{EV vs diesel route duration (\%) on the same instances and "
+        r"realizations.  Coupling = share of charging time credited inside a "
+        r"mandatory break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum). "
+        r"``EV cert.'' is the worst remaining MIP gap on the EV oracle: "
+        r"where it exceeds the solver tolerance the EV schedule is an "
+        r"incumbent, not a proven optimum, so the penalty is an upper bound "
+        r"on the true optimal one.}",
         r"\label{tab:diesel}",
         r"\begin{tabular}{lrrrrrr}",
         r"\hline",
-        r"Route & Diesel (h) & EV (h) & Naive (\%) & Greedy (\%) & "
-        r"Oracle (\%) & Coupling (\%) \\",
+        r"Route & Diesel (h) & EV (h) & Greedy (\%) & "
+        r"Oracle (\%) & Coupling (\%) & EV cert. (\%) \\",
         r"\hline",
     ]
     for r in routes:
         d = per_class[r]
         lines.append(
             f"{r.capitalize()} & {_fmt(_mean(d['dur_d']))} & "
-            f"{_fmt(_mean(d['dur_e']))} & {_fmt(_mean(d['naive']))} & "
+            f"{_fmt(_mean(d['dur_e']))} & "
             f"{_fmt(_mean(d['pen_g']))} & {_fmt(_mean(d['pen_o']))} & "
-            f"{_fmt(_mean(d['coup']), '.0f')} \\\\")
+            f"{_fmt(_mean(d['coup']), '.0f')} & "
+            f"{_fmt(_maxgap(r), '.1f')} \\\\")
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_diesel.tex", "\n".join(lines))
 
-    _diesel_decomposition(routes)
-    _refuel_sensitivity(routes)
+    # Both are oracle-derived, so they follow the coverage guard above.
+    ok = [r for r in routes if r in oracle_ok]
+    _diesel_decomposition(ok)
+    _refuel_sensitivity(ok)
+    _diesel_by_tw(routes, ok)
+
+
+# Window classes ordered tight -> none, i.e. loosening the constraint, so the
+# trend reads left to right (paper_figures.py uses the same order).
+_TW_ORDER = ["tight", "medium", "large", "none"]
+
+
+def _diesel_by_tw(routes, oracle_ok) -> None:
+    """Split the penalty by time-window class.
+
+    Answers whether the EV/diesel gap is a real makespan difference or an
+    artefact of the window penalty: the objective is
+    ta[N] + BETA_TW*sum(delta), so a schedule can trade makespan against a
+    missed window.  Both the duration-based and the objective-based penalty
+    are reported, along with the delta counts that separate them.
+    """
+    per: dict[tuple, dict] = {}
+    for route, cust in DIESEL_COMBOS:
+        for tw in _TW_ORDER:
+            for seed in SEEDS:
+                st  = _stem(route, cust, tw, seed)
+                key = (route, tw)
+                d   = per.setdefault(key, dict(pen_o=[], pen_g=[], obj_o=[],
+                                               d_ev=[], d_di=[], brk_di=[]))
+                fuel = _refuel_h(route)
+                ev_g, di_g = _greedy(st), _greedy(st, "diesel")
+                if (ev_g and di_g and not ev_g["infeasible"]
+                        and not di_g["infeasible"] and di_g["duration"] > 0):
+                    d["pen_g"].append(
+                        100 * (ev_g["duration"] / (di_g["duration"] + fuel) - 1))
+                if route not in oracle_ok:
+                    continue
+                ev, di = _oracle(st), _oracle(st, "diesel")
+                dw_ev, dw_di = _oracle_dwell(st), _oracle_dwell(st, "diesel")
+                if not (ev and di and di["duration"] > 0):
+                    continue
+                base = di["duration"] + fuel
+                d["pen_o"].append(100 * (ev["duration"] / base - 1))
+                if ev.get("delta") is not None and di.get("delta") is not None:
+                    # Objective-based: charge each side for the windows it
+                    # misses, at the model's own BETA_TW.
+                    d["obj_o"].append(
+                        100 * ((ev["duration"] + BETA_TW * ev["delta"])
+                               / (base + BETA_TW * di["delta"]) - 1))
+                    d["d_ev"].append(ev["delta"]); d["d_di"].append(di["delta"])
+                if dw_di:
+                    d["brk_di"].append(dw_di["break"])
+
+    routes = [r for r in routes if any((r, tw) in per for tw in _TW_ORDER)]
+    if not routes:
+        return
+
+    # ── small multiples: one panel per route class ───────────────────────────
+    fig, axes = plt.subplots(1, len(routes), figsize=(2.3 * len(routes) + 0.9,
+                                                      2.9), sharey=True)
+    axes = np.atleast_1d(axes)
+    x, w = np.arange(len(_TW_ORDER)), 0.34
+    series = [("Greedy", "pen_g", BLUE), ("Oracle", "pen_o", INK)]
+    top = 0.0
+    for ax, route in zip(axes, routes):
+        for k, (lbl, key, col) in enumerate(series):
+            vals = [_mean(per[(route, tw)][key]) if (route, tw) in per else None
+                    for tw in _TW_ORDER]
+            top  = max([top] + [v for v in vals if v is not None])
+            ax.bar(x + (k - 0.5) * w,
+                   [np.nan if v is None else v for v in vals], w,
+                   color=col, edgecolor="white", linewidth=0.8,
+                   label=lbl if ax is axes[0] else None)
+        ax.set_xticks(x, [t.capitalize() for t in _TW_ORDER], fontsize=7)
+        ax.set_title(f"{route.capitalize()} route", loc="left", fontsize=8)
+        ax.yaxis.grid(True, color=GRID, lw=0.6)
+        ax.set_axisbelow(True)
+        ax.tick_params(axis="x", length=0)
+    axes[0].set_ylabel("Route duration vs diesel (%)")
+    axes[0].set_ylim(0, top * 1.28)
+    axes[0].legend(frameon=False, fontsize=7, loc="upper right")
+    fig.suptitle("Electrification penalty by time-window class",
+                 x=0.02, ha="left", fontsize=9)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    _save(fig, "additional_diesel_tw")
+
+    # ── table: duration vs objective, and the delta counts behind it ─────────
+    rows = []
+    for route in routes:
+        for tw in _TW_ORDER:
+            d = per.get((route, tw))
+            if not d:
+                continue
+            rows.append([route, tw, len(d["pen_o"]), len(d["pen_g"]),
+                         _fmt(_mean(d["pen_g"]), ".2f", ""),
+                         _fmt(_mean(d["pen_o"]), ".2f", ""),
+                         _fmt(_mean(d["obj_o"]), ".2f", ""),
+                         _fmt(_mean(d["d_ev"]), ".2f", ""),
+                         _fmt(_mean(d["d_di"]), ".2f", ""),
+                         _fmt(_mean(d["brk_di"]), ".2f", "")])
+    _write_csv("additional_diesel_tw.csv",
+               ["route", "tw", "n_oracle", "n_greedy", "pen_greedy_%",
+                "pen_oracle_%", "pen_oracle_objective_%", "delta_ev",
+                "delta_diesel", "diesel_break_h"], rows)
+
+    tex = [
+        r"\begin{table}[ht]\centering",
+        r"\caption{Electrification penalty by time-window class.  "
+        r"``Duration'' compares makespans; ``objective'' additionally charges "
+        r"each vehicle $\beta_{TW}$ per out-of-window service start, so the "
+        r"pair separates a real makespan difference from one bought by "
+        r"missing a window.  $\delta$ columns give the mean number of missed "
+        r"windows.  The last column is the diesel's standalone break time, "
+        r"which is what drives the trend: the electric truck takes none in "
+        r"any cell, charging through every break it needs.}",
+        r"\label{tab:diesel-tw}",
+        r"\begin{tabular}{llrrrrrrr}",
+        r"\hline",
+        r"Route & Window & $n_G$ & Greedy (\%) & $n_O$ & Duration (\%) & "
+        r"Objective (\%) & $\delta_{EV}$ & $\delta_{diesel}$ \\",
+        r"\hline",
+    ]
+    for r in rows:
+        # n differs by column: Greedy drops instances it cannot schedule
+        # feasibly, the oracle drops classes with incomplete coverage.
+        tex.append(f"{r[0].capitalize()} & {r[1].capitalize()} & "
+                   f"{r[3]} & {r[4] or '--'} & "
+                   f"{r[2] or '--'} & {r[5] or '--'} & {r[6] or '--'} & "
+                   f"{r[7] or '--'} & {r[8] or '--'} \\\\")
+    tex += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    _write_tex("additional_diesel_tw.tex", "\n".join(tex))
 
 
 # ── Refuelling: reported post hoc, not modelled ──────────────────────────────
@@ -358,19 +547,37 @@ _TANK_USABLE = 0.90
 # covers nozzle handling and payment.
 _REFUEL_EVENT_H = (10.0 + 2.0 + 7.0) / 60
 
+# Fuel stops credited to the diesel in the headline tables.  Stated as an
+# assumption rather than derived, because the derived count depends on a tank
+# specification that the literature does not pin down (see _TANK_SPECS).
+#
+# The counts below are internally consistent under ONE specification, the
+# 600 L tank at 33 L/100 km: it is the only one that puts the medium class at
+# a full stop (0.95), and it puts the long class at 1.77, i.e. two.  A larger
+# tank would move the pair down together (medium 0, long 1) rather than
+# changing only one of them, so mixing medium=1 with long=1 would not
+# correspond to any single truck.  Crediting a stop LOWERS the reported
+# electrification penalty, so this is the less conservative reading;
+# _refuel_sensitivity() reports the zero-stop bound and every spec alongside.
+_REFUEL_STOPS = {"short": 0, "medium": 1, "long": 2}
+
+
+def _refuel_h(route: str) -> float:
+    """Post-hoc diesel refuelling time (h) credited to a route class."""
+    return _REFUEL_STOPS.get(route, 0) * _REFUEL_EVENT_H
+
 
 def _refuel_sensitivity(routes) -> None:
-    """Bound the effect of the fuel stops the diesel model does not charge for.
+    """Check the assumed fuel-stop count against what tank specs imply.
 
-    Reports, per route class, how many stops each tank spec implies and what
-    crediting them would do to the reported penalty.  The headline table
-    assumes zero, which is the conservative direction: a longer diesel
-    makespan can only shrink the electrification penalty.
+    The headline tables credit _REFUEL_STOPS per route class.  This reports
+    what each tank specification would derive instead, and what the penalty
+    would be under it, so the assumption is auditable rather than asserted.
     """
     rows, note = [], {}
     for route in routes:
         km, pen = [], []
-        for r, cust in COMBOS:
+        for r, cust in DIESEL_COMBOS:
             if r != route:
                 continue
             for tw in TWS:
@@ -384,43 +591,60 @@ def _refuel_sensitivity(routes) -> None:
                     pen.append((ev["duration"], di["duration"]))
         if not km:
             continue
-        base = _mean([100 * (e / d - 1) for e, d in pen])
         note[route] = (len(km), min(km), max(km))
+
+        def _pen(stops) -> float | None:
+            return _mean([100 * (e / (d + s * _REFUEL_EVENT_H) - 1)
+                          for (e, d), s in zip(pen, stops)])
+
+        assumed = _REFUEL_STOPS.get(route, 0)
+        base    = _pen([0] * len(km))
+        rows.append([route, "assumed (headline)", "", "",
+                     f"{assumed:.2f}", "", _fmt(_pen([assumed] * len(km)), ".2f")])
+        rows.append([route, "no fuel stop", "", "", "0.00", "",
+                     _fmt(base, ".2f")])
         for tank, cons in _TANK_SPECS:
             rng   = _TANK_USABLE * tank / cons * 100
             stops = [max(0, int(np.ceil(t / rng)) - 1) for t in km]
-            adj   = _mean([100 * (e / (d + s * _REFUEL_EVENT_H) - 1)
-                           for (e, d), s in zip(pen, stops)])
-            rows.append([route, tank, cons, f"{rng:.0f}",
+            rows.append([route, f"{tank:g} L @ {cons:g} L/100km", tank, cons,
                          f"{_mean(stops):.2f}",
                          f"{100 * np.mean([s > 0 for s in stops]):.0f}",
-                         _fmt(base, ".2f"), _fmt(adj, ".2f"),
-                         _fmt(adj - base if adj and base else None, ".2f")])
+                         _fmt(_pen(stops), ".2f")])
 
     if not rows:
         print("  Refuel note: pending (no EV/diesel oracle pairs yet)")
         return
     _write_csv("additional_diesel_refuel.csv",
-               ["route", "tank_L", "cons_L_per_100km", "range_km",
-                "mean_fuel_stops", "pct_needing_1plus", "penalty_%",
-                "penalty_with_refuel_%", "delta_pp"], rows)
+               ["route", "specification", "tank_L", "cons_L_per_100km",
+                "mean_fuel_stops", "pct_needing_1plus", "penalty_%"], rows)
 
-    worst = max(float(r[8]) for r in rows), min(float(r[8]) for r in rows)
-    span  = " to ".join(f"{v:+.2f}" for v in sorted(worst))
-    _write_tex("additional_diesel_refuel.tex", "\n".join([
-        r"% one-sentence footnote for the diesel section",
-        r"The diesel schedules charge no refuelling time.  Route lengths are "
+    assumed = ", ".join(f"{r} {_REFUEL_STOPS.get(r, 0)}" for r in note)
+    tex = [
+        r"\begin{table}[ht]\centering",
+        r"\caption{Refuelling is credited post hoc rather than modelled: it has "
+        r"no binding location choice, any truck stop serving, and occurs at "
+        r"most once on these corridors.  Route lengths are "
         + "; ".join(rf"{r} {lo:.0f}--{hi:.0f}\,km ($n={n}$)"
                     for r, (n, lo, hi) in note.items())
-        + r", against a tank range of "
-        + rf"{_TANK_USABLE * _TANK_SPECS[-1][0] / _TANK_SPECS[-1][1] * 100:.0f}"
-        + rf"--{_TANK_USABLE * _TANK_SPECS[0][0] / _TANK_SPECS[0][1] * 100:.0f}"
-        + r"\,km, so no fuel stop is required on the short routes under any "
-        r"specification and at most one on the medium routes.  Crediting the "
-        rf"diesel with that stop ({_REFUEL_EVENT_H * 60:.0f}\,min: access "
-        r"manoeuvre, queue and pumping) would change the reported penalty by "
-        rf"{span}\,percentage points, so the tables assume none --- the "
-        r"conservative direction.", ""]))
+        + rf".  A fuel stop costs {_REFUEL_EVENT_H * 60:.0f}\,min (access "
+        r"manoeuvre, queue, pumping).  The headline tables assume "
+        + assumed
+        + r" stop(s), shown against what each tank specification would derive "
+        r"instead.  Crediting a stop lengthens the diesel makespan and so "
+        r"shrinks the reported penalty; the zero-stop row is the conservative "
+        r"bound.}",
+        r"\label{tab:diesel-refuel}",
+        r"\begin{tabular}{llrrr}",
+        r"\hline",
+        r"Route & Specification & Stops & Needing $\geq 1$ (\%) & "
+        r"Penalty (\%) \\",
+        r"\hline",
+    ]
+    for r in rows:
+        tex.append(f"{r[0].capitalize()} & {r[1]} & {r[4]} & "
+                   f"{r[5] or '--'} & ${float(r[6]):+.2f}$ \\\\")
+    tex += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    _write_tex("additional_diesel_refuel.tex", "\n".join(tex))
 
 
 # Labels for the makespan decomposition, in reporting order.  "manoeuvre" is
@@ -448,7 +672,7 @@ def _diesel_decomposition(routes) -> None:
     """
     per: dict[str, dict[str, list]] = {}
     resid_max = 0.0
-    for route, cust in COMBOS:
+    for route, cust in DIESEL_COMBOS:
         for tw in TWS:
             for seed in SEEDS:
                 st = _stem(route, cust, tw, seed)
@@ -473,12 +697,20 @@ def _diesel_decomposition(routes) -> None:
     print(f"  Decomposition: closes to {resid_max * 3600:.3f} s worst case")
 
     routes = [r for r in routes if r in per]
+    # The modelled rows close the gap exactly (asserted above); the post-hoc
+    # fuel stop is then subtracted separately, so the reported net matches the
+    # penalty in Table tab:diesel rather than the raw model output.
+    net = {r: _mean(per[r]["_gap"]) - _refuel_h(r) for r in routes}
     _write_csv("additional_diesel_decomp.csv",
                ["component"] + [f"{r}_h" for r in routes],
                [[lbl] + [_fmt(_mean(per[r][k]), ".3f", "") for r in routes]
                 for k, lbl in _DECOMP_LABEL]
-               + [["Net penalty vs diesel"]
-                  + [_fmt(_mean(per[r]["_gap"]), ".3f", "") for r in routes]])
+               + [["Modelled subtotal"]
+                  + [_fmt(_mean(per[r]["_gap"]), ".3f", "") for r in routes],
+                  ["Diesel refuelling (post hoc)"]
+                  + [_fmt(-_refuel_h(r), ".3f", "") for r in routes],
+                  ["Net penalty vs diesel"]
+                  + [_fmt(net[r], ".3f", "") for r in routes]])
 
     n = min(len(per[r]["_gap"]) for r in routes)
     tex = [
@@ -486,10 +718,11 @@ def _diesel_decomposition(routes) -> None:
         r"\caption{Where the electrification penalty goes: mean per-instance "
         r"difference (h) between the hindsight-optimal electric and diesel "
         r"schedules, decomposed into the terms of the departure equations. "
-        r"Driving is identical within each pair, so the rows sum to the net "
-        r"penalty exactly. Both vehicles pay the same access manoeuvre to "
+        r"Driving is identical within each pair, so the modelled rows sum to "
+        r"the subtotal exactly. Both vehicles pay the same access manoeuvre to "
         r"pull off for a mandatory break, so only the EV's charge-only stops "
-        r"survive that row. $n \geq " + str(n) + r"$ per class.}",
+        r"survive that row. The diesel's fuel stop is credited afterwards "
+        r"(Table~\ref{tab:diesel-refuel}). $n \geq " + str(n) + r"$ per class.}",
         r"\label{tab:diesel-decomp}",
         r"\begin{tabular}{l" + "r" * len(routes) + r"}",
         r"\hline",
@@ -500,11 +733,16 @@ def _diesel_decomposition(routes) -> None:
         tex.append(f"{lbl} & "
                    + " & ".join(f"${_mean(per[r][k]):+.2f}$" for r in routes)
                    + r" \\")
-    tex += [r"\hline",
-            r"\textbf{Net penalty vs.\ diesel} & "
-            + " & ".join(rf"$\mathbf{{{_mean(per[r]['_gap']):+.2f}}}$"
-                         for r in routes) + r" \\",
-            r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    tex += [
+        r"\hline",
+        r"Modelled subtotal & "
+        + " & ".join(f"${_mean(per[r]['_gap']):+.2f}$" for r in routes) + r" \\",
+        r"Diesel refuelling (post hoc) & "
+        + " & ".join(f"${-_refuel_h(r):+.2f}$" for r in routes) + r" \\",
+        r"\hline",
+        r"\textbf{Net penalty vs.\ diesel} & "
+        + " & ".join(rf"$\mathbf{{{net[r]:+.2f}}}$" for r in routes) + r" \\",
+        r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_diesel_decomp.tex", "\n".join(tex))
 
 
