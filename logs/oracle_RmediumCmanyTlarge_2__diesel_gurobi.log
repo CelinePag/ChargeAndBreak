@@ -1,0 +1,58 @@
+
+Gurobi 9.5.2 (linux64) logging started Mon Aug  3 11:03:04 2026
+
+Set parameter LogFile to value "logs/oracle_RmediumCmanyTlarge_2__diesel_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 5005 rows, 2753 columns and 53111 nonzeros
+Model fingerprint: 0x52dc5889
+Variable types: 1717 continuous, 1036 integer (1036 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 4e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 2477 rows and 1094 columns
+Presolve time: 0.48s
+Presolved: 2528 rows, 1659 columns, 41361 nonzeros
+Variable types: 975 continuous, 684 integer (684 binary)
+Root relaxation presolve removed 71 rows and 0 columns
+Root relaxation presolved: 2457 rows, 1659 columns, 24800 nonzeros
+
+
+Root relaxation: objective 6.014132e+01, 1975 iterations, 0.32 seconds (0.20 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      60.9998347   60.14132  1.41%     -    1s
+     0     0   60.14132    0   29   60.99983   60.14132  1.41%     -    1s
+     0     0   60.38957    0   35   60.99983   60.38957  1.00%     -    1s
+     0     0   60.38957    0   33   60.99983   60.38957  1.00%     -    1s
+     0     0   60.54114    0   48   60.99983   60.54114  0.75%     -    2s
+     0     0   60.54114    0   46   60.99983   60.54114  0.75%     -    2s
+
+Cutting planes:
+  Gomory: 52
+  Lift-and-project: 18
+  Cover: 9
+  Implied bound: 41
+  Clique: 1
+  MIR: 50
+  Flow cover: 115
+  Zero half: 6
+  Network: 1
+  RLT: 5
+  Relax-and-lift: 8
+
+Explored 1 nodes (3760 simplex iterations) in 2.11 seconds (0.84 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 1: 60.9998 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 6.099983466667e+01, best bound 6.070780415307e+01, gap 0.4787%

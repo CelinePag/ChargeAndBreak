@@ -1,0 +1,55 @@
+
+Gurobi 9.5.2 (linux64) logging started Mon Aug  3 11:04:56 2026
+
+Set parameter LogFile to value "logs/oracle_RmediumCmanyTtight_9__diesel_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 4993 rows, 2738 columns and 53755 nonzeros
+Model fingerprint: 0x2645ef7e
+Variable types: 1712 continuous, 1026 integer (1026 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 4e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x7507_ by 1.000000000
+
+Presolve removed 2448 rows and 1069 columns
+Presolve time: 0.49s
+Presolved: 2545 rows, 1669 columns, 40821 nonzeros
+Variable types: 983 continuous, 686 integer (686 binary)
+Root relaxation presolve removed 63 rows and 0 columns
+Root relaxation presolved: 2482 rows, 1669 columns, 25324 nonzeros
+
+
+Root relaxation: objective 5.891056e+01, 2143 iterations, 0.35 seconds (0.21 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      61.3418254   58.91056  3.96%     -    1s
+     0     0   58.91056    0   39   61.34183   58.91056  3.96%     -    1s
+     0     0   60.79832    0   65   61.34183   60.79832  0.89%     -    1s
+     0     0   61.05003    0   16   61.34183   61.05003  0.48%     -    1s
+
+Cutting planes:
+  Gomory: 28
+  Lift-and-project: 1
+  Cover: 10
+  Implied bound: 96
+  MIR: 61
+  StrongCG: 1
+  Flow cover: 106
+  RLT: 2
+  Relax-and-lift: 12
+
+Explored 1 nodes (3186 simplex iterations) in 1.74 seconds (0.90 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 1: 61.3418 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 6.134182539177e+01, best bound 6.105003497217e+01, gap 0.4757%

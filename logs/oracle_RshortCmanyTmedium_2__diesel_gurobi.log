@@ -1,0 +1,58 @@
+
+Gurobi 9.5.2 (linux64) logging started Mon Aug  3 11:05:07 2026
+
+Set parameter LogFile to value "logs/oracle_RshortCmanyTmedium_2__diesel_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 3248 rows, 1787 columns and 25349 nonzeros
+Model fingerprint: 0x25928d01
+Variable types: 1117 continuous, 670 integer (670 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 7e+02]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 3e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 1678 rows and 736 columns
+Presolve time: 0.17s
+Presolved: 1570 rows, 1051 columns, 12956 nonzeros
+Variable types: 625 continuous, 426 integer (426 binary)
+Found heuristic solution: objective 417.6188213
+Found heuristic solution: objective 307.4521547
+Root relaxation presolve removed 1 rows and 0 columns
+Root relaxation presolved: 1569 rows, 1051 columns, 12785 nonzeros
+
+
+Root relaxation: objective 4.116094e+01, 1239 iterations, 0.08 seconds (0.06 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      56.3000052   41.16094  26.9%     -    0s
+     0     0   41.16094    0   71   56.30001   41.16094  26.9%     -    0s
+H    0     0                      51.1945204   41.16094  19.6%     -    0s
+H    0     0                      42.8060184   41.16094  3.84%     -    0s
+H    0     0                      41.8893518   41.88516  0.01%     -    0s
+     0     0   41.88935    0   37   41.88935   41.88935  0.00%     -    0s
+
+Cutting planes:
+  Gomory: 23
+  Lift-and-project: 13
+  Cover: 4
+  Implied bound: 15
+  MIR: 103
+  Flow cover: 110
+  Network: 1
+  RLT: 2
+  Relax-and-lift: 24
+
+Explored 1 nodes (1641 simplex iterations) in 0.96 seconds (0.46 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 6: 41.8894 42.806 51.1945 ... 417.619
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 4.188935176813e+01, best bound 4.188935176813e+01, gap 0.0000%

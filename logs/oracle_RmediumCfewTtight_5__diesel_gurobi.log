@@ -1,0 +1,88 @@
+
+Gurobi 9.5.2 (linux64) logging started Mon Aug  3 11:02:55 2026
+
+Set parameter LogFile to value "logs/oracle_RmediumCfewTtight_5__diesel_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 4619 rows, 2541 columns and 46505 nonzeros
+Model fingerprint: 0xd675adbc
+Variable types: 1592 continuous, 949 integer (949 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 3e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x7005_ by 1.000000000
+
+Presolve removed 2301 rows and 1017 columns
+Presolve time: 0.55s
+Presolved: 2318 rows, 1524 columns, 35630 nonzeros
+Variable types: 907 continuous, 617 integer (617 binary)
+Found heuristic solution: objective 902.5850777
+Root relaxation presolve removed 61 rows and 0 columns
+Root relaxation presolved: 2257 rows, 1524 columns, 22191 nonzeros
+
+
+Root relaxation: objective 5.241841e+01, 1647 iterations, 0.35 seconds (0.15 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      64.1684110   52.41841  18.3%     -    1s
+     0     0   52.41841    0    9   64.16841   52.41841  18.3%     -    1s
+     0     0   52.41841    0   35   64.16841   52.41841  18.3%     -    1s
+H    0     0                      56.3960529   52.41841  7.05%     -    1s
+     0     0   52.42259    0    9   56.39605   52.42259  7.05%     -    1s
+     0     0   52.42299    0   32   56.39605   52.42299  7.04%     -    1s
+     0     0   52.46787    0    6   56.39605   52.46787  6.97%     -    2s
+H    0     0                      56.1476070   52.46787  6.55%     -    2s
+     0     0   52.47805    0    5   56.14761   52.47805  6.54%     -    2s
+H    0     0                      55.6460529   52.48799  5.68%     -    2s
+     0     0   52.49722    0    7   55.64605   52.49722  5.66%     -    2s
+     0     0   52.49722    0   12   55.64605   52.49722  5.66%     -    2s
+     0     0   52.53856    0   20   55.64605   52.53856  5.58%     -    2s
+     0     0   52.53856    0   26   55.64605   52.53856  5.58%     -    2s
+     0     0   52.56186    0   87   55.64605   52.56186  5.54%     -    2s
+     0     0   52.57523    0   86   55.64605   52.57523  5.52%     -    3s
+     0     0   52.57523    0    6   55.64605   52.57523  5.52%     -    4s
+     0     0   52.57523    0   79   55.64605   52.57523  5.52%     -    4s
+H    0     0                      55.5642736   52.57523  5.38%     -    4s
+     0     0   52.57523    0   86   55.56427   52.57523  5.38%     -    4s
+     0     0   52.57523    0   88   55.56427   52.57523  5.38%     -    4s
+     0     0   52.57523    0   89   55.56427   52.57523  5.38%     -    4s
+     0     0   53.01078    0   90   55.56427   53.01078  4.60%     -    4s
+     0     0   53.01078    0   84   55.56427   53.01078  4.60%     -    4s
+     0     0   53.01078    0   88   55.56427   53.01078  4.60%     -    4s
+H    0     0                      55.1684110   53.01078  3.91%     -    5s
+     0     0   53.89313    0   66   55.16841   53.89313  2.31%     -    5s
+     0     0   53.90354    0   76   55.16841   53.90354  2.29%     -    5s
+     0     0   53.90354    0   76   55.16841   53.90354  2.29%     -    5s
+H    0     0                      54.4184110   53.90354  0.95%     -    5s
+     0     0   54.00685    0   97   54.41841   54.00685  0.76%     -    5s
+     0     0   54.00685    0   83   54.41841   54.00685  0.76%     -    6s
+     0     2   54.00685    0   74   54.41841   54.00685  0.76%     -    6s
+
+Cutting planes:
+  Learned: 1
+  Gomory: 2
+  Lift-and-project: 6
+  Cover: 23
+  Implied bound: 65
+  Projected implied bound: 1
+  Clique: 3
+  MIR: 88
+  Flow cover: 136
+  Zero half: 2
+  RLT: 7
+  Relax-and-lift: 44
+
+Explored 12 nodes (7497 simplex iterations) in 6.73 seconds (3.87 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 8: 54.4184 55.1684 55.5643 ... 902.585
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 5.441841100000e+01, best bound 5.441841100000e+01, gap 0.0000%
