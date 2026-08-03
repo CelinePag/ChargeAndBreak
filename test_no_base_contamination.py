@@ -82,6 +82,11 @@ def main() -> None:
         # diesel copy: same, plus the _apply_diesel_mode title path
         [py, "additional_analysis.py", "diesel", "--algorithms", algs,
          "--combos", "RshortCfew", "--tw", "none", "--seeds", "1-2"],
+        # patched instance (no_split): the tag carries no value suffix, so it
+        # is the axis most likely to collide with a base stem
+        [py, "additional_analysis.py", "sensitivity", "--axis", "no_split",
+         "--algorithms", algs,
+         "--combos", "RshortCfew", "--tw", "none", "--seeds", "1-2"],
     ]
     print("\nrunning additional-analysis batches:")
     for b in batches:

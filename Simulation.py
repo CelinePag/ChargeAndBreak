@@ -227,8 +227,11 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
             actions.append(dict(y=1, break_type=None, rest_type=None))
         return actions
 
-    break_opts = ["0", "b45", "b15"] #if is_CS else ["0"]
-    if state.phi == 1:# and is_CS:
+    # 8.3 no-split axis: without the Art. 7 split the 45' block is the only
+    # legal break, so b15/b30 leave the action set entirely.
+    allow_split = bool(full_data.get("allow_split", True))
+    break_opts = ["0", "b45"] + (["b15"] if allow_split else [])
+    if allow_split and state.phi == 1:# and is_CS:
         break_opts.append("b30")
     rest_opts = ["0", "r1"]
     if state.rho2_used < int(full_data.get("rho_bar", 3)):
@@ -976,7 +979,9 @@ def select_best_action(full_data, stop: int, state,
             best_action = dict(best_action, break_type="b45")
             _brk = "b45"
             _p(f"     [POST-HOC] tauc={_tc_patch*60:.0f}m >= 45m → b45 injected (free, concurrent)")
-        elif _sig_patch == 0 and _tc_patch >= full_data["Tb30"] - 1e-6 and best_action.get("break_type") in (None, "0", "b15"):
+        elif (_sig_patch == 0 and full_data.get("allow_split", True)
+                and _tc_patch >= full_data["Tb30"] - 1e-6
+                and best_action.get("break_type") in (None, "0", "b15")):
             _s0_patch["b30"] = 1
             best_action = dict(best_action, break_type="b30")
             _brk = "b30"

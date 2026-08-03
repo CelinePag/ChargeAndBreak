@@ -43,3 +43,50 @@ Solution count 5: 34.1683 197.252 275.418 ... 573.835
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 3.416826066667e+01, best bound 3.400159400000e+01, gap 0.4878%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:12:54 2026
+
+Set parameter LogFile to value "logs\oracle_RshortCfewTlarge_5__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 3006 rows, 1660 columns and 22132 nonzeros
+Model fingerprint: 0x52ea6e25
+Variable types: 1042 continuous, 618 integer (618 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 7e+02]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 2e+01]
+  RHS range        [2e-02, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 1562 rows and 685 columns
+Presolve time: 0.22s
+Presolved: 1444 rows, 975 columns, 11448 nonzeros
+Variable types: 578 continuous, 397 integer (395 binary)
+Found heuristic solution: objective 578.5015940
+Root relaxation presolve removed 2 rows and 0 columns
+Root relaxation presolved: 1442 rows, 975 columns, 11278 nonzeros
+
+
+Root relaxation: objective 3.433493e+01, 727 iterations, 0.07 seconds (0.04 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   34.33493    0    5  578.50159   34.33493  94.1%     -    0s
+Another try with MIP start
+H    0     0                      35.2515940   34.33493  2.60%     -    0s
+H    0     0                      34.3349263   34.33493  0.00%     -    0s
+     0     0   34.33493    0    5   34.33493   34.33493  0.00%     -    0s
+
+Explored 1 nodes (818 simplex iterations) in 0.51 seconds (0.20 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 3: 34.3349 35.2516 578.502 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 3.433492633333e+01, best bound 3.433492633333e+01, gap 0.0000%

@@ -191,6 +191,14 @@ def build_2sp_model(data: dict, scenarios: list[dict],
         _v[0].fix(0)
         _v[N].fix(0)
 
+    # 8.3 no-split axis — see MILP._drop_split_break.  The split blocks are
+    # first-stage here too, so fixing them out leaves the scenario sub-problems
+    # untouched and phi collapses to 0 through (26)–(29).
+    if not m._allow_split:
+        for i in m.I:
+            m.x_b15[i].fix(0)
+            m.x_b30[i].fix(0)
+
     # ── Second-stage variables (per scenario, indexed by (stop, scenario)) ────
     m.ta       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)
     m.td       = pyo.Var(m.I, m.Scen, domain=pyo.NonNegativeReals)

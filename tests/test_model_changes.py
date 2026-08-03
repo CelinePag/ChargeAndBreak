@@ -571,6 +571,34 @@ def test_c3_static_execution_records_failure_no_repair():
     assert len(veh.violations) > 0, "a broken static plan must record a failure"
 
 
+def test_diesel_mode_keeps_stop_manoeuvre_drops_charging_overheads():
+    """§8.4 apples-to-apples: a diesel driver still leaves the motorway, parks
+    and re-enters to take a mandatory break, so M_stop survives diesel mode.
+    Only the charger-specific overheads go: the queue, and the repositioning
+    move off the charging bay.  Zeroing M_stop instead (the pre-2026-08 form)
+    handed the diesel every break at no access cost and overstated the
+    electrification penalty by ~2 pp."""
+    from runner_dispatch import _apply_diesel_mode
+
+    data = tiny_data([2.0, 2.0, 1.0], cs_stops=[1], cust_stops=[2])
+    data["Q"]      = {k: 0.2 for k in data["K"]}
+    data["M_stop"] = {k: 10.0 / 60 for k in data["K"]}
+    data["M_seq"]  = {k: 5.0 / 60 for k in data["K"]}
+
+    out, D_real, E_real = _apply_diesel_mode(data, [2.0, 2.0, 1.0], [1.0, 1.0, 1.0])
+
+    assert all(out["M_stop"][k] == 10.0 / 60 for k in out["K"]), \
+        "diesel must still pay the access manoeuvre at any stop it pulls into"
+    assert all(out["M_seq"][k] == 0.0 for k in out["K"]), \
+        "diesel has no charging bay to vacate"
+    assert all(out["Q"][k] == 0.0 for k in out["K"]), \
+        "diesel does not queue for a charger"
+    assert all(e == 0.0 for e in out["E"].values()) and all(e == 0.0 for e in E_real), \
+        "diesel mode must remove the energy dimension"
+    # the caller's dict must not be mutated (runs reuse it for the EV side)
+    assert data["M_seq"][data["K"][0]] == 5.0 / 60, "transform must copy"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PLAIN RUNNER
 # ══════════════════════════════════════════════════════════════════════════════

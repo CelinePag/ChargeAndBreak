@@ -118,6 +118,26 @@ def _apply_diesel_mode(full_data: dict, D_real: list, E_real: list) -> tuple:
     SOC to remain constant at Ecap throughout; the PWL charging math then
     forces y[i]=0 at every CS stop (tauc=0 while chg_act2 requires tauc≥0.25·y).
 
+    Apples-to-apples overheads (§8.4).  A diesel driver taking a mandatory
+    break or rest still has to leave the motorway, park and re-enter, exactly
+    as the EV does, so M_stop is KEPT.  With y=0 the MILP's v[i] reduces to the
+    break/rest indicator (v >= y, v >= xsum, v <= y + xsum), so M_stop is
+    charged at precisely the stops where the diesel actually pulls off — and
+    nowhere else.  This also makes K stops consistent with layby stops, which
+    already pay M_lay = M_STOP_H for the same act and were never zeroed here.
+
+    What IS removed:
+      Q     — charger queue; a diesel never queues for a charger.  (With y=0
+              the Q·y term vanishes anyway; zeroed for clarity.)
+      M_seq — repositioning off the charging bay before a break.  A diesel has
+              no bay to vacate, so this is a genuine EV-only cost.
+
+    Refuelling is NOT modelled here.  Route lengths in the short class
+    (824-1219 km) sit below the range of any plausible tank, and the medium
+    class (1541-2538 km) needs at most one stop, worth <=19 min (<0.6% of
+    route duration) — a constant with no binding location choice, reported
+    post hoc rather than given to the solver.
+
     Returns
     -------
     (full_data, D_real, E_real) — all transformed copies.
@@ -129,10 +149,9 @@ def _apply_diesel_mode(full_data: dict, D_real: list, E_real: list) -> tuple:
     data["E"]  = {i: 0.0 for i in range(N)}
     data["E0"] = data["Ecap"]   # start at max capacity (stays constant throughout)
 
-    # Remove CS overhead — stops become plain break-eligible waypoints
-    data["Q"]      = {k: 0.0 for k in data["K"]}
-    data["M_stop"] = {k: 0.0 for k in data["K"]}
-    data["M_seq"]  = {k: 0.0 for k in data["K"]}
+    # Remove charging-specific overhead; KEEP M_stop (see docstring)
+    data["Q"]     = {k: 0.0 for k in data["K"]}
+    data["M_seq"] = {k: 0.0 for k in data["K"]}
 
     # Distinct title so the oracle cache is separate from the EV version.
     # Idempotent: the diesel instance COPIES are already named "..__diesel",

@@ -70,6 +70,13 @@ Tb15: float = 0.25   # split-break part 1 — 15 min (h)
 Tb30: float = 0.50   # split-break part 2 — 30 min (h)
 Tr1:  float = 11.0   # daily rest (h)
 Tr2:  float = 9.0    # reduced daily rest (h)
+
+# Art. 7 second subparagraph PERMITS the 45-min break to be split into a 15-min
+# block followed by a 30-min block.  It is an option, not an obligation, so the
+# no-split regime is a legal operating policy: False drops x_b15/x_b30 from the
+# models and forces every break to be the unsplit 45 min (8.3 sensitivity axis).
+ALLOW_SPLIT_BREAK: bool = True
+
 Tdrv_cons:  float = 4.5   # max consecutive driving (h)
 Tdrv_sh1:   float = 9.0   # max shift driving, regular (h)
 Tdrv_sh2:   float = 10.0  # max shift driving, extended (h) — Art. 6(1)

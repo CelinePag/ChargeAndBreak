@@ -44,6 +44,7 @@ Data dict keys (produced by make_data)
   T_hor, T_START        float — absolute planning horizon / departure time (h)
   lb_t, ub_t {stop: h}  dict  — arrival-time variable bounds (for MILP tightening)
   Tb45, Tb15, Tb30      float — minimum break durations (h)
+  allow_split           bool  — Art. 7 split break (15'+30') available?
   Tr1, Tr2              float — minimum rest durations: daily=11h, reduced=9h
   Tdrv_cons             float — max consecutive driving before mandatory break (4.5 h)
   Tdrv_sh1, Tdrv_sh2    float — max shift driving (9 h / 10 h split-week rule)
@@ -80,7 +81,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from settings import (
     ECR_A as _ECR_A, ECR_B as _ECR_B, ECR_C as _ECR_C, ecr as _ecr,
     V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS, TBAR,
-    Tb45, Tb15, Tb30, Tr1, Tr2,
+    Tb45, Tb15, Tb30, ALLOW_SPLIT_BREAK, Tr1, Tr2,
     Tdrv_cons, Tdrv_sh1, Tdrv_sh2, Twrk_cons1, Twrk_cons2, Twrk_sh,
     T_SPR1, T_SPR2, TWK_60, TWK_DRV, RHO_BAR, EXT_BAR, BETA_TW,
     QUEUE_WAIT_MEAN_MIN, QUEUE_WAIT_STD_MIN,
@@ -187,7 +188,8 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
               S: dict | None = None,
               M_lay_h: float | None = None,
               allow_wait: bool = False,
-              wtd_rules: bool = False) -> dict:
+              wtd_rules: bool = False,
+              allow_split: bool = ALLOW_SPLIT_BREAK) -> dict:
     """
     Assemble the canonical data dict consumed by MILP.build_model,
     MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
@@ -265,6 +267,11 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
             True → MILP enforces the Directive 2002/15/EC working-time
             breaks in-model (6 h continuous work → break; 30'/45' cumulative
             per shift).  Default False keeps them ex-post only.
+    allow_split : bool
+            True (default) → the Art. 7 split break (15' + 30') is available.
+            False → x_b15 / x_b30 are dropped from every model and the
+            heuristic rules only ever take the unsplit 45' break (8.3
+            no-split sensitivity axis).
 
     Raises
     ------
@@ -344,6 +351,7 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
         H=H_bigM,               # C1 window / rest big-M
         hard_tw=bool(hard_tw), beta=float(beta_tw),
         allow_wait=bool(allow_wait), wtd_rules=bool(wtd_rules),
+        allow_split=bool(allow_split),
         T_hor=T_hor, T_START=_T_START,
         lb_t=lb_t, ub_t=ub_t,
         # Break / rest minimum durations (EU Regulation 561/2006)

@@ -95,6 +95,29 @@ def _model_rho(m, i):
 
 # ── Variable declaration ──────────────────────────────────────────────────────
 
+def _drop_split_break(m):
+    """
+    No-split regime (data["allow_split"] = False, 8.3 sensitivity axis).
+
+    Art. 7 second subparagraph only PERMITS the 15'+30' split, so forbidding it
+    is a legal fleet policy.  Fixing x_b15 = x_b30 = 0 removes both blocks from
+    the model: phi[0] = 0 plus phi[i+1] <= phi[i] + x_b15[i] then propagates
+    phi ≡ 0, so the split-break state machine collapses on its own and only the
+    unsplit 45' break survives.  (phi is deliberately NOT fixed here — the
+    horizon model pins phi[0] to the simulator's carried state, and letting the
+    constraint chain do the work keeps the two consistent.)
+
+    Fixing rather than skipping the declarations keeps every constraint, warm
+    start, and solution extractor downstream structurally identical; presolve
+    removes the columns.  Must be called AFTER _declare_common_vars.
+    """
+    if getattr(m, "_allow_split", True):
+        return
+    for i in m.I:
+        m.x_b15[i].fix(0)
+        m.x_b30[i].fix(0)
+
+
 def _declare_common_vars(m):
     """
     Declare all shared decision variables on model m.
@@ -212,6 +235,9 @@ def _declare_common_params(m, data):
     m.Tb45  = pyo.Param(initialize=data["Tb45"])
     m.Tb15  = pyo.Param(initialize=data["Tb15"])
     m.Tb30  = pyo.Param(initialize=data["Tb30"])
+    # 8.3 no-split axis — plain attribute (not a Param): it gates variable
+    # fixing in _drop_split_break, it never enters an expression.
+    m._allow_split = bool(data.get("allow_split", True))
     m.Tr1   = pyo.Param(initialize=data["Tr1"])
     m.Tr2   = pyo.Param(initialize=data["Tr2"])
     m.Tdrv_cons = pyo.Param(initialize=data["Tdrv_cons"])
@@ -1153,6 +1179,7 @@ def build_model(data: dict) -> pyo.ConcreteModel:
 
     # ── Variables ─────────────────────────────────────────────────────────────
     _declare_common_vars(m)
+    _drop_split_break(m)
 
     # ── Objective (eq. 1): arrival + fixed penalty per missed window (TW2) ───
     m.obj = pyo.Objective(
@@ -1396,6 +1423,7 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         H=H_bigM,                   # C1 window / rest big-M (full-route bound)
         hard_tw=full_data.get("hard_tw", False),
         beta=full_data.get("beta", 2.0),
+        allow_split=full_data.get("allow_split", True),
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],
         Ebar=full_data["Ebar"], Tbar=Tbar,
@@ -1464,6 +1492,7 @@ def build_horizon_model(sub_data: dict, init_state: dict,
 
     # ── Variables ─────────────────────────────────────────────────────────────
     _declare_common_vars(m)
+    _drop_split_break(m)
 
     # ── Objective: arrival + fixed window penalty (TW2) (+ repair penalty) ────
     _obj_expr = m.ta[N] + m.beta * sum(m.delta[i] for i in C)

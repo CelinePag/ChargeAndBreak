@@ -9,8 +9,8 @@ launched from here.  Each subcommand maps to one paper section:
   sensitivity    8.3 Sensitivity analysis            one-at-a-time sweeps off the
                                                      base case (CS spacing, charger
                                                      power, beta, travel CV, AR(1)
-                                                     rho; battery / no-split are
-                                                     guarded stubs until plumbed)
+                                                     rho, no-split break; battery
+                                                     is a guarded stub until plumbed)
   diesel         8.4 VS diesel trucks                same instances re-run with
                                                      --diesel (HoS only, no
                                                      charging) for the EV-vs-diesel
@@ -56,6 +56,9 @@ Examples
 
   # 8.3: charger-power sweep incl. MCS
   python additional_analysis.py sensitivity --axis charger_power --values 150,350,1000
+
+  # 8.3: no-split-break regime (Art. 7 15'+30' split forbidden; no --values)
+  python additional_analysis.py sensitivity --axis no_split
 
   # 8.5: budget frontier on short routes
   python additional_analysis.py gamma --gammas 0,1,2,4,8 --combos RshortCfew
@@ -121,10 +124,14 @@ _AXES = {
                               "generate_instance_file -> instance_realistic "
                               "-> make_data (mirror the charger_power_kw "
                               "path) before it can run"),
-    "no_split":      dict(kind="stub",
-                          msg="no-split-break axis needs an allow_split=False "
-                              "flag dropping x_b15/x_b30 in MILP.py and the "
-                              "greedy rule before it can run"),
+    # Art. 7 second subparagraph only PERMITS the 15'+30' split, so a carrier
+    # may forbid it.  allow_split=False drops x_b15/x_b30 from MILP/2SP and
+    # takes b15/b30 out of the greedy, LA and supervisor rules.  Patch (not
+    # regen): geometry AND realisation stay identical to the base instance,
+    # and generation itself is unaffected because the nominal greedy pass that
+    # centres the time windows never takes a split break anyway.
+    "no_split":      dict(kind="patch", kw="allow_split", cast=bool,
+                          default_values=[0], tag="nosplit"),
 }
 
 _ROUTE_FROM_TAG = {"Rshort": "short", "Rmedium": "medium", "Rlong": "long"}
@@ -269,12 +276,24 @@ def _materialise_regen(axis: str, value, combos, tws, seeds,
     return os.path.join(out_dir, f"*__{tag}.json")
 
 
+def _patch_tag(spec: dict, value) -> str:
+    """Variant tag for one patched value.  Boolean axes are a single regime
+    rather than a sweep, so they carry the bare tag (…__nosplit, not
+    …__nosplit0)."""
+    if spec.get("cast") is bool:
+        return spec["tag"]
+    return f"{spec['tag']}{value:g}"
+
+
 def _materialise_patch(axis: str, value, combos, tws, seeds,
                        out_dir: str, dry: bool) -> str:
     """Copy base instances and override one data field (identical geometry
-    and realisation).  Currently used for beta (out-of-window penalty)."""
+    and realisation).  Used for beta (out-of-window penalty) and no_split
+    (Art. 7 split break available or not)."""
     spec = _AXES[axis]
-    tag  = f"{spec['tag']}{value:g}"
+    cast = spec.get("cast", float)
+    val  = cast(value)
+    tag  = _patch_tag(spec, value)
     os.makedirs(out_dir, exist_ok=True)
     for combo in combos:
         route, cust = _split_combo(combo)
@@ -286,13 +305,13 @@ def _materialise_patch(axis: str, value, combos, tws, seeds,
                 if os.path.isfile(target):
                     continue
                 if dry:
-                    print(f"DRY-RUN  patch {src} [{spec['kw']}={value}] "
+                    print(f"DRY-RUN  patch {src} [{spec['kw']}={val}] "
                           f"-> {target}")
                     continue
                 with open(src, "r", encoding="utf-8") as fh:
                     payload = json.load(fh)
-                payload["instance"][spec["kw"]] = float(value)
-                payload["meta"][f"variant_{axis}"] = float(value)
+                payload["instance"][spec["kw"]] = val
+                payload["meta"][f"variant_{axis}"] = val
                 with open(target, "w", encoding="utf-8") as fh:
                     json.dump(payload, fh, indent=2)
                 _retitle(target, _tagged(stem, tag))
@@ -338,6 +357,13 @@ def cmd_sensitivity(args) -> None:
 
     values = ([float(v) for v in args.values.split(",")] if args.values
               else spec["default_values"])
+    # A boolean axis has one variant (the flag OFF) and a tag with no value
+    # suffix, so a non-zero --values would write __nosplit instances that are
+    # really the base case.  Refuse rather than mislabel the batch.
+    if spec.get("cast") is bool and any(float(v) != 0 for v in values):
+        raise SystemExit(f"axis '{args.axis}' is a single regime, not a sweep "
+                         f"— drop --values (the variant is the flag turned "
+                         f"OFF, i.e. 0)")
     seeds  = _expand_seeds(args.seeds)
     combos = args.combos.split(",")
     tws    = args.tw.split(",")
@@ -345,7 +371,9 @@ def cmd_sensitivity(args) -> None:
     for value in values:
         v = int(value) if float(value).is_integer() and args.axis != "cv" \
             else value
-        out_dir = os.path.join(SENS_DIR, f"{args.axis}_{v}")
+        # A boolean axis is one alternative regime, not a sweep — no suffix.
+        sub = (args.axis if spec.get("cast") is bool else f"{args.axis}_{v}")
+        out_dir = os.path.join(SENS_DIR, sub)
         if spec["kind"] == "regen":
             pattern = _materialise_regen(args.axis, v, combos, tws, seeds,
                                          out_dir, args.dry_run)

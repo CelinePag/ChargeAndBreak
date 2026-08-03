@@ -243,7 +243,11 @@ def supervise_action(full_data: dict, stop: int, state, action: dict,
     _has_reset = (new.get("break_type") in ("b45", "b30")
                   or new.get("rest_type") in ("r1", "r2"))
     if flags["must_reset_cd"] and not _has_reset:
-        brk = "b30" if getattr(state, "phi", 0) == 1 else "b45"
+        # 8.3 no-split axis: with the Art. 7 split unavailable phi stays 0 and
+        # the 45' block is the only break that resets consecutive driving.
+        _phi = (getattr(state, "phi", 0)
+                if full_data.get("allow_split", True) else 0)
+        brk = "b30" if _phi == 1 else "b45"
         # parallel break upgrade: at a CS with a charge planned, the break
         # runs inside the charging window at (near) zero marginal time cost.
         new["break_type"] = brk

@@ -576,7 +576,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     # that JSON files generated before it still load and solve.
     _defaults = dict(
         L=[], M_lay={},
-        T_dead=None, hard_tw=False, beta=2.0,
+        T_dead=None, hard_tw=False, beta=2.0, allow_split=True,
         Tspr1=13.0, Tspr2=15.0, Twk60=60.0,
         rho_bar=3, ext_bar=2,
         Tdrv_sh2=10.0,

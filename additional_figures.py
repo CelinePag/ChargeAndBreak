@@ -39,17 +39,17 @@ import numpy as np
 
 from settings import T_START
 
-# ── paper chrome (mirrors paper_figures.py) ──────────────────────────────────
-INK, MUT, GRID = "#000000", "#555555", "#e0e0e0"
-BLUE, VERM, ORAN, GREEN, PURP = ("#0072B2", "#D55E00", "#E69F00",
-                                 "#009E73", "#CC79A7")
-plt.rcParams.update({
-    "font.size": 8, "axes.edgecolor": MUT, "axes.linewidth": 0.6,
-    "axes.titlesize": 8.5, "axes.labelsize": 8,
-    "xtick.color": MUT, "ytick.color": MUT,
-    "xtick.labelsize": 7.5, "ytick.labelsize": 7.5,
-    "figure.dpi": 150, "savefig.bbox": "tight",
-})
+# Shared palette + chrome (see paper_style.py): colour follows the entity, so
+# Greedy is the same blue here as in the base-case figures.
+import paper_style as ps
+
+INK, MUT, GRID = ps.INK_PRIMARY, ps.INK_MUTED, ps.GRID
+BLUE  = ps.METHOD_COLOR["greedy"]
+VERM  = ps.METHOD_COLOR["RO"]
+ORAN  = ps.METHOD_COLOR["ROBU"]
+GREEN = ps.METHOD_COLOR["LA"]
+PURP  = ps.METHOD_COLOR["2SP"]
+ps.apply_rc()
 
 COMBOS = [("short", "few"), ("short", "many"), ("medium", "few"),
           ("medium", "many")]
@@ -117,6 +117,89 @@ def _oracle(stem: str, tag: str | None = None) -> dict | None:
                         tauc=None, g=None,
                         gap=float(d.get("gap") or 0.0))
     return None
+
+
+_INST_CACHE: dict[str, dict] = {}
+
+
+def _instance(stem: str) -> dict:
+    """Base instance data (geometry + overhead parameters), memoised.
+
+    Diesel variants are verbatim copies, so the base file is the right source
+    for both worlds; the diesel-side transform is applied by the caller.
+    """
+    if stem not in _INST_CACHE:
+        _INST_CACHE[stem] = (_load(f"instances/{stem}.json") or {}).get(
+            "instance") or {}
+    return _INST_CACHE[stem]
+
+
+def _int_keyed(d) -> dict[int, float]:
+    """JSON stringifies int keys on the way out; restore them."""
+    return {int(k): float(v) for k, v in (d or {}).items()}
+
+
+# Dwell components, in the order they are reported.  These are the terms of
+# the model's own departure equations (MILP td_K / td_C / td_L), so they sum
+# with driving to exactly the makespan — verified per instance below.
+_DWELL_ROWS = ("charging", "queue", "manoeuvre", "reposition",
+               "break", "rest", "service", "wait")
+
+
+def _oracle_dwell(stem: str, tag: str | None = None) -> dict | None:
+    """Per-component dwell totals (h) of the hindsight-optimal schedule.
+
+    Because driving is identical across the EV/diesel pair by construction
+    (verbatim copy, same D_real), differencing these components accounts for
+    the whole EV-vs-diesel makespan gap with no residual.
+    """
+    names = ([f"solutions/oracle_{stem}.json"] if tag is None else
+             [f"solutions/oracle_{stem}__{tag}.json",
+              f"solutions/oracle_{stem}_{tag}.json"])
+    sol = None
+    for n in names:
+        d = _load(n)
+        if d and d.get("feasible") and d.get("sol"):
+            sol = d["sol"]
+            break
+    inst = _instance(stem)
+    if sol is None or not inst:
+        return None
+
+    diesel = (tag == "diesel")
+    M_stop = _int_keyed(inst.get("M_stop"))
+    # _apply_diesel_mode keeps M_stop (the access manoeuvre is owed by any
+    # vehicle that pulls off to break) but drops the charger queue and the
+    # repositioning move off the charging bay, which have no diesel analogue.
+    M_seq  = {} if diesel else _int_keyed(inst.get("M_seq"))
+    M_lay  = _int_keyed(inst.get("M_lay"))
+    S      = _int_keyed(inst.get("S"))
+    L_set  = {int(i) for i in (inst.get("L") or [])}
+
+    out = {k: 0.0 for k in _DWELL_ROWS}
+    for s in sol:
+        i   = int(s["i"])
+        brk = any(float(s.get(k) or 0.0) > 0.5 for k in ("b15", "b30", "b45"))
+        rst = any(float(s.get(k) or 0.0) > 0.5 for k in ("rho1", "rho2"))
+        out["break"] += float(s.get("taub") or 0.0)
+        out["rest"]  += float(s.get("taur") or 0.0)
+        if s.get("is_K"):
+            y = float(s.get("y") or 0.0)
+            out["charging"]   += float(s.get("tauc") or 0.0)
+            out["queue"]      += float(s.get("tauq") or 0.0)   # already Q*y
+            out["reposition"] += float(s.get("sigma") or 0.0) * M_seq.get(i, 0.0)
+            if y > 0.5 or brk or rst:                          # MILP v[i]
+                out["manoeuvre"] += M_stop.get(i, 0.0)
+        else:
+            out["wait"] += float(s.get("wait") or 0.0)
+            if s.get("is_C"):
+                out["service"] += S.get(i, 0.0)
+            elif i in L_set and (brk or rst):
+                out["manoeuvre"] += M_lay.get(i, 0.0)
+
+    out["_drive"]    = sum(float(s.get("D_nom") or 0.0) for s in sol)
+    out["_duration"] = float(sol[-1]["ta"]) - T_START
+    return out
 
 
 def _fmt(x, spec=".1f", dash="--"):
@@ -254,6 +337,176 @@ def section_diesel():
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_diesel.tex", "\n".join(lines))
 
+    _diesel_decomposition(routes)
+    _refuel_sensitivity(routes)
+
+
+# ── Refuelling: reported post hoc, not modelled ──────────────────────────────
+# The diesel runs carry no fuel constraint.  Unlike charging, refuelling has no
+# binding location choice (any truck stop serves) and happens at most once on
+# these corridors, so it is a constant rather than a decision — see
+# runner_dispatch._apply_diesel_mode.
+#
+# Tank 500-1000 L on long-haul specs; consumption 32.6 L/100 km for a typical
+# EU 40 t tractor-semitrailer over the regulatory long-haul cycle (ICCT),
+# ~25 L/100 km for a modern tractor on real customer routes.  90% of the tank
+# is treated as usable (carriers do not run to empty).
+_TANK_SPECS = [(900, 25.0), (900, 33.0), (600, 25.0), (600, 33.0)]
+_TANK_USABLE = 0.90
+# One fuel stop = access manoeuvre (M_STOP_H) + short queue + pumping.  A
+# 500 L fill at the 180 L/min truck-lane standard is ~3 min of pumping; 7 min
+# covers nozzle handling and payment.
+_REFUEL_EVENT_H = (10.0 + 2.0 + 7.0) / 60
+
+
+def _refuel_sensitivity(routes) -> None:
+    """Bound the effect of the fuel stops the diesel model does not charge for.
+
+    Reports, per route class, how many stops each tank spec implies and what
+    crediting them would do to the reported penalty.  The headline table
+    assumes zero, which is the conservative direction: a longer diesel
+    makespan can only shrink the electrification penalty.
+    """
+    rows, note = [], {}
+    for route in routes:
+        km, pen = [], []
+        for r, cust in COMBOS:
+            if r != route:
+                continue
+            for tw in TWS:
+                for seed in SEEDS:
+                    st = _stem(route, cust, tw, seed)
+                    inst = _instance(st)
+                    ev, di = _oracle(st), _oracle(st, "diesel")
+                    if not (inst.get("km") and ev and di and di["duration"] > 0):
+                        continue
+                    km.append(sum(_int_keyed(inst["km"]).values()))
+                    pen.append((ev["duration"], di["duration"]))
+        if not km:
+            continue
+        base = _mean([100 * (e / d - 1) for e, d in pen])
+        note[route] = (len(km), min(km), max(km))
+        for tank, cons in _TANK_SPECS:
+            rng   = _TANK_USABLE * tank / cons * 100
+            stops = [max(0, int(np.ceil(t / rng)) - 1) for t in km]
+            adj   = _mean([100 * (e / (d + s * _REFUEL_EVENT_H) - 1)
+                           for (e, d), s in zip(pen, stops)])
+            rows.append([route, tank, cons, f"{rng:.0f}",
+                         f"{_mean(stops):.2f}",
+                         f"{100 * np.mean([s > 0 for s in stops]):.0f}",
+                         _fmt(base, ".2f"), _fmt(adj, ".2f"),
+                         _fmt(adj - base if adj and base else None, ".2f")])
+
+    if not rows:
+        print("  Refuel note: pending (no EV/diesel oracle pairs yet)")
+        return
+    _write_csv("additional_diesel_refuel.csv",
+               ["route", "tank_L", "cons_L_per_100km", "range_km",
+                "mean_fuel_stops", "pct_needing_1plus", "penalty_%",
+                "penalty_with_refuel_%", "delta_pp"], rows)
+
+    worst = max(float(r[8]) for r in rows), min(float(r[8]) for r in rows)
+    span  = " to ".join(f"{v:+.2f}" for v in sorted(worst))
+    _write_tex("additional_diesel_refuel.tex", "\n".join([
+        r"% one-sentence footnote for the diesel section",
+        r"The diesel schedules charge no refuelling time.  Route lengths are "
+        + "; ".join(rf"{r} {lo:.0f}--{hi:.0f}\,km ($n={n}$)"
+                    for r, (n, lo, hi) in note.items())
+        + r", against a tank range of "
+        + rf"{_TANK_USABLE * _TANK_SPECS[-1][0] / _TANK_SPECS[-1][1] * 100:.0f}"
+        + rf"--{_TANK_USABLE * _TANK_SPECS[0][0] / _TANK_SPECS[0][1] * 100:.0f}"
+        + r"\,km, so no fuel stop is required on the short routes under any "
+        r"specification and at most one on the medium routes.  Crediting the "
+        rf"diesel with that stop ({_REFUEL_EVENT_H * 60:.0f}\,min: access "
+        r"manoeuvre, queue and pumping) would change the reported penalty by "
+        rf"{span}\,percentage points, so the tables assume none --- the "
+        r"conservative direction.", ""]))
+
+
+# Labels for the makespan decomposition, in reporting order.  "manoeuvre" is
+# now an INCREMENTAL row: both vehicles pay M_stop to pull off for a break, so
+# only the EV's extra charge-only stops survive the difference.
+_DECOMP_LABEL = [
+    ("charging",   "Total charging time"),
+    ("queue",      "Charging-station queueing"),
+    ("manoeuvre",  "Stop manoeuvring (net of diesel)"),
+    ("reposition", "Repositioning off the charging bay"),
+    ("break",      "Break time no longer taken separately"),
+    ("rest",       "Rest time"),
+    ("wait",       "Idle waiting"),
+    ("service",    "Customer service"),
+]
+
+
+def _diesel_decomposition(routes) -> None:
+    """Where the EV-vs-diesel makespan gap actually goes, per route class.
+
+    Both worlds are decomposed into the terms of the model's own departure
+    equations and differenced; the rows sum to the observed gap by
+    construction, and the residual is asserted per instance so a silent
+    accounting drift cannot pass as a result.
+    """
+    per: dict[str, dict[str, list]] = {}
+    resid_max = 0.0
+    for route, cust in COMBOS:
+        for tw in TWS:
+            for seed in SEEDS:
+                st = _stem(route, cust, tw, seed)
+                ev, di = _oracle_dwell(st), _oracle_dwell(st, "diesel")
+                if not (ev and di):
+                    continue
+                d = per.setdefault(route, {k: [] for k in _DWELL_ROWS})
+                for k in _DWELL_ROWS:
+                    d[k].append(ev[k] - di[k])
+                d.setdefault("_gap", []).append(ev["_duration"] - di["_duration"])
+                resid = ((ev["_duration"] - di["_duration"])
+                         - sum(ev[k] - di[k] for k in _DWELL_ROWS))
+                resid_max = max(resid_max, abs(resid))
+
+    if not per:
+        print("  Decomposition: pending (no EV/diesel oracle pairs yet)")
+        return
+    # Driving is identical in the pair, so the components must close the gap.
+    # The bound is 3.6 s, far above the float accumulation over ~85 stops
+    # (~1e-6 h observed) and far below anything a real accounting slip costs.
+    assert resid_max < 1e-3, f"decomposition residual {resid_max:.2e} h"
+    print(f"  Decomposition: closes to {resid_max * 3600:.3f} s worst case")
+
+    routes = [r for r in routes if r in per]
+    _write_csv("additional_diesel_decomp.csv",
+               ["component"] + [f"{r}_h" for r in routes],
+               [[lbl] + [_fmt(_mean(per[r][k]), ".3f", "") for r in routes]
+                for k, lbl in _DECOMP_LABEL]
+               + [["Net penalty vs diesel"]
+                  + [_fmt(_mean(per[r]["_gap"]), ".3f", "") for r in routes]])
+
+    n = min(len(per[r]["_gap"]) for r in routes)
+    tex = [
+        r"\begin{table}[ht]\centering",
+        r"\caption{Where the electrification penalty goes: mean per-instance "
+        r"difference (h) between the hindsight-optimal electric and diesel "
+        r"schedules, decomposed into the terms of the departure equations. "
+        r"Driving is identical within each pair, so the rows sum to the net "
+        r"penalty exactly. Both vehicles pay the same access manoeuvre to "
+        r"pull off for a mandatory break, so only the EV's charge-only stops "
+        r"survive that row. $n \geq " + str(n) + r"$ per class.}",
+        r"\label{tab:diesel-decomp}",
+        r"\begin{tabular}{l" + "r" * len(routes) + r"}",
+        r"\hline",
+        r"Component & " + " & ".join(r.capitalize() for r in routes) + r" \\",
+        r"\hline",
+    ]
+    for k, lbl in _DECOMP_LABEL:
+        tex.append(f"{lbl} & "
+                   + " & ".join(f"${_mean(per[r][k]):+.2f}$" for r in routes)
+                   + r" \\")
+    tex += [r"\hline",
+            r"\textbf{Net penalty vs.\ diesel} & "
+            + " & ".join(rf"$\mathbf{{{_mean(per[r]['_gap']):+.2f}}}$"
+                         for r in routes) + r" \\",
+            r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    _write_tex("additional_diesel_decomp.tex", "\n".join(tex))
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # §8.3 — SENSITIVITY (one-at-a-time)
@@ -266,87 +519,131 @@ _SENS_ROWS = [
     ("Charger power 150 kW",    "kw150",  True),
     ("Charger power 350 kW",    "kw350",  True),
     ("Charger power 1000 kW",   "kw1000", True),
-    ("Travel-time CV 0.10",     "cv0.1",  True),
-    ("Travel-time CV 0.25",     "cv0.25", True),
-    ("TW penalty beta 5 h",     "beta5",  True),
-    ("Battery 400 kWh",         "bat400", False),   # gated on plumbing
-    ("Battery 750 kWh",         "bat750", False),
-    ("No split break",          "nosplit", False),
+    ("No split break",          "nosplit", True),
 ]
+
+
+_ROUTE_SPLIT = ["short", "medium"]
+# route class is ORDERED (short -> medium), so it gets two steps of one hue
+# rather than two categorical hues; method colours stay reserved for the
+# base-case figures.
+_ROUTE_COLOR = {"short": "#9ecae1", "medium": "#2171b5"}
 
 
 def section_sensitivity():
     print("== Sec 8.3 sensitivity ==")
     rows_out, fig_rows = [], []
     for label, tag, planned in _SENS_ROWS:
-        dg, do, n_g, n_o = [], [], 0, 0
+        # per-route-class deltas (the figure) and pooled (the table)
+        dg = {r: [] for r in _ROUTE_SPLIT}
+        do = {r: [] for r in _ROUTE_SPLIT}
         for route, cust in COMBOS:
+            if route not in dg:
+                continue
             for tw in TWS:
                 for seed in SEEDS:
                     st = _stem(route, cust, tw, seed)
                     bg, vg = _greedy(st), _greedy(st, tag)
                     if (bg and vg and not bg["infeasible"]
                             and not vg["infeasible"] and bg["duration"] > 0):
-                        dg.append(100 * (vg["duration"] / bg["duration"] - 1))
-                        n_g += 1
+                        dg[route].append(
+                            100 * (vg["duration"] / bg["duration"] - 1))
                     bo, vo = _oracle(st), _oracle(st, tag)
                     if bo and vo and bo["duration"] > 0:
-                        do.append(100 * (vo["duration"] / bo["duration"] - 1))
-                        n_o += 1
-        g_mean, o_mean = _mean(dg), _mean(do)
+                        do[route].append(
+                            100 * (vo["duration"] / bo["duration"] - 1))
+
+        all_g = [v for r in _ROUTE_SPLIT for v in dg[r]]
+        all_o = [v for r in _ROUTE_SPLIT for v in do[r]]
+        n_g, n_o = len(all_g), len(all_o)
         status = ("pending (needs code)" if not planned and n_g == 0 else
                   "pending" if n_g == 0 else
                   f"greedy n={n_g}" + (f", oracle n={n_o}" if n_o else
                                        ", oracle pending"))
-        rows_out.append([label, tag, _fmt(g_mean, ".2f", ""), n_g,
-                         _fmt(o_mean, ".2f", ""), n_o, status])
-        fig_rows.append((label, g_mean, o_mean, n_g, planned))
+        rows_out.append([label, tag,
+                         _fmt(_mean(all_g), ".2f", ""), n_g,
+                         _fmt(_mean(all_o), ".2f", ""), n_o,
+                         _fmt(_mean(do["short"]), ".2f", ""), len(do["short"]),
+                         _fmt(_mean(do["medium"]), ".2f", ""),
+                         len(do["medium"]), status])
+        fig_rows.append((label, planned,
+                         {r: (_mean(do[r]), len(do[r]), _mean(dg[r]),
+                              len(dg[r])) for r in _ROUTE_SPLIT}))
 
     _write_csv("additional_sens_stats.csv",
                ["axis", "tag", "greedy_delta_%", "n_greedy",
-                "oracle_delta_%", "n_oracle", "status"], rows_out)
+                "oracle_delta_%", "n_oracle",
+                "oracle_delta_short_%", "n_short",
+                "oracle_delta_medium_%", "n_medium", "status"], rows_out)
 
-    # ── figure: available bars + explicit pending slots ──────────────────────
-    fig, ax = plt.subplots(figsize=(5.8, 0.34 * len(fig_rows) + 1.2))
+    # ── figure ───────────────────────────────────────────────────────────────
+    # Facet by route class, colour by METHOD — the same grammar as the
+    # base-case figures, so Greedy is the same blue everywhere and the oracle
+    # keeps its neutral-grey "benchmark" identity.
+    # One panel, four bars per axis: method = HUE (oracle grey / greedy blue,
+    # as everywhere else in the paper), route class = SHADE within that hue
+    # (light = short, full = medium).  Shading an ordinal dimension inside a
+    # categorical hue is the same device the base-case figure uses for the
+    # time-window class, so the two figures read the same way.
     y = np.arange(len(fig_rows))[::-1]
+    series = [(m, r, off_i) for m, off_i in (("oracle", 0), ("greedy", 2))
+              for r in _ROUTE_SPLIT]
+    h = 0.19
+    vals = [v for _l, _p, per in fig_rows for st in per.values()
+            for v in (st[0], st[2]) if v is not None]
 
-    def _annot(yi, v, txt, col):
-        # small-magnitude bars annotate to the RIGHT of zero so the text
-        # never spills over the y-axis labels
-        if abs(v) < 1.0:
-            ax.text(0.25, yi, txt, ha="left", va="center", fontsize=6.5,
-                    color=col)
-        else:
-            ax.text(v + np.sign(v) * 0.15, yi, txt,
-                    ha="left" if v >= 0 else "right", va="center",
-                    fontsize=6.5, color=col)
+    fig, ax = plt.subplots(figsize=(6.6, 0.72 * len(fig_rows) + 1.5))
+    drawn_m, drawn_r = set(), set()
 
-    vals = [v for (_, g, o, _, _) in fig_rows
-            for v in (g, o) if v is not None]
-    for yi, (label, g, o, n_g, planned) in zip(y, fig_rows):
-        if o is not None:
-            ax.barh(yi, o, height=0.55, color=INK, edgecolor="white")
-            _annot(yi, o, f"{o:+.1f}", INK)
-        elif g is not None:
-            ax.barh(yi, g, height=0.55, color=BLUE, alpha=0.55,
-                    edgecolor="white")
-            _annot(yi, g, f"{g:+.1f} (greedy, n={n_g})", MUT)
-        else:
-            note = "pending" if planned else "pending (needs code)"
-            ax.text(0.25, yi, note, ha="left", va="center",
+    for yi, (label, planned, per) in zip(y, fig_rows):
+        any_here = False
+        for k, (meth, route, off_i) in enumerate(series):
+            mean_v = per[route][off_i]
+            if mean_v is None:
+                continue
+            any_here = True
+            drawn_m.add(meth)
+            drawn_r.add(route)
+            col = ps.METHOD_COLOR[meth]
+            face = ps.tint(col, 0.45) if route == "short" else col
+            off = (1.5 - k) * h
+            ax.barh(yi + off, mean_v, height=h, color=face,
+                    edgecolor=col, linewidth=0.5)
+            ax.text(mean_v + np.sign(mean_v) * 0.18, yi + off, f"{mean_v:+.1f}",
+                    ha="left" if mean_v >= 0 else "right", va="center",
+                    fontsize=6, color=INK)
+        if not any_here:
+            note = "pending" if planned else "pending (needs a model flag)"
+            ax.text(0.2, yi, note, ha="left", va="center",
                     fontsize=6.5, color=MUT, style="italic")
-    ax.axvline(0, color=INK, lw=0.8)
-    ax.set_xlim(min(-2.0, (min(vals) if vals else 0) - 1),
-                max(4.0, (max(vals) if vals else 0) + 4))
+
+    ax.axvline(0, color=INK, lw=0.9)
+    ax.set_xlim(min(-2.0, (min(vals) if vals else 0) - 3.0),
+                max(3.0, (max(vals) if vals else 0) + 3.0))
+    ax.set_ylim(-0.6, len(fig_rows) - 0.4)
     ax.set_yticks(y, [r[0] for r in fig_rows])
-    ax.set_xlabel("Change in mean route duration vs base case (%)")
+    ax.set_xlabel("Change in route duration vs base case (%)")
     ax.xaxis.grid(True, color=GRID, lw=0.6)
     ax.set_axisbelow(True)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=INK),
-               plt.Rectangle((0, 0), 1, 1, color=BLUE, alpha=0.55)]
-    ax.legend(handles, ["oracle", "greedy (preliminary)"],
-              frameon=False, fontsize=7, loc="lower right")
-    ax.set_title("One-at-a-time sensitivity (data available so far)",
+
+    # ONE legend naming each drawn bar exactly (method x route), so no reader
+    # has to infer that the lighter shade means the shorter route
+    handles, labels = [], []
+    for meth, route, _off in series:
+        if meth not in drawn_m or route not in drawn_r:
+            continue
+        col = ps.METHOD_COLOR[meth]
+        handles.append(plt.Rectangle(
+            (0, 0), 1, 1,
+            facecolor=ps.tint(col, 0.45) if route == "short" else col,
+            edgecolor=col, linewidth=0.5))
+        labels.append(f"{ps.METHOD_LBL[meth]} · {route}")
+    if handles:
+        ax.legend(handles, labels, frameon=False, fontsize=7,
+                  loc="lower left", ncol=2,
+                  title="hindsight optimum vs myopic policy",
+                  title_fontsize=7, alignment="left")
+    ax.set_title("Sensitivity of route duration to charging infrastructure",
                  loc="left")
     _save(fig, "additional_sens_effects")
 
@@ -356,12 +653,15 @@ def section_sensitivity():
         r"vs the base case (\%). Preliminary cells use greedy; final values "
         r"use the hindsight optimum.}",
         r"\label{tab:sensitivity}",
-        r"\begin{tabular}{lrrl}", r"\hline",
-        r"Axis & Greedy $\Delta$ (\%) & Oracle $\Delta$ (\%) & Status \\",
+        r"\begin{tabular}{lrrrr}", r"\hline",
+        r"Axis & Greedy $\Delta$ (\%) & Oracle $\Delta$ (\%) "
+        r"& Short & Medium \\",
         r"\hline",
     ]
-    for label, tag, g, n_g, o, n_o, status in rows_out:
-        lines.append(f"{label} & {g or '--'} & {o or '--'} & {status} \\\\")
+    for (label, _tag, g, _ng, o, _no, o_s, _ns, o_m, _nm,
+         _status) in rows_out:
+        lines.append(f"{label} & {g or '--'} & {o or '--'} & "
+                     f"{o_s or '--'} & {o_m or '--'} \\\\")
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_sensitivity.tex", "\n".join(lines))
 

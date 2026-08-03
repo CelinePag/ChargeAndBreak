@@ -41,3 +41,57 @@ Solution count 3: 33.7581 34.5081 35.2581
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 3.375808200000e+01, best bound 3.375808200000e+01, gap 0.0000%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:12:56 2026
+
+Set parameter LogFile to value "logs\oracle_RshortCfewTlarge_8__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 2846 rows, 1573 columns and 20064 nonzeros
+Model fingerprint: 0xc3f92200
+Variable types: 987 continuous, 586 integer (586 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 6e+02]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 2e+01]
+  RHS range        [6e-02, 5e+02]
+
+User MIP start produced solution with objective 35.2581 (0.04s)
+Loaded user MIP start with objective 35.2581
+
+Presolve removed 1485 rows and 656 columns
+Presolve time: 0.20s
+Presolved: 1361 rows, 917 columns, 10656 nonzeros
+Variable types: 544 continuous, 373 integer (371 binary)
+Root relaxation presolve removed 18 rows and 2 columns
+Root relaxation presolved: 1343 rows, 915 columns, 8837 nonzeros
+
+
+Root relaxation: objective 3.394992e+01, 831 iterations, 0.11 seconds (0.03 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   33.94992    0    6   35.25808   33.94992  3.71%     -    0s
+H    0     0                      34.8414153   33.94992  2.56%     -    0s
+     0     0   34.01434    0   10   34.84142   34.01434  2.37%     -    0s
+     0     0   34.01434    0    2   34.84142   34.01434  2.37%     -    1s
+H    0     0                      34.0914153   34.01434  0.23%     -    1s
+
+Cutting planes:
+  Gomory: 4
+  Implied bound: 1
+  MIR: 4
+  Flow cover: 7
+  RLT: 1
+
+Explored 1 nodes (1668 simplex iterations) in 1.39 seconds (0.23 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 4: 34.0914 34.8414 34.8414 35.2581 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 3.409141533333e+01, best bound 3.401433944602e+01, gap 0.2261%

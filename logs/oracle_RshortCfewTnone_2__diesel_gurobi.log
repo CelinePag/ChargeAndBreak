@@ -55,3 +55,59 @@ Solution count 6: 31.3462 32.0962 240.096 ... 470.596
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 3.134616800000e+01, best bound 3.134616800000e+01, gap 0.0000%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:13:13 2026
+
+Set parameter LogFile to value "logs\oracle_RshortCfewTnone_2__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 2524 rows, 1397 columns and 16373 nonzeros
+Model fingerprint: 0xe70c8bb9
+Variable types: 877 continuous, 520 integer (520 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 6e+02]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 2e+01]
+  RHS range        [2e-02, 2e+07]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x3859_ by 1.000000000
+
+Presolve removed 1330 rows and 592 columns
+Presolve time: 0.12s
+Presolved: 1194 rows, 805 columns, 8748 nonzeros
+Variable types: 480 continuous, 325 integer (323 binary)
+Found heuristic solution: objective 474.0128347
+Found heuristic solution: objective 266.0128347
+Root relaxation presolve removed 1 rows and 0 columns
+Root relaxation presolved: 1193 rows, 805 columns, 8593 nonzeros
+
+
+Root relaxation: objective 3.157258e+01, 714 iterations, 0.04 seconds (0.03 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   31.57258    0    8  266.01283   31.57258  88.1%     -    0s
+Another try with MIP start
+H    0     0                      32.2628347   31.57258  2.14%     -    0s
+     0     0   31.59079    0   11   32.26283   31.59079  2.08%     -    0s
+H    0     0                      31.6795013   31.59079  0.28%     -    0s
+
+Cutting planes:
+  Gomory: 16
+  Implied bound: 3
+  MIR: 17
+  Mixing: 1
+  Flow cover: 28
+
+Explored 1 nodes (776 simplex iterations) in 0.57 seconds (0.17 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 4: 31.6795 32.2628 266.013 474.013 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 3.167950133333e+01, best bound 3.159078975726e+01, gap 0.2800%

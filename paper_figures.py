@@ -61,33 +61,31 @@ import compile_solutions as cs
 # The figure always renders the FULL grid (all route/customer/TW classes and
 # all methods) so the paper layout is visible before every run exists; slots
 # without runs stay empty.  Pass --present-only to draw only levels with data.
-_ROUTE_ORDER = ["short", "medium", "long"]
-_CUST_ORDER  = ["few", "medium", "many"]
-_TW_ORDER    = ["tight", "medium", "large", "none"]
+# Orders, labels, colours and chrome all live in paper_style so this script and
+# additional_figures.py cannot drift apart (they had already started to).
+import paper_style as ps
 
-_ROUTE_LBL = {"short": "Short route", "medium": "Medium route", "long": "Long route"}
-_CUST_LBL  = {"few": "Few customers", "medium": "Medium customers", "many": "Many customers"}
-_TW_LBL    = {"none": "None", "tight": "Tight", "medium": "Medium", "large": "Large"}
+_ROUTE_ORDER = ps.ROUTE_ORDER
+_CUST_ORDER  = ps.CUST_ORDER
+_TW_ORDER    = ps.TW_ORDER
+
+_ROUTE_LBL = ps.ROUTE_LBL
+_CUST_LBL  = ps.CUST_LBL
+_TW_LBL    = ps.TW_LBL
 
 # ── fixed method -> colour assignment (Okabe–Ito colourblind-safe palette) ───
 # Colour follows the method identity, never the number of methods present in a
 # given figure, so Greedy is the same blue in every figure of the paper.
-_METHOD_ORDER  = ["greedy", "RO", "ROBU", "LA", "2SP"]
-_METHOD_LBL    = {"greedy": "Greedy", "RO": "RO", "ROBU": "ROBU",
-                  "LA": "LA", "2SP": "2SP"}
-_METHOD_COLOR  = {
-    "greedy": "#0072B2",   # blue
-    "RO":     "#D55E00",   # vermillion
-    "ROBU":   "#E69F00",   # orange (budgeted robust, Bertsimas-Sim)
-    "LA":     "#009E73",   # bluish green
-    "2SP":    "#CC79A7",   # reddish purple
-}
+# the five simulated policies (oracle is a bound, not a plotted method here)
+_METHOD_ORDER  = [m for m in ps.METHOD_ORDER if m != "oracle"]
+_METHOD_LBL    = ps.METHOD_LBL
+_METHOD_COLOR  = ps.METHOD_COLOR
 
 # chart chrome — neutral journal-figure grays
-_INK_PRIMARY = "#000000"
-_INK_MUTED   = "#555555"
-_GRID        = "#e0e0e0"
-_BASELINE    = "#333333"
+_INK_PRIMARY = ps.INK_PRIMARY
+_INK_MUTED   = ps.INK_MUTED
+_GRID        = ps.GRID
+_BASELINE    = ps.BASELINE
 
 
 def _tint(color: str, frac: float = 0.80) -> tuple:

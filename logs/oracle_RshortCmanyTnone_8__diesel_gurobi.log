@@ -50,3 +50,57 @@ Solution count 2: 36.8999 37.8166
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 3.689994300000e+01, best bound 3.689994300000e+01, gap 0.0000%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:13:52 2026
+
+Set parameter LogFile to value "logs\oracle_RshortCmanyTnone_8__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 2981 rows, 1648 columns and 21749 nonzeros
+Model fingerprint: 0xb65a93a5
+Variable types: 1032 continuous, 616 integer (616 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 7e+02]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 3e+01]
+  RHS range        [6e-03, 2e+07]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 1551 rows and 682 columns
+Presolve time: 0.20s
+Presolved: 1430 rows, 966 columns, 11436 nonzeros
+Variable types: 575 continuous, 391 integer (389 binary)
+Found heuristic solution: objective 588.5666097
+Root relaxation presolve removed 1 rows and 0 columns
+Root relaxation presolved: 1429 rows, 966 columns, 11257 nonzeros
+
+
+Root relaxation: objective 3.689994e+01, 799 iterations, 0.08 seconds (0.04 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   36.89994    0    6  588.56661   36.89994  93.7%     -    0s
+Another try with MIP start
+H    0     0                      46.0666097   36.89994  19.9%     -    0s
+H    0     0                      37.6499430   36.89994  1.99%     -    0s
+H    0     0                      36.8999430   36.89994  0.00%     -    0s
+
+Cutting planes:
+  Gomory: 10
+  Lift-and-project: 5
+  Implied bound: 2
+  MIR: 7
+  Flow cover: 26
+
+Explored 1 nodes (799 simplex iterations) in 0.52 seconds (0.20 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 4: 36.8999 37.6499 46.0666 588.567 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 3.689994300000e+01, best bound 3.689994300000e+01, gap 0.0000%

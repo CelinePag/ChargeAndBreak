@@ -53,3 +53,78 @@ Solution count 1: 61.3418
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 6.134182539177e+01, best bound 6.105003497217e+01, gap 0.4757%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:12:39 2026
+
+Set parameter LogFile to value "logs\oracle_RmediumCmanyTtight_9__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 4993 rows, 2738 columns and 53813 nonzeros
+Model fingerprint: 0x0df421c9
+Variable types: 1712 continuous, 1026 integer (1026 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 4e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x7507_ by 1.000000000
+
+Presolve removed 2421 rows and 1039 columns
+Presolve time: 0.49s
+Presolved: 2572 rows, 1699 columns, 41102 nonzeros
+Variable types: 984 continuous, 715 integer (715 binary)
+Root relaxation presolve removed 63 rows and 0 columns
+Root relaxation presolved: 2509 rows, 1699 columns, 25605 nonzeros
+
+
+Root relaxation: objective 5.916820e+01, 1768 iterations, 0.26 seconds (0.14 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      72.6751587   59.16820  18.6%     -    1s
+     0     0   59.16820    0   37   72.67516   59.16820  18.6%     -    1s
+H    0     0                      72.6687277   59.16820  18.6%     -    1s
+H    0     0                      63.4251587   59.16820  6.71%     -    1s
+H    0     0                      62.5853943   60.71978  2.98%     -    2s
+     0     0   60.71978    0  125   62.58539   60.71978  2.98%     -    2s
+H    0     0                      62.5533751   60.71978  2.93%     -    3s
+H    0     0                      61.6838365   60.71978  1.56%     -    3s
+     0     0   60.71978    0   75   61.68384   60.71978  1.56%     -    3s
+     0     0   60.71978    0   76   61.68384   60.71978  1.56%     -    3s
+     0     0   60.87086    0   60   61.68384   60.87086  1.32%     -    4s
+     0     0   60.87086    0   36   61.68384   60.87086  1.32%     -    4s
+H    0     0                      61.5084921   60.87086  1.04%     -    4s
+H    0     0                      61.4667016   61.02748  0.71%     -    5s
+     0     0   61.02748    0   60   61.46670   61.02748  0.71%     -    5s
+     0     0          -    0        61.46670   61.16597  0.49%     -    5s
+
+Cutting planes:
+  Learned: 5
+  Gomory: 35
+  Lift-and-project: 2
+  Cover: 8
+  Implied bound: 28
+  Clique: 4
+  MIR: 52
+  Mixing: 3
+  StrongCG: 2
+  Flow cover: 76
+  Zero half: 4
+  RLT: 1
+  Relax-and-lift: 28
+  BQP: 1
+
+Explored 1 nodes (5077 simplex iterations) in 5.49 seconds (1.27 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 10: 61.4667 61.5085 61.6838 ... 72.6752
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 6.146670163884e+01, best bound 6.116596908617e+01, gap 0.4893%

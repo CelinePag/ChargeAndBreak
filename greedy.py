@@ -22,7 +22,8 @@ The greedy driver operates without planning tools and follows three rules:
      If the driver must stop at a CS and charging takes at least Tb45 hours,
      the mandatory break is scheduled inside the charge window at no extra
      time cost (parallel model: dwell = max(tauc, Tb45)).  Similarly for
-     Tb30 / Tb15 split-break rules.
+     Tb30 / Tb15 split-break rules — which are skipped entirely when the
+     instance sets allow_split=False (8.3 no-split axis).
 
 Priority order (evaluated once per stop)
 -----------------------------------------
@@ -233,6 +234,10 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     usable = Ecap - Emin
     Tb45   = full_data["Tb45"]         # 0.75 h
     Tb30   = full_data["Tb30"]         # 0.50 h
+    # 8.3 no-split axis: without the Art. 7 split, phi can never leave 0, so
+    # every "b30 because a b15 is already banked" branch below is dead.
+    allow_split = bool(full_data.get("allow_split", True))
+    phi         = state.phi if allow_split else 0
 
     # One-step feasibility checks — single source of truth shared with the
     # rolling-horizon pruning and the S1 safety supervisor.
@@ -240,7 +245,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
     must_rest   = flags["must_rest"]
     must_break  = flags["must_reset_cd"] and not must_rest
-    must_b30    = (state.phi == 1) and must_break
+    must_b30    = (phi == 1) and must_break
     must_charge = (flags["must_charge"]
                    or (is_CS and state.e_arr - flags["e_needed"]
                        < Emin + safety_buffer_frac * usable))
@@ -284,7 +289,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
         y        = 1
         tauc_est = _charging_time_needed(state.e_arr, full_data)
         # Insert a break for free only if the charge is long enough to cover it
-        if state.phi == 1 and tauc_est >= Tb30:
+        if phi == 1 and tauc_est >= Tb30:
             brk    = "b30"
             reason = "MUST-CHARGE + free b30"
         elif tauc_est >= Tb45:
@@ -329,10 +334,12 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     if not is_CS:
         y = 0
     # Respect split-break state machine
-    if brk == "b30" and state.phi == 0:
+    if brk == "b30" and phi == 0:
         brk = "b45"    # b30 requires a prior b15 (phi==1)
-    if brk == "b15" and state.phi == 1:
+    if brk == "b15" and phi == 1:
         brk = "b30"    # b15 when phi==1 would create phi==2; use b30 instead
+    if not allow_split and brk in ("b15", "b30"):
+        brk = "b45"    # no-split regime: the 45' block is the only legal break
 
     return {"y": y, "break_type": brk, "rest_type": rst}, reason
 

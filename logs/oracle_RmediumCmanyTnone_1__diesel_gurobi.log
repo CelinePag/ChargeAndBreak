@@ -75,3 +75,66 @@ Solution count 10: 73.8805 74.8805 75.3805 ... 107.964
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 7.388053100000e+01, best bound 7.388053000000e+01, gap 0.0000%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 16:05:14 2026
+
+Set parameter LogFile to value "logs\oracle_RmediumCmanyTnone_1__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 6337 rows, 3484 columns and 82051 nonzeros
+Model fingerprint: 0xb84785b4
+Variable types: 2177 continuous, 1307 integer (1307 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 4e+01]
+  RHS range        [1e-02, 2e+07]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 3035 rows and 1311 columns
+Presolve time: 1.01s
+Presolved: 3302 rows, 2173 columns, 68550 nonzeros
+Variable types: 1260 continuous, 913 integer (913 binary)
+Found heuristic solution: objective 1331.4638643
+Root relaxation presolve removed 49 rows and 0 columns
+Root relaxation presolved: 3253 rows, 2173 columns, 50455 nonzeros
+
+
+Root relaxation: objective 6.601360e+01, 2178 iterations, 0.45 seconds (0.26 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   66.01360    0   22 1331.46386   66.01360  95.0%     -    2s
+Another try with MIP start
+H    0     0                     101.4638643   66.01360  34.9%     -    2s
+     0     0   66.14721    0   20  101.46386   66.14721  34.8%     -    3s
+H    0     0                     100.8805310   66.23199  34.3%     -    3s
+H    0     0                      90.4638643   66.23199  26.8%     -    4s
+     0     0   66.42064    0   98   90.46386   66.42064  26.6%     -    4s
+     0     0   66.51495    0   70   90.46386   66.51495  26.5%     -    4s
+     0     0   66.62635    0  140   90.46386   66.62635  26.4%     -    6s
+H    0     0                      88.2971977   66.62635  24.5%     -    6s
+     0     0   66.66841    0  142   88.29720   66.66841  24.5%     -    7s
+     0     0   66.74706    0  123   88.29720   66.74706  24.4%     -    9s
+     0     0   66.77411    0   70   88.29720   66.77411  24.4%     -   11s
+H    0     0                      87.5471977   66.77411  23.7%     -   11s
+     0     2   66.77411    0   67   87.54720   66.77411  23.7%     -   11s
+H   20    24                      76.9638643   66.77411  13.2%   115   14s
+    23    28   66.77411    7  143   76.96386   66.77411  13.2%   123   15s
+H   58    63                      76.2138643   66.77411  12.4%   125   18s
+    74    81   71.74101   18   26   76.21386   66.77411  12.4%   118   20s
+   138   145   68.75546   40   81   76.21386   66.77411  12.4%  96.0   25s
+H  243   247                      75.6305310   66.77411  11.7%  82.9   28s
+   298   273   66.77411   85  100   75.63053   66.77411  11.7%  74.8   30s
+H  306   263                      74.7138643   66.77411  10.6%  73.2   30s
+   468   420   66.85044   29  105   74.71386   66.80797  10.6%  65.5   35s
+   810   756   66.88977   24  130   74.71386   66.84462  10.5%  54.2   40s
+  1123   964   69.27187   26   23   74.71386   66.86147  10.5%  44.6   45s
+  1128   968   66.92852   29  122   74.71386   66.86147  10.5%  44.4   53s
+  1130   969   67.93940    8  165   74.71386   66.86147  10.5%  44.3   56s
+  1131   970   74.63354  108  129   74.71386   66.86147  10.5%  44.2   61s

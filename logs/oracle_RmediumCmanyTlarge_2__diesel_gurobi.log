@@ -56,3 +56,49 @@ Solution count 1: 60.9998
 
 Optimal solution found (tolerance 5.00e-03)
 Best objective 6.099983466667e+01, best bound 6.070780415307e+01, gap 0.4787%
+
+Gurobi 11.0.0 (win64) logging started Mon Aug  3 15:59:47 2026
+
+Set parameter LogFile to value "logs\oracle_RmediumCmanyTlarge_2__diesel_gurobi.log"
+Gurobi Optimizer version 11.0.0 build v11.0.0rc2 (win64 - Windows 11+.0 (26200.2))
+
+CPU model: 11th Gen Intel(R) Core(TM) i5-1145G7 @ 2.60GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 4 physical cores, 8 logical processors, using up to 8 threads
+
+Optimize a model with 5005 rows, 2753 columns and 53173 nonzeros
+Model fingerprint: 0x64acfc37
+Variable types: 1717 continuous, 1036 integer (1036 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 4e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 2449 rows and 1062 columns
+Presolve time: 0.87s
+Presolved: 2556 rows, 1691 columns, 41676 nonzeros
+Variable types: 976 continuous, 715 integer (715 binary)
+Root relaxation presolve removed 71 rows and 0 columns
+Root relaxation presolved: 2485 rows, 1691 columns, 25115 nonzeros
+
+
+Root relaxation: objective 6.031936e+01, 1872 iterations, 0.55 seconds (0.16 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      61.0047943   60.31936  1.12%     -    2s
+     0     0   60.31936    0   26   61.00479   60.31936  1.12%     -    2s
+     0     0   60.60920    0   53   61.00479   60.60920  0.65%     -    2s
+     0     0     cutoff    0        61.00479   61.00479  0.00%     -    3s
+
+Explored 1 nodes (2674 simplex iterations) in 3.32 seconds (0.68 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 1: 61.0048 
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 6.100479426418e+01, best bound 6.100479426418e+01, gap 0.0000%
