@@ -1,12 +1,13 @@
 \begin{table}[ht]\centering
-\caption{EV vs diesel route duration (\%), same instances and realizations; naive = diesel + total EV charging time. Coupling = share of charging time credited inside a mandatory break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum).}
+\caption{EV vs diesel route duration (\%) on the same instances and realizations.  Coupling = share of charging time credited inside a mandatory break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum). ``EV cert.'' is the worst remaining MIP gap on the EV oracle: where it exceeds the solver tolerance the EV schedule is an incumbent, not a proven optimum, so the penalty is an upper bound on the true optimal one.}
 \label{tab:diesel}
 \begin{tabular}{lrrrrrr}
 \hline
-Route & Diesel (h) & EV (h) & Naive (\%) & Greedy (\%) & Oracle (\%) & Coupling (\%) \\
+Route & Diesel (h) & EV (h) & Greedy (\%) & Oracle (\%) & Coupling (\%) & EV cert. (\%) \\
 \hline
-Short & -- & 28.7 & -- & 20.0 & -- & -- \\
-Medium & 50.5 & 58.2 & 13.2 & 23.7 & 10.6 & 71 \\
+Short & 26.6 & 28.7 & 20.0 & 8.0 & 76 & 0.5 \\
+Medium & 53.2 & 58.2 & 23.0 & 9.4 & 70 & 0.5 \\
+Long & -- & -- & 21.0 & -- & -- & -- \\
 \hline
 \end{tabular}
 \end{table}
