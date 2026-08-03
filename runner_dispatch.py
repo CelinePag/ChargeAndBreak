@@ -134,9 +134,13 @@ def _apply_diesel_mode(full_data: dict, D_real: list, E_real: list) -> tuple:
     data["M_stop"] = {k: 0.0 for k in data["K"]}
     data["M_seq"]  = {k: 0.0 for k in data["K"]}
 
-    # Distinct title so the oracle cache is separate from the EV version
-    data["title"] = data.get("title", "inst") + "_diesel"
-    data["label"] = data.get("label", "inst") + " (diesel)"
+    # Distinct title so the oracle cache is separate from the EV version.
+    # Idempotent: the diesel instance COPIES are already named "..__diesel",
+    # and since the title is now derived from the file stem, appending again
+    # would produce "X__diesel_diesel".
+    if "diesel" not in str(data.get("title", "")).lower():
+        data["title"] = data.get("title", "inst") + "_diesel"
+        data["label"] = data.get("label", "inst") + " (diesel)"
 
     # Zero realised energy per leg
     E_real_out = [0.0] * len(E_real)
@@ -256,6 +260,24 @@ def run_algorithm(
     from instance_io import load_instance_json
 
     full_data, D_real, E_real, cv = load_instance_json(json_file)
+
+    # ── IDENTITY: the title IS the file stem ─────────────────────────────────
+    # Every downstream identifier derives from full_data["title"]: the run's
+    # `instance` field (which keys the compile dedup) and the oracle cache name
+    # solutions/oracle_<title>.json.  Trusting the title stored inside the JSON
+    # once let a variant instance keep its BASE title, so variant runs
+    # displaced base runs in every table and variant oracles overwrote the base
+    # caches.  Deriving the title from the (necessarily unique) file path makes
+    # that class of collision structurally impossible.
+    _stem = os.path.splitext(os.path.basename(json_file))[0]
+    if full_data.get("title") != _stem:
+        if verbose:
+            print(f"  [identity] title '{full_data.get('title')}' -> '{_stem}' "
+                  f"(derived from the instance file)")
+        _old = full_data.get("title", "")
+        full_data["title"] = _stem
+        if isinstance(full_data.get("label"), str) and _old:
+            full_data["label"] = full_data["label"].replace(_old, _stem, 1)
 
     # ── Diesel mode: remove all charging/energy constraints ───────────────────
     if diesel_mode:

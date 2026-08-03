@@ -127,10 +127,14 @@ def audit():
             buckets["orphan"].append(path)           # B
             continue
 
-        expect = (stem.replace("__diesel", "_diesel")
-                  if stem.endswith("__diesel") else stem)
-        if title != expect:
-            buckets["mistitled"].append(path)        # C
+        # C — since runner_dispatch derives the title from the instance FILE
+        # STEM, title and stem must agree exactly.  The legacy diesel
+        # convention (stem "X__diesel", title "X_diesel") predates that and is
+        # accepted only so old runs are flagged for re-run rather than lost.
+        legacy_diesel = (stem.endswith("__diesel")
+                         and title == stem.replace("__diesel", "_diesel"))
+        if title != stem:
+            buckets["legacy_diesel" if legacy_diesel else "mistitled"].append(path)
             continue
 
         # E — greedy runs produced by an ORACLE warm start.  Signature: an
@@ -249,7 +253,8 @@ def main() -> None:
              ("superseded",    "D  older duplicate runs (compile ignores them)"),
              ("unguarded",     "E  greedy runs off-protocol (guard != 0.95)"),
              ("oracle_bad",    "F  oracle caches of the WRONG instance"),
-             ("oracle_orphan", "F* oracle caches with no instance file")]
+             ("oracle_orphan", "F* oracle caches with no instance file"),
+             ("legacy_diesel", "I  diesel runs under the old '_diesel' title")]
 
     print(f"{'check':<52}{'files':>8}")
     print("-" * 60)
