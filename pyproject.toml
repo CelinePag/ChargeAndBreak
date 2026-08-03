@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chargeandbreak"
+version = "0.1.0"
+description = "Joint charging and hours-of-service break scheduling for battery-electric heavy-duty vehicles"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Solver note: the MILPs are built with Pyomo and solved with Gurobi, which is
+# invoked through Pyomo's solver interface rather than imported.  Gurobi and a
+# valid licence must be installed separately; `pip install gurobipy` covers the
+# size-limited evaluation licence only.
+dependencies = [
+    "pyomo>=6.7",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "openpyxl>=3.1",   # compile_solutions -> data_output/solution_summary.xlsx
+    "python-pptx>=0.6",  # concept_solution_pptx
+]
+
+[tool.setuptools.packages.find]
+# Only the source tree is a package; instances/, solutions/, logs/, figures/,
+# tex/ and data_output/ are data trees addressed through src/paths.py.
+include = ["src*"]
