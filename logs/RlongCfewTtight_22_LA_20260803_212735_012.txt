@@ -1,0 +1,1148 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-03 21:42:22)
+  Instance : RlongCfewTtight_22   run_id=RlongCfewTtight_22_LA_20260803_212735_012
+  Route    : 155 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 68/155 stops done, continuing from stop 68
+
+[LA] stop 68 (LAYBY)  t=45.643h  soc=214kWh  cd=1.95h  sd=9.36h  sw=12.43h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [68->103]  travel=9.45h +2rest  4 actions × 25 scen  8w  [mean,lp]  pruned=2
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.1s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=45.643h  td=45.643h  (mean=1000000000.000h)  4.9s
+  [!] FORCED REST (r2) at stop 68
+
+[LA] stop 69 (LAYBY)  t=55.018h  soc=193kWh  cd=0.21h  sd=0.21h  sw=0.21h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [69->113]  travel=11.92h +1rest  5 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   73.091h (0.199h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (2.4s)
+  y=0  brk=0    rst=r1  80.732h (0.299h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r2  80.476h (0.423h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=b45  rst=0   74.006h (0.198h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (2.4s)
+  y=0  brk=b15  rst=0   73.508h (0.199h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (2.5s)
+     [DIAG] max per-scenario delta spread across actions: 46.83 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=55.018h  td=55.018h  (mean=73.091h)  11.8s
+
+[LA] stop 70 (CS)  t=55.246h  soc=172kWh  cd=0.44h  sd=0.44h  sw=0.44h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [70->113]  travel=11.69h +1rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=73.096h  0.5s  ws=no  1379v/2432c
+  y=0  brk=0    rst=0   73.046h (0.231h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=1  brk=0    rst=0   73.398h (0.250h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  80.552h (0.348h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=1  brk=0    rst=r1  80.787h (0.350h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  80.130h (0.493h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=1  brk=0    rst=r2  80.365h (0.495h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   73.961h (0.230h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.3s)
+  y=1  brk=b45  rst=0   73.829h (0.238h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.0s)
+  y=0  brk=b15  rst=0   73.462h (0.231h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+  y=1  brk=b15  rst=0   73.393h (0.250h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 61.63 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=55.246h  td=55.246h  (mean=73.046h)  22.0s
+
+[LA] stop 71 (LAYBY)  t=55.512h  soc=147kWh  cd=0.70h  sd=0.70h  sw=0.70h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [71->114]  travel=11.66h +1rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=73.887h  0.8s  ws=no  1360v/2402c
+  y=0  brk=0    rst=0   73.936h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r1  81.502h (0.446h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.5s)
+  y=0  brk=0    rst=r2  81.153h (0.629h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   74.850h (0.296h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.2s)
+  y=0  brk=b15  rst=0   74.353h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.3s)
+     [DIAG] max per-scenario delta spread across actions: 86.70 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=55.512h  td=55.512h  (mean=73.936h)  12.1s
+
+[LA] stop 72 (CS)  t=55.805h  soc=123kWh  cd=1.00h  sd=1.00h  sw=1.00h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [72->115]  travel=11.64h +1rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=73.674h  0.5s  ws=no  1360v/2402c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=0   74.102h (0.253h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=r1  81.542h (0.371h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=r2  81.150h (0.523h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=b45  rst=0   74.496h (0.250h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.0s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=b15  rst=0   74.102h (0.253h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=3 c+b=0 c+r=1  2.0s
+     [POST-HOC] tauc=39m >= 30m → b30 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b30  rst=0  tauc=39m (+186kWh)  taub=0m  [CONC]  ta=55.805h  td=56.814h  (mean=74.102h)  [tiebreak]  20.5s
+
+[LA] stop 73 (LAYBY)  t=57.044h  soc=285kWh  cd=1.23h  sd=1.23h  sw=1.58h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [73->116]  travel=11.65h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=74.737h  0.5s  ws=yes  1360v/2404c
+  y=0  brk=0    rst=0   74.690h (0.191h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  82.166h (0.276h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r2  81.739h (0.389h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=b45  rst=0   75.579h (0.183h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b30  rst=0   75.329h (0.183h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 47.43 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=57.044h  td=57.044h  (mean=74.690h)  11.0s
+
+[LA] stop 74 (LAYBY)  t=57.277h  soc=262kWh  cd=1.46h  sd=1.46h  sw=1.81h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [74->117]  travel=11.65h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=75.034h  0.7s  ws=no  1360v/2403c
+  y=0  brk=0    rst=0   75.047h (0.317h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.5s)
+  y=0  brk=0    rst=r1  82.587h (0.468h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r2  82.223h (0.656h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   75.948h (0.313h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=0  brk=b30  rst=0   75.698h (0.313h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 93.84 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=57.277h  td=57.277h  (mean=75.047h)  11.5s
+
+[LA] stop 75 (CS)  t=57.519h  soc=239kWh  cd=1.70h  sd=1.70h  sw=2.05h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [75->118]  travel=11.66h +1rest  10 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=75.266h  0.5s  ws=no  1360v/2403c
+  y=0  brk=0    rst=0   75.242h (0.251h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=0   75.611h (0.259h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  82.763h (0.370h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=1  brk=0    rst=r1  83.045h (0.375h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  82.362h (0.521h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=1  brk=0    rst=r2  82.644h (0.526h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.4s)
+  y=0  brk=b45  rst=0   76.155h (0.246h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=1  brk=b45  rst=0   76.100h (0.251h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.1s)
+  y=0  brk=b30  rst=0   75.905h (0.246h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.9s)
+  y=1  brk=b30  rst=0   75.852h (0.251h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 66.26 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=57.519h  td=57.519h  (mean=75.242h)  21.8s
+
+[LA] stop 76 (LAYBY)  t=57.757h  soc=217kWh  cd=1.94h  sd=1.94h  sw=2.29h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [76->119]  travel=11.68h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=75.532h  0.7s  ws=no  1341v/2375c
+  y=0  brk=0    rst=0   75.566h (0.227h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  83.115h (0.341h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  82.747h (0.481h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=b45  rst=0   76.481h (0.227h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.2s)
+  y=0  brk=b30  rst=0   76.231h (0.227h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 71.98 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=57.757h  td=57.757h  (mean=75.566h)  11.2s
+
+[LA] stop 77 (LAYBY)  t=57.999h  soc=195kWh  cd=2.18h  sd=2.18h  sw=2.53h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [77->119]  travel=11.43h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=75.545h  0.4s  ws=no  1317v/2331c
+  y=0  brk=0    rst=0   75.585h (0.233h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  83.020h (0.349h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r2  82.512h (0.490h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   76.500h (0.234h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=0  brk=b30  rst=0   76.250h (0.234h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 60.90 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=57.999h  td=57.999h  (mean=75.585h)  10.5s
+
+[LA] stop 78 (LAYBY)  t=58.230h  soc=172kWh  cd=2.41h  sd=2.41h  sw=2.76h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [78->119]  travel=11.18h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=76.034h  0.5s  ws=no  1293v/2287c
+  y=0  brk=0    rst=0   76.076h (0.157h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r1  83.378h (0.232h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  82.723h (0.327h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   76.978h (0.155h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b30  rst=0   76.728h (0.155h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 37.17 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=58.230h  td=58.230h  (mean=76.076h)  10.8s
+
+[LA] stop 79 (CS)  t=58.526h  soc=152kWh  cd=2.71h  sd=2.71h  sw=3.06h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [79->119]  travel=10.94h +1rest  10 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=75.577h  0.7s  ws=no  1269v/2243c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=0    rst=0   76.008h (0.171h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  83.053h (0.254h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=r2  82.212h (0.358h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=b45  rst=0   76.449h (0.171h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.2s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=b30  rst=0   76.207h (0.170h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=0  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=3 c+b=0 c+r=1  2.2s
+  -> CHOSEN y=1  brk=0  rst=0  tauc=15m (+77kWh)  taub=0m  [CONC]  ta=58.526h  td=59.113h  (mean=76.008h)  20.1s
+
+[LA] stop 80 (LAYBY)  t=59.423h  soc=201kWh  cd=3.02h  sd=3.02h  sw=3.96h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [80->120]  travel=10.89h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=76.383h  0.5s  ws=yes  1269v/2244c
+  y=0  brk=0    rst=0   76.446h (0.185h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  83.564h (0.247h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  82.678h (0.347h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   77.352h (0.177h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b30  rst=0   77.102h (0.177h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 54.71 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=59.423h  td=59.423h  (mean=76.446h)  10.4s
+
+[LA] stop 81 (CS)  t=59.899h  soc=175kWh  cd=3.49h  sd=3.49h  sw=4.43h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [81->121]  travel=11.01h +1rest  10 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=77.048h  0.6s  ws=no  1288v/2272c
+  y=0  brk=0    rst=0   77.011h (0.227h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=1  brk=0    rst=0   77.304h (0.230h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  84.192h (0.339h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=1  brk=0    rst=r1  84.348h (0.340h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r2  83.371h (0.478h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=r2  83.527h (0.479h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   77.927h (0.226h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.4s)
+  y=1  brk=b45  rst=0   77.727h (0.228h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.8s)
+  y=0  brk=b30  rst=0   77.677h (0.226h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.9s)
+  y=1  brk=b30  rst=0   77.482h (0.228h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 57.51 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=59.899h  td=59.899h  (mean=77.011h)  20.3s
+
+[LA] stop 82 (LAYBY)  t=60.152h  soc=150kWh  cd=3.75h  sd=3.75h  sw=4.68h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [82->122]  travel=11.03h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=77.346h  0.5s  ws=no  1269v/2242c
+  y=0  brk=0    rst=0   40000074.182h (0.223h)  ok=24/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  40000081.076h (0.334h)  ok=24/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  40000080.289h (0.471h)  ok=24/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   40000075.061h (0.223h)  ok=24/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=0  brk=b30  rst=0   40000074.821h (0.223h)  ok=24/25  ws=25/25  tauc=0m  taub=30m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 50.04 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=60.152h  td=60.152h  (mean=40000074.182h)  10.3s
+
+[LA] stop 83 (LAYBY)  t=60.399h  soc=125kWh  cd=3.99h  sd=3.99h  sw=4.93h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [83->122]  travel=10.76h +1rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=77.932h  0.5s  ws=no  1245v/2199c
+  y=0  brk=0    rst=0   160000065.529h (0.275h)  ok=21/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  160000071.436h (0.377h)  ok=21/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  160000070.667h (0.530h)  ok=21/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   160000066.238h (0.251h)  ok=21/25  ws=25/25  tauc=0m  taub=45m  (1.7s)
+  y=0  brk=b30  rst=0   160000066.028h (0.251h)  ok=21/25  ws=25/25  tauc=0m  taub=30m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 59.63 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=60.399h  td=60.399h  (mean=160000065.529h)  9.6s
+
+[LA] stop 84 (CS)  t=60.678h  soc=102kWh  cd=4.27h  sd=4.27h  sw=5.21h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [84->123]  travel=10.78h +1rest  10 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=77.789h  0.6s  ws=no  1245v/2199c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=0   280000056.801h (0.214h)  ok=18/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=r1  85.224h (0.311h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=r2  84.326h (0.439h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=b45  rst=0   78.643h (0.210h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.9s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=b30  rst=0   78.410h (0.210h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b30  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=2 c+b=0 c+r=1  1.5s
+     [POST-HOC] tauc=55m >= 45m → b45 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b45  rst=0  tauc=55m (+257kWh)  taub=0m  [CONC]  ta=60.678h  td=62.072h  (mean=78.410h)  19.1s
+
+[LA] stop 85 (LAYBY)  t=62.329h  soc=339kWh  cd=0.26h  sd=4.53h  sw=5.94h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [85->127]  travel=11.77h +1rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=80.080h  0.3s  ws=yes  1336v/2361c
+  y=0  brk=0    rst=0   80.104h (0.205h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  87.686h (0.293h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r2  87.373h (0.412h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=b45  rst=0   81.006h (0.195h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=0  brk=b15  rst=0   80.517h (0.204h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 53.04 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=62.329h  td=62.329h  (mean=80.104h)  10.7s
+
+[LA] stop 86 (LAYBY)  t=62.545h  soc=318kWh  cd=0.47h  sd=4.75h  sw=6.16h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [86->127]  travel=11.54h +1rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=80.068h  0.7s  ws=no  1312v/2318c
+  y=0  brk=0    rst=0   80.073h (0.237h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  87.536h (0.354h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  87.070h (0.499h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   80.981h (0.236h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.2s)
+  y=0  brk=b15  rst=0   80.485h (0.236h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 62.29 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=62.545h  td=62.545h  (mean=80.073h)  11.4s
+
+[LA] stop 87 (CS)  t=62.768h  soc=298kWh  cd=0.70h  sd=4.97h  sw=6.38h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [87->128]  travel=11.59h +1rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=80.434h  0.6s  ws=no  1312v/2318c
+  y=0  brk=0    rst=0   80.489h (0.247h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=0   80.923h (0.253h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  88.006h (0.370h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=r1  88.339h (0.375h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  87.605h (0.523h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=1  brk=0    rst=r2  87.937h (0.528h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   81.399h (0.245h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=1  brk=b45  rst=0   81.386h (0.250h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.2s)
+  y=0  brk=b15  rst=0   80.906h (0.247h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+  y=1  brk=b15  rst=0   80.911h (0.253h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 74.06 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=62.768h  td=62.768h  (mean=80.489h)  21.0s
+
+[LA] stop 88 (LAYBY)  t=63.060h  soc=271kWh  cd=0.99h  sd=5.26h  sw=6.67h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [88->129]  travel=11.56h +1rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=80.691h  0.6s  ws=no  1312v/2318c
+  y=0  brk=0    rst=0   80.756h (0.223h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  88.266h (0.332h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r2  87.848h (0.466h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   81.672h (0.222h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b15  rst=0   81.173h (0.223h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 63.84 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=63.060h  td=63.060h  (mean=80.756h)  10.6s
+
+[LA] stop 89 (LAYBY)  t=63.361h  soc=244kWh  cd=1.29h  sd=5.56h  sw=6.98h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [89->130]  travel=11.54h +1rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=80.981h  0.6s  ws=no  1312v/2317c
+  y=0  brk=0    rst=0   81.087h (0.186h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r1  88.608h (0.279h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.5s)
+  y=0  brk=0    rst=r2  88.205h (0.393h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   82.002h (0.186h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.3s)
+  y=0  brk=b15  rst=0   81.502h (0.186h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.5s)
+     [DIAG] max per-scenario delta spread across actions: 47.12 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=63.361h  td=63.361h  (mean=81.087h)  12.3s
+
+[LA] stop 90 (CS)  t=63.736h  soc=218kWh  cd=1.66h  sd=5.94h  sw=7.35h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [90->131]  travel=11.53h +1rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=81.351h  0.7s  ws=no  1312v/2317c
+  y=0  brk=0    rst=0   81.658h (0.273h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.4s)
+  y=1  brk=0    rst=0   81.865h (0.156h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r1  89.135h (0.325h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=1  brk=0    rst=r1  89.249h (0.232h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.4s)
+  y=0  brk=0    rst=r2  88.677h (0.399h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=r2  88.791h (0.326h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   82.573h (0.274h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.2s)
+  y=1  brk=b45  rst=0   82.343h (0.155h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.3s)
+  y=0  brk=b15  rst=0   82.073h (0.274h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+  y=1  brk=b15  rst=0   81.857h (0.156h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.5s)
+     [DIAG] max per-scenario delta spread across actions: 55.14 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=63.736h  td=63.736h  (mean=81.658h)  23.0s
+
+[LA] stop 91 (CS)  t=64.162h  soc=189kWh  cd=2.09h  sd=6.36h  sw=7.78h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [91->133]  travel=11.73h +2rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.025h  0.5s  ws=no  1336v/2360c
+  y=0  brk=0    rst=0   200000065.693h (0.228h)  ok=20/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=0   82.456h (0.253h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  200000071.770h (0.344h)  ok=20/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=1  brk=0    rst=r1  89.924h (0.364h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r2  200000071.523h (0.486h)  ok=20/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=1  brk=0    rst=r2  89.583h (0.513h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   200000066.423h (0.227h)  ok=20/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=1  brk=b45  rst=0   82.916h (0.243h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.1s)
+  y=0  brk=b15  rst=0   200000066.023h (0.227h)  ok=20/25  ws=25/25  tauc=0m  taub=15m  (1.8s)
+  y=1  brk=b15  rst=0   82.446h (0.251h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.3s)
+     [DIAG] max per-scenario delta spread across actions: 59.82 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=-1 rst=1 chg=2 c+b=0 c+r=1  3.9s
+     [POST-HOC] tauc=48m >= 45m → b45 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b45  rst=0  tauc=48m (+200kWh)  taub=0m  [CONC]  ta=64.162h  td=65.227h  (mean=82.446h)  24.3s
+
+[LA] stop 92 (LAYBY)  t=65.449h  soc=366kWh  cd=0.22h  sd=6.58h  sw=8.26h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [92->133]  travel=11.48h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.960h  0.5s  ws=yes  1293v/2287c
+  y=0  brk=0    rst=0   83.042h (0.262h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  90.517h (0.388h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  90.071h (0.544h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   83.947h (0.261h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=0  brk=b15  rst=0   83.450h (0.261h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 76.34 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=65.449h  td=65.449h  (mean=83.042h)  10.7s
+
+[LA] stop 93 (LAYBY)  t=65.681h  soc=344kWh  cd=0.45h  sd=6.82h  sw=8.49h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [93->133]  travel=11.24h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.946h  0.4s  ws=no  1269v/2243c
+  y=0  brk=0    rst=0   83.037h (0.240h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=0    rst=r1  90.372h (0.369h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  89.750h (0.526h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   83.945h (0.240h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b15  rst=0   83.445h (0.240h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 60.93 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=65.681h  td=65.681h  (mean=83.037h)  10.7s
+
+[LA] stop 94 (LAYBY)  t=65.918h  soc=322kWh  cd=0.69h  sd=7.05h  sw=8.73h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [94->133]  travel=10.99h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.933h  0.6s  ws=no  1245v/2199c
+  y=0  brk=0    rst=0   83.027h (0.210h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r1  90.219h (0.306h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=0    rst=r2  89.437h (0.440h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   83.922h (0.198h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   83.434h (0.209h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 57.06 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=65.918h  td=65.918h  (mean=83.027h)  10.8s
+
+[LA] stop 95 (CS)  t=66.150h  soc=299kWh  cd=0.92h  sd=7.29h  sw=8.96h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [95->133]  travel=10.74h +2rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.917h  0.5s  ws=no  1221v/2156c
+  y=0  brk=0    rst=0   83.001h (0.200h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=1  brk=0    rst=0   83.425h (0.208h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  90.061h (0.284h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=1  brk=0    rst=r1  90.384h (0.294h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  89.149h (0.406h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=1  brk=0    rst=r2  89.472h (0.417h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   83.871h (0.184h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.3s)
+  y=1  brk=b45  rst=0   83.847h (0.198h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.0s)
+  y=0  brk=b15  rst=0   83.404h (0.199h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+  y=1  brk=b15  rst=0   83.403h (0.207h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 59.25 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=66.150h  td=66.150h  (mean=83.001h)  20.7s
+
+[LA] stop 96 (LAYBY)  t=66.363h  soc=277kWh  cd=1.14h  sd=7.50h  sw=9.18h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [96->135]  travel=11.04h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=83.455h  0.4s  ws=no  1245v/2201c
+  y=0  brk=0    rst=0   83.550h (0.280h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  90.770h (0.370h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r2  90.042h (0.522h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   84.434h (0.257h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   83.956h (0.277h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 52.61 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=66.363h  td=66.363h  (mean=83.550h)  9.9s
+
+[LA] stop 97 (LAYBY)  t=66.582h  soc=255kWh  cd=1.36h  sd=7.72h  sw=9.39h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [97->135]  travel=10.80h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=83.437h  0.5s  ws=no  1221v/2159c
+  y=0  brk=0    rst=0   83.410h (0.260h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  90.472h (0.360h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  89.545h (0.509h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   84.294h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   83.820h (0.256h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 50.72 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=66.582h  td=66.582h  (mean=83.410h)  10.3s
+
+[LA] stop 98 (LAYBY)  t=66.941h  soc=235kWh  cd=1.71h  sd=8.08h  sw=9.75h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [98->133]  travel=10.03h +2rest  5 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.932h  0.4s  ws=no  1130v/1997c
+  y=0  brk=0    rst=0   83.021h (0.220h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  89.757h (0.324h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=0    rst=r2  88.405h (0.460h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   83.928h (0.214h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=0  brk=b15  rst=0   83.431h (0.219h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 65.25 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=66.941h  td=66.941h  (mean=83.021h)  9.8s
+
+[LA] stop 99 (CS)  t=67.176h  soc=214kWh  cd=1.95h  sd=8.31h  sw=9.99h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [99->133]  travel=9.79h +2rest  10 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=82.979h  0.5s  ws=no  1106v/1953c
+  y=0  brk=0    rst=0   40000080.026h (0.179h)  ok=24/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=1  brk=0    rst=0   40000080.041h (0.180h)  ok=24/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  89.958h (0.286h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=1  brk=0    rst=r1  89.872h (0.298h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r2  88.408h (0.407h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=1  brk=0    rst=r2  88.322h (0.419h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   40000080.908h (0.178h)  ok=24/25  ws=25/25  tauc=0m  taub=45m  (1.6s)
+  y=1  brk=b45  rst=0   40000080.494h (0.179h)  ok=24/25  ws=25/25  tauc=45m  taub=0m  (2.1s)
+  y=0  brk=b15  rst=0   40000080.426h (0.179h)  ok=24/25  ws=25/25  tauc=0m  taub=15m  (1.6s)
+  y=1  brk=b15  rst=0   40000080.022h (0.179h)  ok=24/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 50.08 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=0  rst=r2  SEQ  ok  hor_stops: brk=-1 rst=0 chg=2 c+b=0 c+r=1  1.6s
+  -> CHOSEN y=1  brk=0  rst=r2  tauc=15m (+62kWh)  taub=0m  [SEQ]  ta=67.176h  td=76.797h  (mean=88.322h)  20.1s
+
+[LA] stop 100 (CS)  t=77.325h  soc=234kWh  cd=0.53h  sd=0.53h  sw=0.53h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [100->142]  travel=11.64h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=101.170h  0.4s  ws=yes  1336v/2370c
+  y=0  brk=0    rst=0   101.195h (0.302h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=0   101.551h (0.302h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  104.311h (0.631h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=1  brk=0    rst=r1  104.573h (0.629h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   102.108h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=1  brk=b45  rst=0   102.018h (0.298h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.1s)
+  y=0  brk=b15  rst=0   101.609h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+  y=1  brk=b15  rst=0   101.542h (0.302h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 87.21 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=77.325h  td=77.325h  (mean=101.195h)  16.8s
+
+[LA] stop 101 (LAYBY)  t=77.622h  soc=209kWh  cd=0.82h  sd=0.82h  sw=0.82h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [101->143]  travel=11.63h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=101.468h  0.4s  ws=no  1317v/2341c
+  y=0  brk=0    rst=0   101.437h (0.239h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  104.459h (0.501h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=b45  rst=0   102.351h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b15  rst=0   101.851h (0.239h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 74.84 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=77.622h  td=77.622h  (mean=101.437h)  8.6s
+
+[LA] stop 102 (LAYBY)  t=77.897h  soc=184kWh  cd=1.10h  sd=1.10h  sw=1.10h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [102->144]  travel=11.63h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=101.807h  0.5s  ws=no  1336v/2372c
+  y=0  brk=0    rst=0   101.994h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.4s)
+  y=0  brk=0    rst=r1  105.027h (0.434h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=b45  rst=0   102.903h (0.233h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=0  brk=b15  rst=0   102.409h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 55.15 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=77.897h  td=77.897h  (mean=101.994h)  9.3s
+
+[LA] stop 103 (CS)  t=78.167h  soc=157kWh  cd=1.37h  sd=1.37h  sw=1.37h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [103->145]  travel=11.69h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=102.114h  0.3s  ws=no  1355v/2402c
+  y=0  brk=0    rst=0   840000016.352h (0.217h)  ok=4/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=0   102.372h (0.178h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  840000016.850h (0.460h)  ok=4/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  105.304h (0.368h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   840000016.497h (0.215h)  ok=4/25  ws=25/25  tauc=0m  taub=45m  (1.7s)
+  y=1  brk=b45  rst=0   102.783h (0.176h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.2s)
+  y=0  brk=b15  rst=0   840000016.418h (0.217h)  ok=4/25  ws=25/25  tauc=0m  taub=15m  (1.7s)
+  y=1  brk=b15  rst=0   102.358h (0.180h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 40.33 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=3 c+b=0 c+r=1  2.5s
+     [POST-HOC] tauc=41m >= 30m → b30 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b30  rst=0  tauc=41m (+180kWh)  taub=0m  [CONC]  ta=78.167h  td=79.094h  (mean=102.358h)  17.7s
+
+[LA] stop 104 (LAYBY)  t=79.299h  soc=318kWh  cd=1.58h  sd=1.58h  sw=1.82h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [104->146]  travel=11.71h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=103.067h  0.4s  ws=yes  1336v/2373c
+  y=0  brk=0    rst=0   103.112h (0.264h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  106.273h (0.551h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.2s)
+  y=0  brk=b45  rst=0   104.019h (0.259h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b30  rst=0   103.769h (0.259h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.2s)
+     [DIAG] max per-scenario delta spread across actions: 66.08 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=79.299h  td=79.299h  (mean=103.112h)  8.6s
+
+[LA] stop 105 (LAYBY)  t=79.505h  soc=298kWh  cd=1.78h  sd=1.78h  sw=2.03h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [105->147]  travel=11.73h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=103.320h  0.6s  ws=no  1336v/2376c
+  y=0  brk=0    rst=0   103.297h (0.224h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  106.408h (0.472h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.3s)
+  y=0  brk=b45  rst=0   104.203h (0.220h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.1s)
+  y=0  brk=b30  rst=0   103.953h (0.220h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 56.24 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=79.505h  td=79.505h  (mean=103.297h)  9.1s
+
+[LA] stop 106 (CS)  t=79.707h  soc=279kWh  cd=1.98h  sd=1.98h  sw=2.23h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [106->147]  travel=11.51h +1rest  8 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=103.404h  0.5s  ws=no  1312v/2332c
+  y=0  brk=0    rst=0   103.389h (0.244h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=1  brk=0    rst=0   103.897h (0.245h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  106.347h (0.491h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=1  brk=0    rst=r1  106.767h (0.491h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   104.286h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.6s)
+  y=1  brk=b45  rst=0   104.366h (0.235h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.2s)
+  y=0  brk=b30  rst=0   104.036h (0.238h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.1s)
+  y=1  brk=b30  rst=0   104.119h (0.237h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 56.14 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=79.707h  td=79.707h  (mean=103.389h)  17.1s
+
+[LA] stop 107 (LAYBY)  t=79.954h  soc=258kWh  cd=2.23h  sd=2.23h  sw=2.48h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [107->148]  travel=11.52h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=103.660h  0.4s  ws=no  1293v/2304c
+  y=0  brk=0    rst=0   103.712h (0.255h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  106.672h (0.536h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   104.607h (0.254h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b30  rst=0   104.357h (0.254h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 62.38 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=79.954h  td=79.954h  (mean=103.712h)  8.2s
+
+[LA] stop 108 (LAYBY)  t=80.255h  soc=239kWh  cd=2.53h  sd=2.53h  sw=2.78h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [108->147]  travel=11.05h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=103.483h  0.5s  ws=no  1245v/2215c
+  y=0  brk=0    rst=0   103.505h (0.201h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  105.924h (0.426h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   104.409h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b30  rst=0   104.159h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.7s)
+     [DIAG] max per-scenario delta spread across actions: 45.71 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=80.255h  td=80.255h  (mean=103.505h)  7.7s
+
+[LA] stop 109 (CS)  t=80.470h  soc=218kWh  cd=2.75h  sd=2.75h  sw=2.99h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [109->148]  travel=11.05h +1rest  8 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=103.699h  0.5s  ws=no  1245v/2216c
+  y=0  brk=0    rst=0   103.597h (0.179h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=1  brk=0    rst=0   104.306h (0.184h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  105.888h (0.375h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=1  brk=0    rst=r1  106.483h (0.388h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   104.508h (0.177h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=1  brk=b45  rst=0   104.744h (0.195h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (2.0s)
+  y=0  brk=b30  rst=0   104.258h (0.177h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.9s)
+  y=1  brk=b30  rst=0   104.504h (0.193h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 45.76 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=80.470h  td=80.470h  (mean=103.597h)  15.7s
+
+[LA] stop 110 (LAYBY)  t=80.943h  soc=192kWh  cd=3.22h  sd=3.22h  sw=3.47h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [110->148]  travel=10.75h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=103.875h  0.4s  ws=no  1202v/2146c
+  y=0  brk=0    rst=0   103.850h (0.134h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  105.906h (0.280h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   104.763h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=0  brk=b30  rst=0   104.513h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 38.07 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=80.943h  td=80.943h  (mean=103.850h)  7.9s
+
+[LA] stop 111 (LAYBY)  t=81.216h  soc=165kWh  cd=3.49h  sd=3.49h  sw=3.74h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [111->150]  travel=10.91h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=104.953h  0.5s  ws=no  1245v/2219c
+  y=0  brk=0    rst=0   104.871h (0.249h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  107.073h (0.454h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   105.748h (0.244h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b30  rst=0   105.498h (0.244h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 62.51 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=81.216h  td=81.216h  (mean=104.871h)  8.5s
+
+[LA] stop 112 (CS)  t=81.499h  soc=139kWh  cd=3.78h  sd=3.78h  sw=4.02h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [112->151]  travel=10.83h +1rest  8 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=104.678h  0.4s  ws=no  1245v/2220c
+  y=0  brk=0    rst=0   840000016.810h (0.111h)  ok=4/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=0   105.315h (0.339h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  840000017.120h (0.236h)  ok=4/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=r1  107.106h (0.422h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   840000016.930h (0.111h)  ok=4/25  ws=25/25  tauc=0m  taub=45m  (1.6s)
+  y=1  brk=b45  rst=0   105.450h (0.200h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.9s)
+  y=0  brk=b30  rst=0   840000016.890h (0.111h)  ok=4/25  ws=25/25  tauc=0m  taub=30m  (1.4s)
+  y=1  brk=b30  rst=0   105.224h (0.200h)  ok=25/25  ws=25/25  tauc=30m  taub=0m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 19.16 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=b30  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=3 c+b=0 c+r=1  1.9s
+  -> CHOSEN y=1  brk=b30  rst=0  tauc=30m (+142kWh)  taub=0m  [CONC]  ta=81.499h  td=82.359h  (mean=105.224h)  15.8s
+
+[LA] stop 113 (CS)  t=82.788h  soc=239kWh  cd=0.43h  sd=4.20h  sw=4.81h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [113->155]  travel=11.30h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=106.236h  0.5s  ws=yes  1317v/2352c
+  y=0  brk=0    rst=0   106.228h (0.220h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=1  brk=0    rst=0   106.569h (0.221h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  108.857h (0.446h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=1  brk=0    rst=r1  109.090h (0.449h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=b45  rst=0   107.117h (0.210h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=1  brk=b45  rst=0   106.995h (0.213h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.9s)
+  y=0  brk=b15  rst=0   106.632h (0.219h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+  y=1  brk=b15  rst=0   106.556h (0.221h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 53.72 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=82.788h  td=82.788h  (mean=106.228h)  16.0s
+
+[LA] stop 114 (LAYBY)  t=83.032h  soc=215kWh  cd=0.67h  sd=4.45h  sw=5.06h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [114->155]  travel=11.04h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=106.229h  0.5s  ws=no  1274v/2279c
+  y=0  brk=0    rst=0   106.214h (0.215h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  108.576h (0.445h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   107.111h (0.209h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.0s)
+  y=0  brk=b15  rst=0   106.616h (0.216h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.1s)
+     [DIAG] max per-scenario delta spread across actions: 51.61 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=83.032h  td=83.032h  (mean=106.214h)  8.5s
+
+[LA] stop 115 (LAYBY)  t=83.284h  soc=192kWh  cd=0.92h  sd=4.70h  sw=5.31h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [115->155]  travel=10.78h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=106.682h  0.3s  ws=no  1250v/2235c
+  y=0  brk=0    rst=0   106.688h (0.219h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=0    rst=r1  108.789h (0.463h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=b45  rst=0   107.579h (0.219h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   107.105h (0.219h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (2.0s)
+     [DIAG] max per-scenario delta spread across actions: 67.21 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=83.284h  td=83.284h  (mean=106.688h)  8.0s
+
+[LA] stop 116 (CS)  t=83.523h  soc=169kWh  cd=1.16h  sd=4.94h  sw=5.55h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [116->155]  travel=10.53h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=106.205h  0.6s  ws=no  1226v/2191c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=0    rst=0   106.571h (0.169h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.0s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=r1  108.219h (0.356h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.9s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=1  brk=b45  rst=0   106.993h (0.170h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.9s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=b15  rst=0   106.556h (0.169h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=-1 rst=0 chg=2 c+b=0 c+r=1  1.9s
+     [POST-HOC] tauc=52m >= 45m → b45 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b45  rst=0  tauc=52m (+221kWh)  taub=0m  [CONC]  ta=83.523h  td=84.668h  (mean=106.556h)  15.4s
+
+[LA] stop 117 (LAYBY)  t=84.916h  soc=365kWh  cd=0.25h  sd=5.19h  sw=6.08h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [117->155]  travel=10.26h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.196h  0.5s  ws=yes  1183v/2118c
+  y=0  brk=0    rst=0   107.192h (0.190h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  108.694h (0.401h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.1s)
+  y=0  brk=b45  rst=0   108.066h (0.191h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   107.594h (0.190h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 46.95 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=84.916h  td=84.916h  (mean=107.192h)  7.8s
+
+[LA] stop 118 (LAYBY)  t=85.202h  soc=343kWh  cd=0.53h  sd=5.47h  sw=6.37h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [118->155]  travel=10.00h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.219h  0.3s  ws=no  1159v/2074c
+  y=0  brk=0    rst=0   107.258h (0.192h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.9s)
+  y=0  brk=0    rst=r1  108.521h (0.405h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=b45  rst=0   108.133h (0.193h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   107.660h (0.192h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.8s)
+     [DIAG] max per-scenario delta spread across actions: 57.20 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=85.202h  td=85.202h  (mean=107.258h)  7.3s
+
+[LA] stop 119 (LAYBY)  t=85.520h  soc=321kWh  cd=0.85h  sd=5.79h  sw=6.69h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [119->155]  travel=9.74h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.274h  0.4s  ws=no  1135v/2030c
+  y=0  brk=0    rst=0   107.299h (0.142h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  108.259h (0.299h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=b45  rst=0   108.174h (0.142h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.7s)
+  y=0  brk=b15  rst=0   107.701h (0.142h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 37.48 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=85.520h  td=85.520h  (mean=107.299h)  7.4s
+
+[LA] stop 120 (CS)  t=85.788h  soc=298kWh  cd=1.12h  sd=6.06h  sw=6.95h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [120->155]  travel=9.48h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.280h  0.5s  ws=no  1111v/1987c
+  y=0  brk=0    rst=0   107.398h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=0   108.135h (0.186h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.7s)
+  y=0  brk=0    rst=r1  108.173h (0.426h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  108.816h (0.396h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=b45  rst=0   108.274h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.5s)
+  y=1  brk=b45  rst=0   108.578h (0.187h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.7s)
+  y=0  brk=b15  rst=0   107.800h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.6s)
+  y=1  brk=b15  rst=0   108.115h (0.185h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+     [DIAG] max per-scenario delta spread across actions: 56.36 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=85.788h  td=85.788h  (mean=107.398h)  13.5s
+
+[LA] stop 121 (CS)  t=86.299h  soc=262kWh  cd=1.63h  sd=6.57h  sw=7.46h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [121->155]  travel=9.04h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.230h  0.4s  ws=no  1068v/1915c
+  y=0  brk=0    rst=0   107.360h (0.209h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=0   107.772h (0.255h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  107.628h (0.347h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  107.882h (0.365h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.7s)
+  y=0  brk=b45  rst=0   108.250h (0.192h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.6s)
+  y=1  brk=b45  rst=0   108.161h (0.202h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.7s)
+  y=0  brk=b15  rst=0   107.769h (0.203h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.5s)
+  y=1  brk=b15  rst=0   107.745h (0.237h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+     [DIAG] max per-scenario delta spread across actions: 32.91 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=86.299h  td=86.299h  (mean=107.360h)  13.3s
+
+[LA] stop 122 (LAYBY)  t=86.566h  soc=235kWh  cd=1.90h  sd=6.84h  sw=7.73h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [122->155]  travel=8.75h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.124h  0.5s  ws=no  1025v/1843c
+  y=0  brk=0    rst=0   107.173h (0.194h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  107.313h (0.209h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   108.084h (0.182h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.6s)
+  y=0  brk=b15  rst=0   107.588h (0.191h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.6s)
+     [DIAG] max per-scenario delta spread across actions: 11.05 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=86.566h  td=86.566h  (mean=107.173h)  6.9s
+
+[LA] stop 123 (LAYBY)  t=86.840h  soc=208kWh  cd=2.17h  sd=7.11h  sw=8.01h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [123->155]  travel=8.45h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.117h  0.4s  ws=no  1001v/1800c
+  y=0  brk=0    rst=0   107.389h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=0    rst=r1  107.517h (0.305h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   108.306h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.5s)
+  y=0  brk=b15  rst=0   107.806h (0.301h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.5s)
+     [DIAG] max per-scenario delta spread across actions: 2.73 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=86.840h  td=86.840h  (mean=107.389h)  6.5s
+
+[LA] stop 124 (CS)  t=87.148h  soc=183kWh  cd=2.48h  sd=7.42h  sw=8.31h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [124->155]  travel=8.16h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=107.123h  0.4s  ws=no  977v/1757c
+  y=0  brk=0    rst=0   240000081.500h (0.181h)  ok=19/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=0    rst=0   107.674h (0.194h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+  y=0  brk=0    rst=r1  240000081.595h (0.179h)  ok=19/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=1  brk=0    rst=r1  107.694h (0.188h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+  y=0  brk=b45  rst=0   240000082.197h (0.181h)  ok=19/25  ws=25/25  tauc=0m  taub=45m  (1.2s)
+  y=1  brk=b45  rst=0   108.135h (0.193h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.5s)
+  y=0  brk=b15  rst=0   240000081.817h (0.181h)  ok=19/25  ws=25/25  tauc=0m  taub=15m  (1.3s)
+  y=1  brk=b15  rst=0   107.666h (0.191h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+     [DIAG] max per-scenario delta spread across actions: 2.69 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=0 rst=1 chg=2 c+b=0 c+r=0  1.1s
+     [POST-HOC] tauc=46m >= 45m → b45 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b45  rst=0  tauc=46m (+193kWh)  taub=0m  [CONC]  ta=87.148h  td=88.335h  (mean=107.666h)  12.6s
+
+[LA] stop 125 (LAYBY)  t=88.613h  soc=347kWh  cd=0.28h  sd=7.70h  sw=9.01h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [125->155]  travel=7.85h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=108.093h  0.4s  ws=yes  934v/1684c
+  y=0  brk=0    rst=0   108.052h (0.184h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=0    rst=r1  108.150h (0.182h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=b45  rst=0   108.968h (0.184h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.4s)
+  y=0  brk=b15  rst=0   108.468h (0.183h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.58 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=88.613h  td=88.613h  (mean=108.052h)  5.8s
+
+[LA] stop 126 (LAYBY)  t=88.933h  soc=321kWh  cd=0.60h  sd=8.02h  sw=9.33h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [126->155]  travel=7.55h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=108.160h  0.3s  ws=no  910v/1642c
+  y=0  brk=0    rst=0   108.190h (0.170h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=0    rst=r1  108.266h (0.170h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=b45  rst=0   109.107h (0.170h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.5s)
+  y=0  brk=b15  rst=0   108.607h (0.170h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.4s)
+     [DIAG] max per-scenario delta spread across actions: 0.24 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=88.933h  td=88.933h  (mean=108.190h)  6.0s
+
+[LA] stop 127 (CS)  t=89.237h  soc=293kWh  cd=0.90h  sd=8.32h  sw=9.64h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [127->155]  travel=7.24h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=108.145h  0.4s  ws=no  886v/1599c
+  y=0  brk=0    rst=0   108.163h (0.135h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=0   108.584h (0.137h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.2s)
+  y=0  brk=0    rst=r1  108.221h (0.134h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=1  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=0  brk=b45  rst=0   109.080h (0.135h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.2s)
+  y=1  brk=b45  rst=0   109.084h (0.137h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.2s)
+  y=0  brk=b15  rst=0   108.580h (0.135h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.3s)
+  y=1  brk=b15  rst=0   108.584h (0.137h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.64 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=89.237h  td=89.237h  (mean=108.163h)  10.4s
+
+[LA] stop 128 (LAYBY)  t=89.494h  soc=268kWh  cd=1.16h  sd=8.58h  sw=9.89h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [128->155]  travel=6.96h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=108.167h  0.3s  ws=no  843v/1526c
+  y=0  brk=0    rst=0   108.208h (0.160h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=0    rst=r1  108.223h (0.159h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=b45  rst=0   109.125h (0.160h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.3s)
+  y=0  brk=b15  rst=0   108.625h (0.160h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.37 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=89.494h  td=89.494h  (mean=108.208h)  5.5s
+
+[LA] stop 129 (CS)  t=89.796h  soc=245kWh  cd=1.46h  sd=8.88h  sw=10.20h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [129->155]  travel=6.69h +1rest  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=108.217h  0.3s  ws=no  819v/1480c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=1  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=89.796h  td=89.796h  (mean=1000000000.000h)  8.7s
+  [!] FORCED REST (r1) at stop 129
+
+[LA] stop 130 (LAYBY)  t=103.181h  soc=475kWh  cd=0.30h  sd=0.30h  sw=0.30h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [130->155]  travel=6.40h  4 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   110.189h (0.172h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=0    rst=r1  121.254h (0.169h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (1.1s)
+  y=0  brk=b45  rst=0   111.004h (0.169h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (1.1s)
+  y=0  brk=b15  rst=0   110.556h (0.170h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (1.2s)
+     [DIAG] max per-scenario delta spread across actions: 2.05 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=103.181h  td=103.181h  (mean=110.189h)  4.9s
+
+[LA] stop 131 (LAYBY)  t=103.463h  soc=450kWh  cd=0.59h  sd=0.59h  sw=0.59h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [131->155]  travel=6.11h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.156h  0.3s  ws=no  752v/1322c
+  y=0  brk=0    rst=0   110.203h (0.150h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=0    rst=r1  121.269h (0.150h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=b45  rst=0   111.019h (0.150h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.2s)
+  y=0  brk=b15  rst=0   110.571h (0.150h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.2s)
+     [DIAG] max per-scenario delta spread across actions: 0.03 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=103.463h  td=103.463h  (mean=110.203h)  5.2s
+
+[LA] stop 132 (CS)  t=103.762h  soc=425kWh  cd=0.89h  sd=0.89h  sw=0.89h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [132->155]  travel=5.82h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.167h  0.3s  ws=no  728v/1271c
+  y=0  brk=0    rst=0   110.144h (0.137h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=0    rst=0   110.725h (0.137h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.2s)
+  y=0  brk=0    rst=r1  121.211h (0.136h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=1  brk=0    rst=r1  121.708h (0.137h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+  y=0  brk=b45  rst=0   110.961h (0.136h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.0s)
+  y=1  brk=b45  rst=0   111.124h (0.137h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.2s)
+  y=0  brk=b15  rst=0   110.513h (0.137h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.1s)
+  y=1  brk=b15  rst=0   110.677h (0.137h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 0.16 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=103.762h  td=103.762h  (mean=110.144h)  9.2s
+
+[LA] stop 133 (LAYBY)  t=104.013h  soc=401kWh  cd=1.14h  sd=1.14h  sw=1.14h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [133->155]  travel=5.56h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.152h  0.3s  ws=no  685v/1193c
+  y=0  brk=0    rst=0   110.157h (0.156h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=0  brk=0    rst=r1  121.223h (0.156h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=b45  rst=0   110.973h (0.156h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.0s)
+  y=0  brk=b15  rst=0   110.525h (0.156h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.4s)
+     [DIAG] max per-scenario delta spread across actions: 0.19 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=104.013h  td=104.013h  (mean=110.157h)  4.9s
+
+[LA] stop 134 (LAYBY)  t=104.273h  soc=377kWh  cd=1.40h  sd=1.40h  sw=1.40h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [134->155]  travel=5.29h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.146h  0.2s  ws=no  661v/1145c
+  y=0  brk=0    rst=0   110.131h (0.128h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=0  brk=0    rst=r1  121.195h (0.128h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=b45  rst=0   110.945h (0.128h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.1s)
+  y=0  brk=b15  rst=0   110.497h (0.128h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.0s)
+     [DIAG] max per-scenario delta spread across actions: 0.02 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=104.273h  td=104.273h  (mean=110.131h)  4.4s
+
+[LA] stop 135 (CS)  t=104.519h  soc=352kWh  cd=1.64h  sd=1.64h  sw=1.64h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [135->155]  travel=5.02h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.130h  0.2s  ws=no  637v/1098c
+  y=0  brk=0    rst=0   110.112h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=1  brk=0    rst=0   110.634h (0.117h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.0s)
+  y=0  brk=0    rst=r1  121.173h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=1  brk=0    rst=r1  121.612h (0.117h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.6s)
+  y=0  brk=b45  rst=0   110.923h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.2s)
+  y=1  brk=b45  rst=0   111.028h (0.117h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.2s)
+  y=0  brk=b15  rst=0   110.475h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.3s)
+  y=1  brk=b15  rst=0   110.581h (0.117h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 0.02 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=104.519h  td=104.519h  (mean=110.112h)  8.4s
+
+[LA] stop 136 (LAYBY)  t=104.743h  soc=334kWh  cd=1.87h  sd=1.87h  sw=1.87h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [136->155]  travel=4.81h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.140h  0.4s  ws=no  594v/1024c
+  y=0  brk=0    rst=0   110.096h (0.111h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=0    rst=r1  121.154h (0.111h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   110.904h (0.111h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.9s)
+  y=0  brk=b15  rst=0   110.456h (0.111h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 0.02 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=104.743h  td=104.743h  (mean=110.096h)  6.4s
+
+[LA] stop 137 (LAYBY)  t=104.978h  soc=315kWh  cd=2.10h  sd=2.10h  sw=2.10h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [137->155]  travel=4.59h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.159h  0.3s  ws=no  570v/979c
+  y=0  brk=0    rst=0   110.148h (0.119h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.3s)
+  y=0  brk=0    rst=r1  121.223h (0.091h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
+  y=0  brk=b45  rst=0   110.973h (0.091h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.8s)
+  y=0  brk=b15  rst=0   110.516h (0.103h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 6.49 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=104.978h  td=104.978h  (mean=110.148h)  5.7s
+
+[LA] stop 138 (CS)  t=105.202h  soc=296kWh  cd=2.32h  sd=2.32h  sw=2.32h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [138->155]  travel=4.37h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.861h  0.2s  ws=no  546v/935c
+  y=0  brk=0    rst=0   109.887h (0.210h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=1  brk=0    rst=0   110.357h (0.214h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.0s)
+  y=0  brk=0    rst=r1  120.966h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=1  brk=0    rst=r1  121.231h (0.133h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.0s)
+  y=0  brk=b45  rst=0   110.716h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.8s)
+  y=1  brk=b45  rst=0   110.596h (0.135h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.8s)
+  y=0  brk=b15  rst=0   110.277h (0.211h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.8s)
+  y=1  brk=b15  rst=0   110.349h (0.213h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 15.85 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=105.202h  td=105.202h  (mean=109.887h)  7.6s
+
+[LA] stop 139 (LAYBY)  t=105.489h  soc=271kWh  cd=2.61h  sd=2.61h  sw=2.61h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [139->155]  travel=4.08h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.857h  0.2s  ws=no  503v/864c
+  y=0  brk=0    rst=0   109.913h (0.198h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=0    rst=r1  121.014h (0.159h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.0s)
+  y=0  brk=b45  rst=0   110.764h (0.159h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.8s)
+  y=0  brk=b15  rst=0   110.303h (0.199h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.7s)
+     [DIAG] max per-scenario delta spread across actions: 16.02 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=105.489h  td=105.489h  (mean=109.913h)  3.6s
+
+[LA] stop 140 (LAYBY)  t=105.768h  soc=244kWh  cd=2.89h  sd=2.89h  sw=2.89h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [140->155]  travel=3.79h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.845h  0.2s  ws=no  479v/822c
+  y=0  brk=0    rst=0   109.854h (0.147h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=0    rst=r1  120.966h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=0  brk=b45  rst=0   110.716h (0.133h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.8s)
+  y=0  brk=b15  rst=0   110.242h (0.147h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+     [DIAG] max per-scenario delta spread across actions: 2.58 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=105.768h  td=105.768h  (mean=109.854h)  3.7s
+
+[LA] stop 141 (CS)  t=106.034h  soc=217kWh  cd=3.16h  sd=3.16h  sw=3.16h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [141->155]  travel=3.50h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.822h  0.2s  ws=no  455v/780c
+  y=0  brk=0    rst=0   109.829h (0.130h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=1  brk=0    rst=0   110.610h (0.132h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.8s)
+  y=0  brk=0    rst=r1  120.940h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=1  brk=0    rst=r1  121.484h (0.117h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.0s)
+  y=0  brk=b45  rst=0   110.690h (0.117h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.7s)
+  y=1  brk=b45  rst=0   110.877h (0.120h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.8s)
+  y=0  brk=b15  rst=0   110.214h (0.129h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+  y=1  brk=b15  rst=0   110.604h (0.132h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+     [DIAG] max per-scenario delta spread across actions: 3.13 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=106.034h  td=106.034h  (mean=109.829h)  6.8s
+
+[LA] stop 142 (LAYBY)  t=106.343h  soc=194kWh  cd=3.47h  sd=3.47h  sw=3.47h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [142->155]  travel=3.22h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.860h  0.1s  ws=no  412v/709c
+  y=0  brk=0    rst=0   109.881h (0.137h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=0  brk=0    rst=r1  120.982h (0.121h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=b45  rst=0   110.732h (0.121h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.9s)
+  y=0  brk=b15  rst=0   110.261h (0.135h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.8s)
+     [DIAG] max per-scenario delta spread across actions: 3.85 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=106.343h  td=106.343h  (mean=109.881h)  3.5s
+
+[LA] stop 143 (LAYBY)  t=106.652h  soc=170kWh  cd=3.77h  sd=3.77h  sw=3.77h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [143->155]  travel=2.94h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.913h  0.2s  ws=no  388v/667c
+  y=0  brk=0    rst=0   109.933h (0.178h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=0    rst=r1  120.992h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   110.742h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.7s)
+  y=0  brk=b15  rst=0   110.292h (0.156h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+     [DIAG] max per-scenario delta spread across actions: 41.24 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=106.652h  td=106.652h  (mean=109.933h)  3.2s
+
+[LA] stop 144 (CS)  t=106.921h  soc=145kWh  cd=4.04h  sd=4.04h  sw=4.04h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [144->155]  travel=2.66h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=109.929h  0.2s  ws=no  364v/625c
+  y=0  brk=0    rst=0   40000106.130h (0.088h)  ok=24/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=1  brk=0    rst=0   40000106.582h (0.085h)  ok=24/25  ws=25/25  tauc=15m  taub=0m  (0.8s)
+  y=0  brk=0    rst=r1  121.357h (0.085h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=1  brk=0    rst=r1  121.193h (0.085h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.8s)
+  y=0  brk=b45  rst=0   111.107h (0.085h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.6s)
+  y=1  brk=b45  rst=0   110.565h (0.088h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.6s)
+  y=0  brk=b15  rst=0   40000106.343h (0.085h)  ok=24/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+  y=1  brk=b15  rst=0   40000106.342h (0.085h)  ok=24/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.86 min  (constant shift)
+     [NOM-MIP] y=1  brk=b45  rst=0  CONC  ok  hor_stops: brk=0 rst=0 chg=0 c+b=0 c+r=0  0.2s
+  -> CHOSEN y=1  brk=b45  rst=0  tauc=45m (+202kWh)  taub=0m  [CONC]  ta=106.921h  td=107.910h  (mean=110.565h)  6.3s
+
+[LA] stop 145 (CS)  t=108.237h  soc=315kWh  cd=0.33h  sd=4.37h  sw=4.61h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [145->155]  travel=2.31h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.549h  0.2s  ws=yes  321v/554c
+  y=0  brk=0    rst=0   110.529h (0.105h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=1  brk=0    rst=0   111.009h (0.105h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+  y=0  brk=0    rst=r1  121.696h (0.105h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=1  brk=0    rst=r1  122.092h (0.105h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   111.446h (0.105h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.6s)
+  y=1  brk=b45  rst=0   111.509h (0.105h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.7s)
+  y=0  brk=b15  rst=0   110.946h (0.105h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.8s)
+  y=1  brk=b15  rst=0   111.009h (0.105h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=108.237h  td=108.237h  (mean=110.529h)  5.8s
+
+[LA] stop 146 (LAYBY)  t=108.464h  soc=293kWh  cd=0.55h  sd=4.60h  sw=4.84h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [146->155]  travel=2.07h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.539h  0.2s  ws=no  278v/483c
+  y=0  brk=0    rst=0   110.540h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=0    rst=r1  121.706h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   111.456h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.6s)
+  y=0  brk=b15  rst=0   110.956h (0.088h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=108.464h  td=108.464h  (mean=110.540h)  2.7s
+
+[LA] stop 147 (LAYBY)  t=108.680h  soc=271kWh  cd=0.77h  sd=4.81h  sw=5.05h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [147->155]  travel=1.84h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.518h  0.1s  ws=no  254v/441c
+  y=0  brk=0    rst=0   110.502h (0.066h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=0    rst=r1  121.669h (0.066h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   111.419h (0.066h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.6s)
+  y=0  brk=b15  rst=0   110.919h (0.066h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=108.680h  td=108.680h  (mean=110.502h)  2.7s
+
+[LA] stop 148 (LAYBY)  t=108.904h  soc=250kWh  cd=0.99h  sd=5.04h  sw=5.28h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [148->155]  travel=1.60h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.504h  0.1s  ws=no  230v/399c
+  y=0  brk=0    rst=0   110.495h (0.076h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=0    rst=r1  121.662h (0.076h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   111.412h (0.076h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.7s)
+  y=0  brk=b15  rst=0   110.912h (0.076h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.6s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=108.904h  td=108.904h  (mean=110.495h)  2.6s
+
+[LA] stop 149 (CS)  t=109.187h  soc=230kWh  cd=1.28h  sd=5.32h  sw=5.56h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [149->155]  travel=1.36h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.549h  0.2s  ws=no  206v/357c
+  y=0  brk=0    rst=0   110.531h (0.049h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=1  brk=0    rst=0   111.055h (0.049h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.7s)
+  y=0  brk=0    rst=r1  121.698h (0.049h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.5s)
+  y=1  brk=0    rst=r1  122.138h (0.049h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.5s)
+  y=0  brk=b45  rst=0   111.448h (0.049h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.5s)
+  y=1  brk=b45  rst=0   111.555h (0.049h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.5s)
+  y=0  brk=b15  rst=0   110.948h (0.049h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.5s)
+  y=1  brk=b15  rst=0   111.055h (0.049h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=109.187h  td=109.187h  (mean=110.531h)  4.6s
+
+[LA] stop 150 (LAYBY)  t=109.395h  soc=211kWh  cd=1.48h  sd=5.53h  sw=5.77h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [150->155]  travel=1.15h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.545h  0.1s  ws=no  163v/286c
+  y=0  brk=0    rst=0   110.566h (0.063h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.5s)
+  y=0  brk=0    rst=r1  121.733h (0.063h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=b45  rst=0   111.483h (0.063h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.4s)
+  y=0  brk=b15  rst=0   110.983h (0.063h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=109.395h  td=109.395h  (mean=110.566h)  2.2s
+
+[LA] stop 151 (LAYBY)  t=109.594h  soc=192kWh  cd=1.68h  sd=5.73h  sw=5.97h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [151->155]  travel=0.94h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.531h  0.1s  ws=no  139v/244c
+  y=0  brk=0    rst=0   110.550h (0.046h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=0    rst=r1  121.717h (0.046h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=b45  rst=0   111.467h (0.046h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.5s)
+  y=0  brk=b15  rst=0   110.967h (0.046h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=109.594h  td=109.594h  (mean=110.550h)  2.4s
+
+[LA] stop 152 (CS)  t=109.799h  soc=173kWh  cd=1.89h  sd=5.93h  sw=6.17h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [152->155]  travel=0.72h  8 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.524h  0.1s  ws=no  115v/202c
+  y=0  brk=0    rst=0   110.512h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=1  brk=0    rst=0   111.054h (0.052h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.5s)
+  y=0  brk=0    rst=r1  121.679h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.5s)
+  y=1  brk=0    rst=r1  122.138h (0.052h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.4s)
+  y=0  brk=b45  rst=0   111.429h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.5s)
+  y=1  brk=b45  rst=0   111.554h (0.052h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (0.4s)
+  y=0  brk=b15  rst=0   110.929h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.4s)
+  y=1  brk=b15  rst=0   111.054h (0.052h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=109.799h  td=109.799h  (mean=110.512h)  3.8s
+
+[LA] stop 153 (LAYBY)  t=110.082h  soc=152kWh  cd=2.17h  sd=6.22h  sw=6.45h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [153->155]  travel=0.48h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.565h  0.1s  ws=no  72v/131c
+  y=0  brk=0    rst=0   110.569h (0.053h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=0    rst=r1  121.736h (0.053h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.4s)
+  y=0  brk=b45  rst=0   111.486h (0.053h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.5s)
+  y=0  brk=b15  rst=0   110.986h (0.053h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.4s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=110.082h  td=110.082h  (mean=110.569h)  1.9s
+
+[LA] stop 154 (LAYBY)  t=110.303h  soc=130kWh  cd=2.39h  sd=6.44h  sw=6.68h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [154->155]  travel=0.24h  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-LP]  obj=110.545h  0.1s  ws=no  48v/89c
+  y=0  brk=0    rst=0   110.538h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.5s)
+  y=0  brk=0    rst=r1  121.704h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.4s)
+  y=0  brk=b45  rst=0   111.454h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.4s)
+  y=0  brk=b15  rst=0   110.954h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=110.303h  td=110.303h  (mean=110.538h)  1.7s
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 110.544 h  (110:32)
+  Duration : 102.544 h
+  Wall     : 884.0 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RlongCfewTtight_22_LA_20260803_212735_012_scenarios.json  (coverage=92.0%)
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RlongCfewTtight_22_LA_20260803_212735_012.json

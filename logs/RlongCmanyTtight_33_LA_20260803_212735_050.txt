@@ -1,0 +1,25 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-03 23:11:21)
+  Instance : RlongCmanyTtight_33   run_id=RlongCmanyTtight_33_LA_20260803_212735_050
+  Route    : 191 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 92/191 stops done, continuing from stop 92
+
+[LA] stop 92 (LAYBY)  t=69.215h  soc=238kWh  cd=3.83h  sd=8.11h  sw=9.94h  phi=1  r2=2  ext_sh=1/2  sd_lim=9h
+     horizon [92->131]  travel=10.09h +2rest  5 actions × 25 scen  8w  [mean,lp]  pruned=1
+  y=0  brk=0    rst=0   880000010.976h (0.183h)  ok=3/25  ws=0/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=0    rst=r1  880000011.903h (0.291h)  ok=3/25  ws=0/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=0    rst=r2  880000011.396h (0.809h)  ok=3/25  ws=0/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   880000011.096h (0.183h)  ok=3/25  ws=0/25  tauc=0m  taub=48m  (1.3s)
+  y=0  brk=b30  rst=0   880000011.056h (0.607h)  ok=3/25  ws=0/25  tauc=0m  taub=30m  (1.9s)
+     [DIAG] max per-scenario delta spread across actions: 91.65 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=69.215h  td=69.215h  (mean=880000010.976h)  7.7s
+  [!] FORCED REST (r2) at stop 92
+
+[LA] stop 93 (LAYBY)  t=78.614h  soc=215kWh  cd=0.23h  sd=0.23h  sw=0.23h  phi=0  r2=3  ext_sh=1/2  sd_lim=9h
+     horizon [93->138]  travel=11.70h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-] INFEASIBLE — re-solving with tee=True to dump LP
