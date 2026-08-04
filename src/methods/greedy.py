@@ -458,12 +458,27 @@ def run_greedy(full_data: dict,
     if run_id is None:
         ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"{full_data.get('title', 'inst')}_GREEDY_{ts}"
-    # persist=False -> an INTERNAL run (the ORACLE MIP warm start): keep the
-    # log for traceability but write no solution/figure/scenario artefacts, so
-    # it can never be mistaken for a greedy method result by the dedup, the
-    # tables, or the figures.
+    # persist=False -> an INTERNAL run (the ORACLE MIP warm start): write no
+    # solution/figure/scenario artefacts, so it can never be mistaken for a
+    # greedy method result by the dedup, the tables, or the figures.
+    #
+    # The log goes to logs/_internal/ rather than logs/.  Suppressing only the
+    # SOLUTION was not enough: compile_solutions.find_failed_runs synthesises a
+    # run row from any logs/*.txt that has no matching solution file, so each
+    # warm start produced a phantom INCOMPLETE row for (instance, greedy) whose
+    # timestamp — the oracle runs after the method batch — beat the real greedy
+    # run in the latest-run dedup and evicted it from every table and figure.
+    # 1163 real greedy runs were hidden that way, almost all of them on the
+    # __variant and __diesel instances of sections 8.3/8.4, which are exactly
+    # where ORACLE is run alongside greedy.  find_failed_runs scans only the top
+    # level of logs/, so a subdirectory keeps the traceability without the
+    # phantom.
+    _int_dir = _paths.logs("_internal")
+    if not persist:
+        os.makedirs(_int_dir, exist_ok=True)
     paths = dict(
-        log = _paths.logs(f"{run_id}.txt"),
+        log = (_paths.logs(f"{run_id}.txt") if persist
+               else os.path.join(_int_dir, f"{run_id}.txt")),
         fig = _paths.figures(f"{run_id}.png") if persist else None,
         sol = _paths.solutions(f"{run_id}.json") if persist else None,
         scn = (_paths.logs(f"{run_id}_scenarios.json")

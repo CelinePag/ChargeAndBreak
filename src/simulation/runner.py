@@ -66,6 +66,7 @@ from typing import Optional
 from src.methods.oracle import check_simulation_feasibility, \
                    check_directive_compliance, \
                    print_simulation_log, print_oracle_log
+from src.paths import parse_run_id as _parse_run_id
 from src.plot.plots import plot_simulation_results
 from src.simulation.scenarios import ScenarioTracker
 
@@ -251,9 +252,18 @@ def finalize_run(
             return [_ser(v) for v in o]
         return str(o)
 
+    # The method-configuration label, recovered from the run_id rather than
+    # threaded through all five method signatures (every method funnels through
+    # this one function, so parsing here covers them all).  None for a base-case
+    # run; a sweep cell (e.g. "S25H12") otherwise.  compile_solutions keys its
+    # dedup on it, so a variant never displaces the base run it is compared to.
+    _parsed  = _parse_run_id(run_id)
+    _variant = _parsed.get("variant") if _parsed else None
+
     payload = dict(
         run_id       = run_id,
         instance     = full_data.get("title", "unknown"),
+        variant      = _variant,
         sim_arrival_h= arr,
         duration_h   = arr - T0,
         wall_clock_s = wall,

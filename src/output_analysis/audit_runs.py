@@ -50,8 +50,13 @@ ARCHIVE = _paths.archive()
 SOL_DIR = _paths.solutions()
 LOG_DIR = _paths.logs()
 
-_RUN_RE = re.compile(r"^(?P<stem>.+?)_(?P<alg>GREEDY|ROBU|RO|LA|2SP)_"
-                     r"(?P<ts>\d{8}_\d{6})(?:_(?P<idx>\d+))?$")
+# Shared with the runner (src/paths.py) so this audit sees exactly the run ids
+# the runner writes — including the optional VARIANT segment.  With the old
+# private regex a --variant run did not match at all and was skipped silently;
+# once it DOES match, the variant must be part of the "superseded" key below,
+# or a base run and a variant run of the same instance would look like two runs
+# of the same thing and --apply would archive the older one.
+_RUN_RE = _paths.RUN_ID_RE
 
 # parameters that must agree across the latest runs of a method.  ROBU's gamma
 # is eps-derived and legitimately varies with N, so it is not listed.
@@ -114,7 +119,9 @@ def audit():
         m = _RUN_RE.match(base[:-5])
         if not m:
             continue
-        stem, alg, ts = m.group("stem"), m.group("alg"), m.group("ts")
+        stem, alg, ts = m.group("instance"), m.group("algo"), m.group("ts")
+        if alg == "ORACLE":       # writes a cache, not a run file
+            continue
 
         try:
             with open(path, "r", encoding="utf-8") as fh:
@@ -122,6 +129,14 @@ def audit():
         except Exception:
             buckets["corrupt"].append(path)          # A
             continue
+
+        # The STORED field decides, not the file name.  Three pre-existing runs
+        # carry a label-shaped segment in their run_id from a manual session
+        # (…_RO_box_…, …_2SP_S5_…) but were never launched as variants; reading
+        # the name as authoritative would retro-classify them and quietly drop
+        # them out of the base tables.  A run is a variant only when the runner
+        # recorded it as one.
+        var = d.get("variant") or None
 
         title = str(d.get("instance") or "")
         if title not in idx:
@@ -147,11 +162,13 @@ def audit():
         # pre-guard runs.  A timestamp heuristic was tried first and failed:
         # batch run_ids share one timestamp while the warm start writes its own
         # hours later, so proximity says nothing.
-        if alg == "GREEDY" and d.get("prune_quantile") != GUARD:
+        # A variant run is a deliberate sweep cell, not a protocol run: the
+        # guard rule below is about the base-case greedy protocol only.
+        if alg == "GREEDY" and not var and d.get("prune_quantile") != GUARD:
             buckets["unguarded"].append((path, title))
             continue
 
-        key = (title, alg, bool(d.get("supervised")))
+        key = (title, alg, bool(d.get("supervised")), var)
         if key in latest:
             older = latest[key] if latest[key][0] > ts else (ts, path)
             newer = (ts, path) if latest[key][0] <= ts else latest[key]
@@ -161,7 +178,7 @@ def audit():
             latest[key] = (ts, path)
 
     # H — parameter consistency over the surviving latest runs
-    for (title, alg, _sup), (_ts, path) in latest.items():
+    for (title, alg, _sup, var), (_ts, path) in latest.items():
         p = _KEY_PARAM.get(alg)
         if not p:
             continue
@@ -170,9 +187,16 @@ def audit():
                 v = json.load(fh).get(p)
         except Exception:
             continue
-        cls = re.match(r"(R[a-z]+C[a-z]+T[a-z]+)", title)
-        variant = "__" in title or title.endswith("_diesel")
-        params[(alg, "variant" if variant else "base")].add(str(v))
+        # A method-configuration sweep varies exactly the parameter this check
+        # polices, so each label is its own scope: "LA/S25H12" must not be
+        # reported as disagreeing with the base "LA/base" on n_scenarios.
+        if var:
+            scope = f"var:{var}"
+        elif "__" in title or title.endswith("_diesel"):
+            scope = "variant"
+        else:
+            scope = "base"
+        params[(alg, scope)].add(str(v))
 
     # F — oracle caches that do not match their instance
     for path in sorted(glob.glob(os.path.join(SOL_DIR, "oracle_*.json"))):
@@ -197,7 +221,7 @@ def audit():
     # SAFETY: only archive an unguarded greedy run when a guarded one survives
     # for that instance; otherwise the instance would silently lose its greedy
     # result altogether.  Those are reported separately as needing a re-run.
-    guarded = {t for (t, a, _s) in latest if a == "GREEDY"}
+    guarded = {t for (t, a, _s, _v) in latest if a == "GREEDY"}
     keep, rerun = [], []
     for path, title in buckets.pop("unguarded", []):
         (keep if title in guarded else rerun).append(path)
@@ -277,7 +301,7 @@ def main() -> None:
     print("\nH  parameter consistency of surviving runs:")
     for (alg, scope), vals in sorted(params.items()):
         flag = "  <-- INCONSISTENT" if len(vals) > 1 else ""
-        print(f"     {alg:<7} {scope:<8} {_KEY_PARAM[alg]} = "
+        print(f"     {alg:<7} {scope:<12} {_KEY_PARAM[alg]} = "
               f"{sorted(vals)}{flag}")
 
     for key, label in order:
