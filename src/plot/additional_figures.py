@@ -15,6 +15,10 @@ Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
   figures/additional_sens_effects.png|pdf    §8.3 one-at-a-time
   data_output/additional_sens_stats.csv
   tex/tables/additional_sensitivity.tex
+  figures/additional_la_config.png|pdf       §8.3 look-ahead configuration
+  figures/additional_la_frontier.png|pdf     §8.3 cost/quality frontier
+  tex/tables/additional_la.tex               (both read
+  additional_analysis.py's data_output/additional_la_stats.csv)
   figures/additional_gamma_frontier.png|pdf  §8.5 frontier (endpoints only yet)
   tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
   data_output/additional_vss_stats.csv             results_vss/ fills up)
@@ -330,26 +334,25 @@ def section_diesel():
                 "coupling_%", "refuel_h",
                 "ev_oracle_gap_%"], detail)
 
-    # ── Oracle coverage guard ────────────────────────────────────────────────
-    # On long routes BOTH oracles stall on the dual bound (the rest-packing
-    # structure, not the energy dimension), so the class is reported from
-    # Greedy alone.  The instances that DO finish there are the easy tail, so
-    # averaging whatever happens to be cached would silently report a biased
-    # subset as if it were the class.  Oracle-derived quantities are therefore
-    # suppressed for any class whose oracle coverage is incomplete; the
-    # per-instance values stay in the CSV above with their own n.
-    oracle_ok = []
+    # ── Oracle coverage ──────────────────────────────────────────────────────
+    # A class is reported from whatever oracle solves exist, complete or not.
+    # This is a partial average where coverage is incomplete, and on long
+    # routes the instances that finish are the easy tail (both oracles stall on
+    # the dual bound there, on the rest-packing structure rather than the
+    # energy dimension), so an incomplete class reads slightly optimistic.
+    # Rather than withhold it, every consumer below states the coverage: the
+    # figure annotates "n = have/want" and the table caption names the
+    # incomplete classes.  Per-instance values remain in the CSV above.
+    coverage = {}
     for r, d in per_class.items():
         have = sum(1 for v in d["pen_o"] if v is not None)
         want = len(TWS) * len(SEEDS) * sum(1 for rr, _ in DIESEL_COMBOS
                                            if rr == r)
+        coverage[r] = (have, want)
         if have < want:
-            print(f"  Oracle coverage {r}: {have}/{want} — reporting Greedy "
-                  f"only for this class")
-            for key in ("pen_o", "dt_o", "coup", "ev_gap", "dur_d", "dur_e"):
-                d[key] = [None] * len(d[key])
-        else:
-            oracle_ok.append(r)
+            print(f"  Oracle coverage {r}: {have}/{want} — partial average, "
+                  f"reported with its n")
+    oracle_ok = [r for r, (have, _w) in coverage.items() if have]
 
     # ── figure: greedy vs oracle penalty, per route class ────────────────────
     # Two units on one mark: the percentage sits above the bar (it is what the
@@ -383,9 +386,13 @@ def section_diesel():
     for xi, r in enumerate(routes):
         c = _mean(per_class[r]["coup"])
         n = sum(1 for v in per_class[r]["pen_o"] if v is not None)
+        want = coverage[r][1]
         if n:
-            note = f"{_fmt(c, '.0f')}% coupled  ·  n = {n}"
-        else:   # oracle suppressed for this class — label the Greedy sample
+            # "n = 75/80" wherever the class is a partial average, so the bar
+            # is never read as resting on the full sample.
+            shown = f"{n}" if n >= want else f"{n}/{want}"
+            note = f"{_fmt(c, '.0f')}% coupled  ·  n = {shown}"
+        else:   # no oracle at all for this class — label the Greedy sample
             n = sum(1 for v in per_class[r]["pen_g"] if v is not None)
             note = f"greedy only  ·  n = {n}"
         ax.text(xi, -0.115, note, ha="center", va="top", fontsize=6.5,
@@ -414,9 +421,36 @@ def section_diesel():
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
+    # Non-finite entries are dropped rather than propagated: some long-route
+    # oracle caches record no bound at all, and a bare max() over them returned
+    # NaN, which _fmt rendered as "--" — reading as "no certification data"
+    # when in fact 69 of 80 instances had one.  The dropped count is reported
+    # in the caption instead, since a max over the certified subset says
+    # nothing about the instances whose bound is unknown.
     def _maxgap(r):
-        v = [x for x in per_class[r]["ev_gap"] if x is not None]
+        v = [x for x in per_class[r]["ev_gap"]
+             if x is not None and np.isfinite(x)]
         return max(v) if v else None
+
+    def _nogap(r):
+        return sum(1 for x in per_class[r]["ev_gap"]
+                   if x is not None and not np.isfinite(x))
+
+    # Name any class whose oracle columns rest on a partial sample, in the
+    # caption rather than in a footnote, so the qualification travels with the
+    # table wherever it is reproduced.
+    partial = [f"{r} ({h}/{w})" for r in routes
+               for h, w in [coverage[r]] if 0 < h < w]
+    cov_note = (r"  Oracle columns for " + ", ".join(partial) +
+                r" average the solved subset rather than the full sample; on "
+                r"long routes the instances that solve are the easier ones, "
+                r"so those figures read slightly optimistic."
+                ) if partial else ""
+    nb = [f"{r} ({_nogap(r)})" for r in routes if _nogap(r)]
+    if nb:
+        cov_note += (r"  The certification shown is the worst gap among the "
+                     r"instances that recorded one; no bound was recorded "
+                     r"for " + ", ".join(nb) + r".")
 
     lines = [
         r"\begin{table}[ht]\centering",
@@ -426,22 +460,24 @@ def section_diesel():
         r"``EV cert.'' is the worst remaining MIP gap on the EV oracle: "
         r"where it exceeds the solver tolerance the EV schedule is an "
         r"incumbent, not a proven optimum, so the penalty is an upper bound "
-        r"on the true optimal one.}",
+        r"on the true optimal one." + cov_note + r"}",
         r"\label{tab:diesel}",
-        r"\begin{tabular}{lrrrrrr}",
+        r"\begin{tabular}{lrrrrrrr}",
         r"\hline",
         r"Route & Diesel (h) & EV (h) & Greedy (\%) & "
-        r"Oracle (\%) & Coupling (\%) & EV cert. (\%) \\",
+        r"Oracle (\%) & Coupling (\%) & EV cert. (\%) & $n$ \\",
         r"\hline",
     ]
     for r in routes:
         d = per_class[r]
+        have, want = coverage[r]
         lines.append(
             f"{r.capitalize()} & {_fmt(_mean(d['dur_d']))} & "
             f"{_fmt(_mean(d['dur_e']))} & "
             f"{_fmt(_mean(d['pen_g']))} & {_fmt(_mean(d['pen_o']))} & "
             f"{_fmt(_mean(d['coup']), '.0f')} & "
-            f"{_fmt(_maxgap(r), '.1f')} \\\\")
+            f"{_fmt(_maxgap(r), '.1f')} & "
+            f"{have}/{want} \\\\")
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_diesel.tex", "\n".join(lines))
 
@@ -1001,6 +1037,298 @@ def section_sensitivity():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# §8.3b — LOOK-AHEAD CONFIGURATION (horizon x scenario count)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Regulatory breakpoints the horizon axis is read against (settings.T_SPR1 and
+# Tr1).  A horizon shorter than the spread cannot see the end of the current
+# duty; one equal to spread + daily rest sees a whole duty cycle.
+_LA_SPREAD_H = 13.0
+_LA_CYCLE_H  = 24.0
+
+_LA_BASE = (25, 24.0)
+# Ladders drawn on the two panels.  The base cell sits on BOTH, which is what
+# makes the one-at-a-time design readable as two crossing lines.
+_LA_HORIZONS  = [12.0, 24.0, 48.0]
+_LA_SCENARIOS = [10, 25, 50]
+# Time-window class -> line style.  The house grammar puts the window class in
+# the SHADE, but shade is already carrying the ordered route hue here, so on a
+# line chart the window class moves to the dash pattern instead.
+_LA_TW_STYLE = {"none": "-", "tight": "--"}
+
+
+def _log_ticks_plain(axis) -> None:
+    """Label a log axis in plain seconds at 1-2-5 steps.
+
+    The decision-time ranges here span well under a decade, so the default
+    decade locator leaves the axis unlabelled, and the default formatter would
+    write '2.2 x 10^1' if it did label it.
+    """
+    from matplotlib import ticker
+    axis.set_major_locator(ticker.LogLocator(base=10, subs=(1, 2, 5),
+                                             numticks=12))
+    axis.set_major_formatter(ticker.ScalarFormatter())
+    axis.set_minor_locator(ticker.LogLocator(base=10, subs=tuple(
+        x / 10 for x in range(10, 100, 5)), numticks=40))
+    axis.set_minor_formatter(ticker.NullFormatter())
+
+
+def _la_stats() -> dict:
+    """data_output/additional_la_stats.csv -> {(cfg, route, tw): row}.
+
+    Written by `additional_analysis.py la-report`.  Absent or partial file is
+    normal while the sweep is running: missing cells render as "pending".
+    """
+    out: dict = {}
+    path = _paths.data_output("additional_la_stats.csv")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                key = (row.get("config"), row.get("route_class"),
+                       row.get("window_class"))
+                out[key] = row
+    except OSError:
+        pass
+    return out
+
+
+def _la_num(row, col):
+    if not row:
+        return None
+    v = (row.get(col) or "").strip()
+    if not v:
+        return None
+    try:
+        f = float(v)
+    except ValueError:
+        return None
+    return f if np.isfinite(f) else None
+
+
+def _la_cfg(n_scen: int, horizon: float) -> str:
+    return f"S{n_scen}H{horizon:g}"
+
+
+def _la_cell(stats, n_scen, horizon, route, tw, col):
+    """One (config, route, window) value, with the base cell aliased.
+
+    The base cell is stored under the literal tag 'base' because those runs
+    predate the sweep and carry no --variant; addressing it by its (S, H)
+    coordinates keeps the ladders uniform.
+    """
+    cfg = "base" if (n_scen, horizon) == _LA_BASE else _la_cfg(n_scen, horizon)
+    return _la_num(stats.get((cfg, route, tw)), col)
+
+
+def section_la():
+    print("== Sec 8.3 look-ahead configuration ==")
+    stats = _la_stats()
+    routes = ps.ROUTE_ORDER
+    tws    = ["none", "tight"]
+
+    # ── figure 1: quality and cost on both axes ──────────────────────────────
+    # Columns are the two axes of the one-at-a-time design, rows are the two
+    # things a configuration trades off.  Sharing the y-axis WITHIN a row is
+    # the whole point: the reader compares the shape of the horizon response
+    # against the shape of the scenario response, and any difference in slope
+    # is then real rather than an artefact of two independent scales.
+    fig, axes = plt.subplots(2, 2, figsize=(6.6, 4.4),
+                             sharex="col", sharey="row")
+    (ax_hq, ax_sq), (ax_hc, ax_sc) = axes
+
+    for ax_q, ax_c, ladder, is_h in ((ax_hq, ax_hc, _LA_HORIZONS, True),
+                                     (ax_sq, ax_sc, _LA_SCENARIOS, False)):
+        drew = False
+        for route in routes:
+            for tw in tws:
+                xs, gq, gc = [], [], []
+                for v in ladder:
+                    ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v),
+                                                                   _LA_BASE[1])
+                    q = _la_cell(stats, ns, hh, route, tw, "gap_pen_median_pct")
+                    c = _la_cell(stats, ns, hh, route, tw,
+                                 "decision_mean_s_median")
+                    if q is None and c is None:
+                        continue
+                    xs.append(v); gq.append(q); gc.append(c)
+                if not xs:
+                    continue
+                drew = True
+                col = ps.ROUTE_COLOR[route]
+                sty = _LA_TW_STYLE[tw]
+                for ax, ys in ((ax_q, gq), (ax_c, gc)):
+                    pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
+                    if not pts:
+                        continue
+                    ax.plot([p[0] for p in pts], [p[1] for p in pts],
+                            sty, color=col, marker="o", ms=3.4, lw=1.2,
+                            mfc=col, mec=col)
+                    # The base cell is the reference the sweep is quoted
+                    # against, so it is marked rather than left as one dot
+                    # among three.
+                    bx = _LA_BASE[1] if is_h else _LA_BASE[0]
+                    for x, y in pts:
+                        if x == bx:
+                            ax.plot(x, y, "o", ms=7, mfc="none", mec=col,
+                                    lw=0.9)
+        if not drew:
+            for ax in (ax_q, ax_c):
+                ax.text(0.5, 0.5, "pending", ha="center", va="center",
+                        fontsize=7.5, color=MUT, style="italic",
+                        transform=ax.transAxes)
+
+    # Regulatory reference lines: the horizon axis is a threshold story, and
+    # the thresholds are HOS constants, not fitted breakpoints.
+    for ax in (ax_hq, ax_hc):
+        ax.axvline(_LA_SPREAD_H, color=MUT, lw=0.7, ls=":", zorder=0)
+        ax.axvline(_LA_CYCLE_H,  color=MUT, lw=0.7, ls=":", zorder=0)
+    ax_hq.annotate("spread\n13 h", (_LA_SPREAD_H, 1.0), xytext=(2, -2),
+                   textcoords="offset points", xycoords=("data", "axes fraction"),
+                   ha="left", va="top", fontsize=6, color=MUT)
+    ax_hq.annotate("duty cycle\n24 h", (_LA_CYCLE_H, 1.0), xytext=(2, -2),
+                   textcoords="offset points", xycoords=("data", "axes fraction"),
+                   ha="left", va="top", fontsize=6, color=MUT)
+
+    ax_hc.set_xticks(_LA_HORIZONS, [f"{h:g}" for h in _LA_HORIZONS])
+    ax_sc.set_xticks(_LA_SCENARIOS, [str(s) for s in _LA_SCENARIOS])
+    ax_hc.set_xlabel(r"Look-ahead horizon $L$ (h)   [$|\Xi| = 25$]")
+    ax_sc.set_xlabel(r"Scenarios $|\Xi|$   [$L = 24$ h]")
+    ax_hq.set_ylabel("Gap to hindsight\noptimum (%)")
+    ax_hc.set_ylabel("Decision time\nper stop (s)")
+    for ax in axes.ravel():
+        ax.yaxis.grid(True, color=GRID, lw=0.6)
+        ax.set_axisbelow(True)
+    # Log cost axis: the scenario ladder spans 5x and the horizon ladder more,
+    # so equal ratios must read as equal distances — but the tick labels stay
+    # plain seconds, since "2.2 x 10^1 s" helps no one.
+    ax_hc.set_yscale("log")
+    _log_ticks_plain(ax_hc.yaxis)
+
+    handles = [plt.Line2D([], [], color=ps.ROUTE_COLOR[r], lw=1.4, marker="o",
+                          ms=3.4) for r in routes]
+    labels  = [ps.ROUTE_LBL[r] for r in routes]
+    handles += [plt.Line2D([], [], color=MUT, lw=1.2, ls=_LA_TW_STYLE[t])
+                for t in tws]
+    labels  += [f"{ps.TW_LBL[t]} windows" for t in tws]
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
+               ncol=5, bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
+               handletextpad=0.4, columnspacing=1.4)
+    _save(fig, "additional_la_config")
+
+    # ── figure 2: what a per-decision compute budget buys ────────────────────
+    # Same five cells, re-plotted as cost against quality.  The two ladders
+    # become two paths from the same base point, and the question "should the
+    # next second of compute go into horizon or into scenarios?" is read off
+    # directly as which path is steeper.
+    fig2, axs = plt.subplots(1, len(routes), figsize=(6.6, 2.5),
+                             sharey=True)
+    for ax, route in zip(np.atleast_1d(axs), routes):
+        drew = False
+        for tw in tws:
+            for ladder, is_h, col, lbl in (
+                    (_LA_HORIZONS, True, ps.METHOD_COLOR["LA"], "horizon"),
+                    (_LA_SCENARIOS, False, ps.METHOD_COLOR["greedy"],
+                     "scenarios")):
+                pts = []
+                for v in ladder:
+                    ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v),
+                                                                   _LA_BASE[1])
+                    c = _la_cell(stats, ns, hh, route, tw,
+                                 "decision_mean_s_median")
+                    q = _la_cell(stats, ns, hh, route, tw,
+                                 "gap_pen_median_pct")
+                    if c is None or q is None:
+                        continue
+                    pts.append((c, q, v))
+                if len(pts) < 2:
+                    continue
+                drew = True
+                ax.plot([p[0] for p in pts], [p[1] for p in pts],
+                        _LA_TW_STYLE[tw], color=col, marker="o", ms=3.4,
+                        lw=1.2)
+                for c, q, v in pts:
+                    ax.annotate(f"{lbl[0].upper()}{v:g}", (c, q),
+                                xytext=(3, 3), textcoords="offset points",
+                                fontsize=5.5, color=MUT)
+        ax.set_title(ps.ROUTE_LBL[route], loc="left")
+        ax.set_xscale("log")
+        _log_ticks_plain(ax.xaxis)
+        ax.set_xlabel("Decision time per stop (s)")
+        ax.yaxis.grid(True, color=GRID, lw=0.6)
+        ax.set_axisbelow(True)
+        if not drew:
+            ax.text(0.5, 0.5, "pending", ha="center", va="center",
+                    fontsize=7.5, color=MUT, style="italic",
+                    transform=ax.transAxes)
+    np.atleast_1d(axs)[0].set_ylabel("Gap to hindsight optimum (%)")
+    h2 = [plt.Line2D([], [], color=ps.METHOD_COLOR["LA"], lw=1.4, marker="o",
+                     ms=3.4),
+          plt.Line2D([], [], color=ps.METHOD_COLOR["greedy"], lw=1.4,
+                     marker="o", ms=3.4)]
+    l2 = [r"horizon ladder ($|\Xi| = 25$)", r"scenario ladder ($L = 24$ h)"]
+    fig2.tight_layout(rect=(0, 0, 1, 0.87))
+    fig2.legend(h2, l2, frameon=False, fontsize=7, loc="upper center", ncol=2,
+                bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
+                handletextpad=0.4, columnspacing=1.4)
+    _save(fig2, "additional_la_frontier")
+
+    # ── table ────────────────────────────────────────────────────────────────
+    # One row per cell, route classes across the columns.  Both effect measures
+    # appear: the gap is the level, the paired delta is the effect, and on long
+    # routes only the second is trustworthy (the oracle's own residual MIP gap
+    # is structural there and enters every level equally).
+    body = []
+    order = ([("base", _LA_BASE[0], _LA_BASE[1])] +
+             [(_la_cfg(_LA_BASE[0], h), _LA_BASE[0], h)
+              for h in _LA_HORIZONS if h != _LA_BASE[1]] +
+             [(_la_cfg(s, _LA_BASE[1]), s, _LA_BASE[1])
+              for s in _LA_SCENARIOS if s != _LA_BASE[0]])
+    for cfg, ns, hh in order:
+        for tw in tws:
+            cells = []
+            for route in routes:
+                row = stats.get((cfg, route, tw))
+                gap = _la_num(row, "gap_pen_median_pct")
+                dlt = _la_num(row, "delta_vs_base_pct")
+                dec = _la_num(row, "decision_mean_s_median")
+                cells += [_fmt(gap, ".1f"),
+                          "--" if cfg == "base" else _fmt(dlt, "+.1f"),
+                          _fmt(dec, ".0f")]
+            lbl = "base" if cfg == "base" else ""
+            body.append((f"{ns} & {hh:g} & {ps.TW_LBL[tw]}"
+                         + (f"\\rlap{{\\,\\tiny {lbl}}}" if lbl else ""),
+                         cells))
+
+    lines = [
+        r"\begin{table}[htbp]\centering",
+        r"\caption{Look-ahead configuration sensitivity.  Gap is the median "
+        r"gap to the hindsight optimum; $\Delta$ is the median paired change "
+        r"in route duration with respect to the base cell "
+        r"($|\Xi| = 25$, $L = 24$\,h), positive meaning slower; $t_{\text{dec}}$ "
+        r"is the median per-stop decision time.  Cells shown as ``--'' have "
+        r"no runs yet.}",
+        r"\label{tab:la-config}",
+        r"\begin{tabular}{rrl" + "rrr" * len(routes) + "}",
+        r"\toprule",
+        (r"\multicolumn{3}{c}{\textbf{Configuration}}"
+         + "".join(r" & \multicolumn{3}{c}{\textbf{" + ps.ROUTE_LBL[r] + r"}}"
+                   for r in routes) + r" \\"),
+        r"\cmidrule(lr){1-3}"
+        + "".join(r"\cmidrule(lr){%d-%d}" % (4 + 3 * i, 6 + 3 * i)
+                  for i in range(len(routes))),
+        (r"$|\Xi|$ & $L$ (h) & Windows"
+         + r" & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s)" * len(routes)
+         + r" \\"),
+        r"\midrule",
+    ]
+    for head, cells in body:
+        lines.append(head + " & " + " & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
+    _write_tex("additional_la.tex", "\n".join(lines))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # §8.5 — GAMMA FRONTIER (endpoints from base case until the sweep runs)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1143,7 +1471,7 @@ def section_vss():
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
-                 gamma=section_gamma, vss=section_vss)
+                 la=section_la, gamma=section_gamma, vss=section_vss)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Real tables/figures for the "

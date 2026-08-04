@@ -443,24 +443,62 @@ LA_BASE_HORIZON = 24.0
 # One-at-a-time off (S25, H24): two horizons at the base scenario count, two
 # scenario counts at the base horizon.  The base cell itself is deliberately
 # absent — it is the existing unlabelled runs on these very instances.
-LA_DEFAULT_CONFIGS = "S25H12,S25H14,S10H24,S50H24"
+#
+# The horizon ladder is 12 / 24 / 48 rather than a fine grid, because the axis
+# has natural breakpoints rather than a smooth trend: 12 h falls short of the
+# 13 h regular spread T_SPR1, 24 h is exactly one duty cycle (T_SPR1 + Tr1 =
+# 13 + 11), and 48 h is two.  A doubling ladder brackets the cycle length from
+# both sides, which is what the threshold claim in the paper needs.
+LA_DEFAULT_CONFIGS = "S25H12,S25H48,S10H24,S50H24"
 
 # Combos for the LA sweep.  Unlike the instance-level axes this one DOES span
 # long routes: the whole question is how the look-ahead behaves as the route
 # grows, and the base LA runs exist for all three.
 LA_COMBOS = ["RshortCmedium", "RmediumCmedium", "RlongCmedium"]
-LA_TW     = ["none"]
+# Both window regimes: the value of look-ahead should rise with temporal
+# coupling, and time windows are the second coupling channel after HOS, so the
+# none/tight contrast is part of the finding rather than a robustness check.
+LA_TW     = ["none", "tight"]
 
 
 def _parse_la_config(cfg: str) -> tuple[int, float]:
-    """'S25H12' -> (25, 12.0).  The label is also the run's variant tag."""
+    """'S25H12' -> (25, 12.0).  The label is also the run's variant tag.
+
+    'L' (look-ahead) is accepted as a synonym of 'H' (horizon) so that tags
+    written either way refer to the same cell; see _norm_la_tag.
+    """
     import re
-    m = re.fullmatch(r"S(?P<s>\d+)H(?P<h>\d+(?:\.\d+)?)", cfg.strip())
+    m = re.fullmatch(r"S(?P<s>\d+)[HL](?P<h>\d+(?:\.\d+)?)", cfg.strip(),
+                     re.IGNORECASE)
     if not m:
         raise SystemExit(
             f"bad LA config '{cfg}': expected S<scenarios>H<horizon>, "
-            f"e.g. S25H12 or S50H24")
+            f"e.g. S25H12 or S50H24 ('L' accepted for 'H')")
     return int(m.group("s")), float(m.group("h"))
+
+
+def _instance_seed(instance: str | None) -> int | None:
+    """'RshortCmediumTnone_7' -> 7; anything unparseable -> None."""
+    if not instance:
+        return None
+    tail = instance.rsplit("_", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def _norm_la_tag(cfg: str) -> str:
+    """Canonical cell label: 'S25L48' / 's25h48' -> 'S25H48', 'base' -> 'base'.
+
+    Both spellings occur in stored runs — the batch was launched with L-tags
+    while this module's defaults are written with H — and a report that keyed
+    on the raw string would split one cell into two half-empty ones.
+    """
+    if not cfg or cfg == "base":
+        return "base"
+    try:
+        n_scen, horizon = _parse_la_config(cfg)
+    except SystemExit:
+        return cfg
+    return f"S{n_scen}H{horizon:g}"
 
 
 def cmd_la(args) -> None:
@@ -510,7 +548,20 @@ def cmd_la(args) -> None:
 
 def cmd_la_report(args) -> None:
     """Write data_output/additional_la_stats.csv: one row per (config, route
-    class), with the unlabelled base runs as the reference row.
+    class, window class), with the unlabelled base runs as the reference row.
+
+    Two effect measures are reported side by side, and they answer different
+    questions:
+
+      gap_pen_median_pct  — level: distance to the hindsight optimum.  Bounded
+                            below by the oracle's own residual MIP gap, which
+                            on long routes is structural (~9%), so it is a
+                            calibrated level, not a certified one.
+      delta_vs_base_pct   — effect: the paired per-instance change in route
+                            duration against the base cell.  The oracle cancels
+                            out of a difference of two policy runs on the SAME
+                            instance, so this is the number the sweep is really
+                            about and it is unaffected by the oracle's gap.
 
     Cost is reported as decision_mean_s (per-stop decision time) as well as
     wall clock, because wall clock is only comparable across configs when every
@@ -526,9 +577,17 @@ def cmd_la_report(args) -> None:
     cs._annotate_outcome(rows)
     rows, _ = cs._dedup_latest(rows)
 
-    wanted_cfg = {c.strip() for c in args.configs.split(",") if c.strip()}
+    wanted_cfg = {_norm_la_tag(c.strip())
+                  for c in args.configs.split(",") if c.strip()}
     wanted_cfg.add("base")
     combos = set(args.combos.split(","))
+    tws    = set(args.tw.split(","))
+    # The base cell is the pre-existing unlabelled runs, and those cover all 50
+    # seeds while the sweep cells cover only --seeds.  Without this filter the
+    # base gap would be a 50-instance average compared against 10-instance
+    # averages, so the LEVEL column would move between cells for a reason that
+    # has nothing to do with the configuration.
+    seeds = set(_expand_seeds(args.seeds))
 
     groups: dict = {}
     for r in rows:
@@ -539,12 +598,15 @@ def cmd_la_report(args) -> None:
             continue
         if f"R{route}C{cust}" not in combos:
             continue
-        if r.get("window_class") not in set(args.tw.split(",")):
+        tw = r.get("window_class")
+        if tw not in tws:
             continue
-        cfg = r.get("variant") or "base"
+        if _instance_seed(r.get("instance")) not in seeds:
+            continue
+        cfg = _norm_la_tag(r.get("variant") or "base")
         if cfg not in wanted_cfg:
             continue
-        groups.setdefault((cfg, route), []).append(r)
+        groups.setdefault((cfg, route, tw), []).append(r)
 
     if not groups:
         print("  no LA runs matched — nothing written")
@@ -554,15 +616,24 @@ def cmd_la_report(args) -> None:
         vals = [v for v in vals if v is not None]
         return (stat.median(vals) if vals else None), len(vals)
 
+    # Paired reference: base duration per instance, keyed the same way the
+    # variant rows are, so a missing base run drops the pair instead of
+    # silently comparing against a different instance.
+    base_dur = {(r.get("instance"), r.get("window_class")): r.get("duration_h")
+                for (c, _rt, _tw), recs in groups.items() if c == "base"
+                for r in recs if not cs._is_truly_infeasible(r)}
+
     _paths.ensure_dirs()
     out = _paths.data_output("additional_la_stats.csv")
     with open(out, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["config", "n_scenarios", "horizon_h", "route_class",
-                    "n_runs", "n_infeasible", "gap_pen_median_pct",
-                    "gap_nopen_median_pct", "duration_median_h",
-                    "decision_mean_s_median", "wall_clock_s_median"])
-        for (cfg, route), recs in sorted(groups.items()):
+                    "window_class", "n_runs", "n_infeasible",
+                    "gap_pen_median_pct", "gap_nopen_median_pct",
+                    "duration_median_h", "delta_vs_base_pct", "n_paired",
+                    "decision_mean_s_median", "decision_max_s_median",
+                    "wall_clock_s_median"])
+        for (cfg, route, tw), recs in sorted(groups.items()):
             gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
                              if cs._gap_usable(r) and r.get("gap_pen") is not None])
             gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
@@ -570,20 +641,37 @@ def cmd_la_report(args) -> None:
             dur, _   = _agg([r.get("duration_h") for r in recs])
             dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
                              for r in recs])
+            decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
+                             for r in recs])
             wall, _  = _agg([r.get("wall_clock_s") for r in recs])
             n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
+
+            deltas = []
+            for r in recs:
+                if cs._is_truly_infeasible(r):
+                    continue
+                b = base_dur.get((r.get("instance"), r.get("window_class")))
+                d = r.get("duration_h")
+                if b and d:
+                    deltas.append(100.0 * (d / b - 1.0))
+            dl, n_pair = _agg(deltas)
+
             ns = recs[0].get("n_scenarios")
             hh = recs[0].get("horizon_hours")
-            w.writerow([cfg, ns, hh, route, len(recs), n_inf,
+            w.writerow([cfg, ns, hh, route, tw, len(recs), n_inf,
                         None if gp is None else round(gp, 3),
                         None if gn is None else round(gn, 3),
                         None if dur is None else round(dur, 3),
+                        None if dl is None else round(dl, 3), n_pair,
                         None if dec is None else round(dec, 4),
+                        None if decx is None else round(decx, 4),
                         None if wall is None else round(wall, 1)])
-            print(f"  {cfg:<8} {route:<7} n={len(recs):<3} "
+            print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
                   f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
                   f"(from {n_gp} run(s) with an oracle bound)  "
-                  f"wall={'—' if wall is None else f'{wall:.0f}s'}")
+                  f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
+                  f"(n={n_pair})  "
+                  f"dec={'—' if dec is None else f'{dec:.1f}s'}")
     print(f"  CSV saved   : {out}")
 
 
