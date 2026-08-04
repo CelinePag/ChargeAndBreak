@@ -42,6 +42,7 @@ are ``Path`` objects for new code.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 # ── anchor ───────────────────────────────────────────────────────────────────
@@ -98,3 +99,50 @@ tex_sections   = _joiner(TEX_SECTIONS)
 data_output    = _joiner(DATA_OUTPUT)
 archive        = _joiner(ARCHIVE)
 results_vss    = _joiner(RESULTS_VSS)
+
+
+# ── run-id naming convention ─────────────────────────────────────────────────
+# A run_id is the stem of solutions/<run_id>.json and logs/<run_id>.txt:
+#
+#     <instance>_<ALGO>[_<VARIANT>]_<YYYYmmdd>_<HHMMSS>[_<idx>]
+#
+# VARIANT is the METHOD-CONFIGURATION label (e.g. "S25H12" = 25 scenarios,
+# 12 h look-ahead).  It exists because the reporting dedup is keyed on
+# (instance, method, supervised, variant): without it, a sweep over a method's
+# own parameters would have to be smuggled in by duplicating the INSTANCE under
+# a "__tag" stem — which is what the earlier guard/gamma/diesel sweeps did.
+# That is the wrong home for the label (the instance is unchanged) and it also
+# orphans the run from the instance's already-solved oracle cache.
+#
+# Parsing is shared by the runner (which stamps `variant` into every solution
+# JSON) and by compile_solutions (which ranks runs by recency), so the two can
+# never drift apart.  The variant must START WITH A LETTER: that is what keeps
+# it unambiguous against the 8-digit date that follows the algorithm when no
+# variant is present.
+RUN_ID_RE = re.compile(
+    r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP|ORACLE)"
+    r"(?:_(?P<variant>[A-Za-z][A-Za-z0-9_.-]*))?"
+    r"_(?P<ts>\d{8}_\d{6})(?:_(?P<idx>\d+))?$"
+)
+
+
+def parse_run_id(run_id: str) -> dict | None:
+    """Split a run_id into instance / algo / variant / ts / idx, or None."""
+    m = RUN_ID_RE.match(run_id or "")
+    if not m:
+        return None
+    d = m.groupdict()
+    d["idx"] = int(d["idx"]) if d["idx"] else 0
+    return d
+
+
+def make_run_id(instance: str, algo: str, ts: str,
+                idx: int | None = None, variant: str | None = None) -> str:
+    """Build a run_id that ``parse_run_id`` round-trips."""
+    parts = [instance, algo.upper()]
+    if variant:
+        parts.append(str(variant))
+    parts.append(ts)
+    if idx is not None:
+        parts.append(f"{int(idx):03d}")
+    return "_".join(parts)

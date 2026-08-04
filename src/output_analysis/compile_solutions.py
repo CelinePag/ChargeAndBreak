@@ -94,6 +94,7 @@ _COLS = [
     ("customers_class",  ("customers_class",),                            "@",     13),
     ("window_class",     ("window_class",),                               "@",     12),
     ("method",           ("method",),                                     "@",     9),
+    ("variant",          ("variant",),                                    "@",     10),
     ("criterion",        ("criterion",),                                  "@",     9),
     ("n_scenarios",      ("n_scenarios",),                                "0",     11),
     ("horizon_h",        ("horizon_hours",),                              "0.0",   10),
@@ -141,14 +142,20 @@ _COLS = [
 # single run failed to match and fell back to a path-string ranking in
 # _dedup_latest, which made stale runs beat newer ones (a path starting with
 # "s"/"R" sorts above a "2026..." timestamp).
-_RUN_ID_RE = re.compile(
-    r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP)_"
-    r"(?P<ts>\d{8}_\d{6})(?:_(?P<idx>\d+))?$"
-)
+# Shared with the runner (src/paths.py), so the id the runner writes and the id
+# reporting parses can never drift.  It also carries the optional VARIANT group
+# — the method-configuration sweep label.
+_RUN_ID_RE = _paths.RUN_ID_RE
 _ALGO_TO_METHOD = {"GREEDY": "greedy", "LA": "LA", "RO": "RO",
                    "ROBU": "ROBU", "2SP": "2SP"}
 
 _STATUS_LINE_RE = re.compile(r"Status\s*:\s*(\w+)\s*\(([\d.]+)s\)")
+
+# Written by runner.finalize_run when paths["sol"] is None, i.e. the run is an
+# internal one (the ORACLE MIP's greedy warm start) whose result must never be
+# recorded as a method result.  Kept as a constant so the producer and this
+# consumer cannot drift.
+_INTERNAL_RUN_MARKER = "not persisted (internal warm-start run)"
 
 # instance id -> instance family, e.g. "RshortCfewTtight_1" -> "RshortCfewTtight"
 _INSTANCE_SEED_RE = re.compile(r"_\d+$")
@@ -290,6 +297,7 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
         }
 
     rows = []
+    n_internal = 0
     for f in sorted(os.listdir(logs_dir)):
         if not f.endswith(".txt"):
             continue
@@ -305,9 +313,11 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
 
         m = _RUN_ID_RE.match(run_id)
         if m:
-            instance, method = m.group("instance"), _ALGO_TO_METHOD[m.group("algo")]
+            instance = m.group("instance")
+            method   = _ALGO_TO_METHOD.get(m.group("algo"), "UNKNOWN")
+            variant  = m.group("variant")
         else:
-            instance, method = run_id, "UNKNOWN"
+            instance, method, variant = run_id, "UNKNOWN", None
 
         log_path = os.path.join(logs_dir, f)
         try:
@@ -315,6 +325,17 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
         except Exception as e:
             text = ""
             print(f"  SKIP {log_path}: {e}", file=sys.stderr)
+
+        # An INTERNAL run: the greedy warm start of the ORACLE MIP, which
+        # completes normally but deliberately persists no solution.  Its log is
+        # not evidence of a failed run — treating it as one produced a phantom
+        # INCOMPLETE row that outranked (the oracle runs last) and evicted the
+        # REAL greedy run of that instance from every table and figure.
+        # greedy.py now writes these under logs/_internal/, which this top-level
+        # scan never sees; the marker check keeps the ones already on disk out.
+        if _INTERNAL_RUN_MARKER in text:
+            n_internal += 1
+            continue
 
         sm = _STATUS_LINE_RE.search(text)
         solver_status = sm.group(1) if sm else None
@@ -334,7 +355,7 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
             note += " (crash, timeout, or manual interruption; reason not captured in the log)"
 
         rows.append(dict(
-            run_id=run_id, instance=instance, method=method,
+            run_id=run_id, instance=instance, method=method, variant=variant,
             status=status, note=note,
             wall_clock_s=elapsed,
             oracle={}, metrics={},
@@ -342,6 +363,9 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
 
     print(f"  Found {len(rows)} unfinished run(s) referenced in '{logs_dir}/' "
           f"with no matching solution file")
+    if n_internal:
+        print(f"  Ignored {n_internal} internal warm-start log(s) "
+              f"(ORACLE's greedy seed — completed, persists no solution)")
     return rows
 
 
@@ -350,8 +374,22 @@ def _dedup_latest(rows: list[dict]) -> tuple[list[dict], int]:
     When the same instance was solved several times with the same method
     (e.g. a rerun batch), keep only the LATEST run — ranked by the
     timestamp+index in the run_id (file name as fallback) — and drop the
-    rest.  Keyed on (instance, method, supervised) so supervised and
-    unsupervised runs of the same instance/method are kept separately.
+    rest.  Keyed on (instance, method, supervised, variant) so supervised and
+    unsupervised runs, and each cell of a method-configuration sweep, are kept
+    separately.
+
+    The `variant` leg is what lets a sweep run on the BASE instances: a run
+    labelled e.g. "S25H12" no longer competes with — and cannot displace — the
+    unlabelled base run of the same instance and method.  Every pre-existing
+    run has no `variant` key, so it reads as None and this key is identical to
+    the old (instance, method, supervised) one for all of them.
+
+    NOTE: the key is deliberately NOT the stored parameter set.  1802 keys in
+    the current solutions/ hold runs whose parameters differ (mostly greedy at
+    prune_quantile 0.95 vs None from the guard sweep); keying on parameters
+    would resurrect all of them as extra samples in the paper tables.  A run is
+    a variant only when it was explicitly launched as one.
+
     Returns (kept_rows, n_dropped).
     """
     def _rank(r):
@@ -366,7 +404,8 @@ def _dedup_latest(rows: list[dict]) -> tuple[list[dict], int]:
     best: dict = {}
     n_dup = 0
     for r in rows:
-        key = (r.get("instance"), r.get("method"), bool(r.get("supervised")))
+        key = (r.get("instance"), r.get("method"), bool(r.get("supervised")),
+               r.get("variant") or None)
         if key in best:
             n_dup += 1
             if _rank(r) > _rank(best[key]):
@@ -1116,22 +1155,35 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
               f"(same instance + method, older timestamp)")
 
     rows.sort(key=lambda r: (str(r.get("instance")), str(r.get("method")),
-                             str(r.get("run_id"))))
+                             str(r.get("variant") or ""), str(r.get("run_id"))))
+
+    # Base-case rows only for every AGGREGATE output.  A method-configuration
+    # sweep (--variant) runs on the base instances, so unlike the "__tag"
+    # instance variants it is NOT filtered out by the instance-name regex: a
+    # variant row carries a perfectly valid route/customers/window class and
+    # would silently pool into the published means.  The full row set still
+    # goes to the Results sheet, which is the complete record of what was run.
+    base_rows = [r for r in rows if not r.get("variant")]
+    n_var     = len(rows) - len(base_rows)
+    if n_var:
+        _seen = sorted({str(r.get("variant")) for r in rows if r.get("variant")})
+        print(f"  Excluded {n_var} method-variant run(s) from the summary and "
+              f"LaTeX tables (kept in 'Results'): {', '.join(_seen)}")
 
     wb = openpyxl.Workbook()
     build_results_sheet(wb.active, rows)
-    build_summary_sheet(wb.create_sheet(), rows)
+    build_summary_sheet(wb.create_sheet(), base_rows)
 
     # LaTeX tables — penalised (objective) gap and duration-only gap
-    gap_pen_tab = build_gap_latex(rows, metric="gap_pen")
+    gap_pen_tab = build_gap_latex(base_rows, metric="gap_pen")
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap", gap_pen_tab)
-    gap_np_tab  = build_gap_latex(rows, metric="gap_nopen")
+    gap_np_tab  = build_gap_latex(base_rows, metric="gap_nopen")
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_nopen", gap_np_tab)
 
-    feas = build_feasibility_latex(rows)
+    feas = build_feasibility_latex(base_rows)
     write_latex_sheet(wb.create_sheet(), "LaTeX_Feasibility", feas)
 
-    runtime = build_runtime_latex(rows)
+    runtime = build_runtime_latex(base_rows)
     write_latex_sheet(wb.create_sheet(), "LaTeX_Runtime", runtime)
 
     wb.save(output_path)

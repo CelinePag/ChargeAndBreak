@@ -8,16 +8,22 @@ paper artefacts with the data available NOW; cells or panels whose runs have
 not finished yet are shown explicitly as "pending", mirroring the
 paper_figures.py convention of drawing the full grid with empty slots.
 
-Outputs
-  figures/additional_diesel_gap.png|pdf     §8.4 figure
-  figures/additional_diesel_stats.csv       §8.4 per-class detail
-  tables/additional_diesel.tex              §8.4 table
-  figures/additional_sens_effects.png|pdf   §8.3 one-at-a-time (preliminary)
-  figures/additional_sens_stats.csv
-  tables/additional_sensitivity.tex
-  figures/additional_gamma_frontier.png|pdf §8.5 frontier (endpoints only yet)
-  tables/additional_vss.tex                 §8.5 VSS/EVPI (skeleton until
-  figures/additional_vss_stats.csv                results_vss/ fills up)
+Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
+  figures/additional_diesel_gap.png|pdf      §8.4 figure
+  data_output/additional_diesel_stats.csv    §8.4 per-class detail
+  tex/tables/additional_diesel.tex           §8.4 table
+  figures/additional_sens_effects.png|pdf    §8.3 one-at-a-time
+  data_output/additional_sens_stats.csv
+  tex/tables/additional_sensitivity.tex
+  figures/additional_gamma_frontier.png|pdf  §8.5 frontier (endpoints only yet)
+  tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
+  data_output/additional_vss_stats.csv             results_vss/ fills up)
+
+§8.3 reports three methods per axis: greedy and LA (online policies) and the
+oracle (hindsight optimum).  Each is PAIRED per instance — base and variant
+must both exist and both be feasible — so a method whose variant runs have not
+landed yet shows "--" in the table and no bar in the figure, rather than a
+misleading zero.
 
 Usage
   python -m src.plot.additional_figures                 # all sections
@@ -84,12 +90,16 @@ def _load(path: str) -> dict | None:
         return None
 
 
-def _greedy(stem: str, tag: str | None = None) -> dict | None:
-    """Latest greedy solution for a (possibly tagged) instance.  Accepts both
-    the '__tag' stem (orchestrator batch) and the runner-normalised '_tag'."""
-    pats = ([_paths.solutions(f"{stem}_GREEDY_*.json")] if tag is None else
-            [_paths.solutions(f"{stem}__{tag}_GREEDY_*.json"),
-             _paths.solutions(f"{stem}_{tag}_GREEDY_*.json")])
+def _policy(stem: str, alg: str, tag: str | None = None) -> dict | None:
+    """Latest simulated-policy solution for a (possibly tagged) instance.
+
+    ``alg`` is the run-id algorithm token (GREEDY, LA, 2SP, RO, ROBU).  Accepts
+    both the '__tag' stem (orchestrator batch) and the runner-normalised
+    '_tag'.
+    """
+    pats = ([_paths.solutions(f"{stem}_{alg}_*.json")] if tag is None else
+            [_paths.solutions(f"{stem}__{tag}_{alg}_*.json"),
+             _paths.solutions(f"{stem}_{tag}_{alg}_*.json")])
     for p in pats:
         f = _latest(p)
         if f:
@@ -98,6 +108,14 @@ def _greedy(stem: str, tag: str | None = None) -> dict | None:
                 infeas = bool((d.get("metrics") or {}).get("run_infeasible"))
                 return dict(duration=float(d["duration_h"]), infeasible=infeas)
     return None
+
+
+def _greedy(stem: str, tag: str | None = None) -> dict | None:
+    return _policy(stem, "GREEDY", tag)
+
+
+def _la(stem: str, tag: str | None = None) -> dict | None:
+    return _policy(stem, "LA", tag)
 
 
 def _oracle(stem: str, tag: str | None = None) -> dict | None:
@@ -268,14 +286,20 @@ def section_diesel():
                 dur_d = (di_o["duration"] + fuel) if di_o else None
 
                 pen_o = pen_g = coup = None
+                # Absolute counterpart of the percentage: the same difference
+                # in hours, so the figure states the penalty in the unit the
+                # operator actually plans in.
+                dt_o = dt_g = None
                 if ev_o and dur_d and dur_d > 0:
                     pen_o = 100 * (ev_o["duration"] / dur_d - 1)
+                    dt_o  = ev_o["duration"] - dur_d
                     # tauc/g are None for a log-recovered cache (no schedule)
                     if ev_o["tauc"] is not None and ev_o["tauc"] > 1e-6:
                         coup = 100 * ev_o["g"] / ev_o["tauc"]
                 if (ev_g and di_g and not ev_g["infeasible"]
                         and not di_g["infeasible"] and di_g["duration"] > 0):
                     pen_g = 100 * (ev_g["duration"] / (di_g["duration"] + fuel) - 1)
+                    dt_g  = ev_g["duration"] - (di_g["duration"] + fuel)
 
                 # The EV oracle is only an incumbent where the solve hit its
                 # wall budget (long routes stall on the DUAL bound), so the
@@ -289,10 +313,12 @@ def section_diesel():
                                _fmt(coup, ".1f", ""),
                                _fmt(fuel, ".3f", ""), _fmt(ev_gap, ".2f", "")])
                 d = per_class.setdefault(route, dict(pen_o=[], pen_g=[],
+                                                     dt_o=[], dt_g=[],
                                                      coup=[],
                                                      dur_d=[], dur_e=[],
                                                      ev_gap=[]))
                 d["pen_o"].append(pen_o); d["pen_g"].append(pen_g)
+                d["dt_o"].append(dt_o);   d["dt_g"].append(dt_g)
                 d["coup"].append(coup)
                 d["dur_d"].append(dur_d)
                 d["dur_e"].append(ev_o and ev_o["duration"])
@@ -320,50 +346,71 @@ def section_diesel():
         if have < want:
             print(f"  Oracle coverage {r}: {have}/{want} — reporting Greedy "
                   f"only for this class")
-            for key in ("pen_o", "coup", "ev_gap", "dur_d", "dur_e"):
+            for key in ("pen_o", "dt_o", "coup", "ev_gap", "dur_d", "dur_e"):
                 d[key] = [None] * len(d[key])
         else:
             oracle_ok.append(r)
 
     # ── figure: greedy vs oracle penalty, per route class ────────────────────
+    # Two units on one mark: the percentage sits above the bar (it is what the
+    # axis measures) and its absolute-hours counterpart sits inside the bar in
+    # reversed-out type, so the two never read as a single stacked number.
     routes = [r for r in DIESEL_ROUTES if r in per_class]
-    fig, ax = plt.subplots(figsize=(4.6, 2.8))
-    w, x = 0.34, np.arange(len(routes))
-    series = [("greedy EV vs greedy diesel", "pen_g", BLUE),
-              ("oracle EV vs oracle diesel", "pen_o", INK)]
-    for k, (lbl, key, col) in enumerate(series):
+    fig, ax = plt.subplots(figsize=(5.0, 2.9))
+    w, x = 0.30, np.arange(len(routes), dtype=float)
+    # Colour follows the entity (paper_style): the same blue as Greedy and the
+    # same neutral grey as the oracle everywhere else in the paper.
+    series = [("Greedy policy", "pen_g", "dt_g", BLUE),
+              ("Hindsight optimum", "pen_o", "dt_o", ps.METHOD_COLOR["oracle"])]
+    for k, (lbl, key, dkey, col) in enumerate(series):
         vals = [_mean(per_class[r][key]) for r in routes]
-        pos  = x + (k - 0.5) * w
+        hrs  = [_mean(per_class[r][dkey]) for r in routes]
+        pos  = x + (k - 0.5) * (w + 0.035)      # hairline gap between the pair
         # nan, not 0: a suppressed class must leave a gap, not draw a bar at
         # zero that reads as "no penalty".
         ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
-               edgecolor="white", label=lbl)
-        for p, v in zip(pos, vals):
-            if v is not None:
-                ax.text(p, v + 0.25, f"{v:.1f}", ha="center", fontsize=7,
-                        color=INK)
+               edgecolor="white", linewidth=0.5, zorder=3, label=lbl)
+        for p, v, h in zip(pos, vals, hrs):
+            if v is None:
+                continue
+            ax.annotate(f"{v:.1f}%", (p, v), textcoords="offset points",
+                        xytext=(0, 3), ha="center", va="bottom",
+                        fontsize=7.5, color=INK)
+            if h is not None:
+                ax.annotate(f"{h:+.1f} h", (p, v), textcoords="offset points",
+                            xytext=(0, -4), ha="center", va="top",
+                            fontsize=6.5, color="white")
     for xi, r in enumerate(routes):
         c = _mean(per_class[r]["coup"])
         n = sum(1 for v in per_class[r]["pen_o"] if v is not None)
         if n:
-            note = f"{_fmt(c, '.0f')}% coupled  (n={n})"
+            note = f"{_fmt(c, '.0f')}% coupled  ·  n = {n}"
         else:   # oracle suppressed for this class — label the Greedy sample
             n = sum(1 for v in per_class[r]["pen_g"] if v is not None)
-            note = f"greedy only  (n={n})"
-        ax.text(xi, -0.14, note, ha="center", va="top", fontsize=6.5,
+            note = f"greedy only  ·  n = {n}"
+        ax.text(xi, -0.115, note, ha="center", va="top", fontsize=6.5,
                 color=MUT, transform=ax.get_xaxis_transform())
-    ax.set_xticks(x, [f"{r.capitalize()} route" for r in routes])
-    ax.set_ylabel("Route duration vs diesel (%)")
+    ax.set_xticks(x, [ps.ROUTE_LBL[r] for r in routes])
+    ax.set_xlim(-0.6, len(routes) - 0.4)
+    ax.set_ylabel("Route duration vs. diesel (%)")
     ax.yaxis.grid(True, color=GRID, lw=0.6)
     ax.set_axisbelow(True)
-    # Headroom so the legend clears the tallest bar's value label.
+    ax.tick_params(axis="x", length=0, colors=INK)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(ps.BASELINE)
+        ax.spines[side].set_linewidth(0.7)
+    # Headroom so the legend row clears the tallest bar's value label.
     _top = max((v for s in series for v in
                 (_mean(per_class[r][s[1]]) for r in routes)
                 if v is not None), default=1.0)
-    ax.set_ylim(0, _top * 1.32)
-    ax.legend(frameon=False, fontsize=7, loc="upper left")
+    ax.set_ylim(0, _top * 1.38)
+    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper left",
+              handlelength=1.0, handleheight=1.0, handletextpad=0.5,
+              columnspacing=1.4, borderpad=0.0, borderaxespad=0.2)
     ax.set_title("Electrification penalty: myopic vs optimized schedules",
-                 loc="left")
+                 loc="left", color=INK, pad=6)
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
@@ -752,13 +799,24 @@ def _diesel_decomposition(routes) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 # (axis label, variant tag, planned?) — extend as new sweeps land
+#
+# "No split break" ("nosplit") is deliberately NOT listed.  The Art. 7 split can
+# save at most Tb45 - Tb30 = 0.25 h per break entitlement, and only when the stop
+# that COMPLETES the break has a charging session shorter than Tb45 (the b15 is
+# banked, it does not reset cd, so both regimes complete the break at the same
+# stop).  Over 1-2 entitlements on a 31-37 h route that caps the axis near 0.5 %,
+# well inside the oracle's own MIPGap of 0.005 — at that tolerance more than a
+# third of the pairs come out NEGATIVE, which is impossible for a restriction.
+# Re-solved at MIPGap=0 the effect is real but tiny (+0.00 / +0.02 / +0.21 /
+# +0.23 % on RshortCfewTlarge_17/18/11 and RshortCmanyTtight_1).  Reinstating the
+# row therefore requires the whole variant set re-solved to proven optimality,
+# not just a rerun of this script.
 _SENS_ROWS = [
     ("CS spacing 30 km",        "cs30",   True),
     ("CS spacing 90 km",        "cs90",   True),
     ("Charger power 150 kW",    "kw150",  True),
     ("Charger power 350 kW",    "kw350",  True),
     ("Charger power 1000 kW",   "kw1000", True),
-    ("No split break",          "nosplit", True),
 ]
 
 
@@ -773,9 +831,12 @@ def section_sensitivity():
     print("== Sec 8.3 sensitivity ==")
     rows_out, fig_rows = [], []
     for label, tag, planned in _SENS_ROWS:
-        # per-route-class deltas (the figure) and pooled (the table)
+        # per-route-class deltas (the figure) and pooled (the table).  One dict
+        # per method; the LA leg stays empty until the LA variant runs land, and
+        # every consumer below treats an empty list as "pending" rather than 0.
         dg = {r: [] for r in _ROUTE_SPLIT}
         do = {r: [] for r in _ROUTE_SPLIT}
+        dl = {r: [] for r in _ROUTE_SPLIT}
         for route, cust in COMBOS:
             if route not in dg:
                 continue
@@ -787,6 +848,14 @@ def section_sensitivity():
                             and not vg["infeasible"] and bg["duration"] > 0):
                         dg[route].append(
                             100 * (vg["duration"] / bg["duration"] - 1))
+                    # LA is paired exactly like greedy: both legs must exist and
+                    # both must be feasible, so the delta is never contaminated
+                    # by a run that stranded on one side only.
+                    bl, vl = _la(st), _la(st, tag)
+                    if (bl and vl and not bl["infeasible"]
+                            and not vl["infeasible"] and bl["duration"] > 0):
+                        dl[route].append(
+                            100 * (vl["duration"] / bl["duration"] - 1))
                     bo, vo = _oracle(st), _oracle(st, tag)
                     if bo and vo and bo["duration"] > 0:
                         do[route].append(
@@ -794,23 +863,29 @@ def section_sensitivity():
 
         all_g = [v for r in _ROUTE_SPLIT for v in dg[r]]
         all_o = [v for r in _ROUTE_SPLIT for v in do[r]]
-        n_g, n_o = len(all_g), len(all_o)
+        all_l = [v for r in _ROUTE_SPLIT for v in dl[r]]
+        n_g, n_o, n_l = len(all_g), len(all_o), len(all_l)
         status = ("pending (needs code)" if not planned and n_g == 0 else
                   "pending" if n_g == 0 else
-                  f"greedy n={n_g}" + (f", oracle n={n_o}" if n_o else
-                                       ", oracle pending"))
+                  f"greedy n={n_g}"
+                  + (f", LA n={n_l}" if n_l else ", LA pending")
+                  + (f", oracle n={n_o}" if n_o else ", oracle pending"))
         rows_out.append([label, tag,
                          _fmt(_mean(all_g), ".2f", ""), n_g,
+                         _fmt(_mean(all_l), ".2f", ""), n_l,
                          _fmt(_mean(all_o), ".2f", ""), n_o,
                          _fmt(_mean(do["short"]), ".2f", ""), len(do["short"]),
                          _fmt(_mean(do["medium"]), ".2f", ""),
                          len(do["medium"]), status])
         fig_rows.append((label, planned,
-                         {r: (_mean(do[r]), len(do[r]), _mean(dg[r]),
-                              len(dg[r])) for r in _ROUTE_SPLIT}))
+                         {r: {"oracle": (_mean(do[r]), len(do[r])),
+                              "LA":     (_mean(dl[r]), len(dl[r])),
+                              "greedy": (_mean(dg[r]), len(dg[r]))}
+                          for r in _ROUTE_SPLIT}))
 
     _write_csv("additional_sens_stats.csv",
                ["axis", "tag", "greedy_delta_%", "n_greedy",
+                "la_delta_%", "n_la",
                 "oracle_delta_%", "n_oracle",
                 "oracle_delta_short_%", "n_short",
                 "oracle_delta_medium_%", "n_medium", "status"], rows_out)
@@ -825,19 +900,29 @@ def section_sensitivity():
     # categorical hue is the same device the base-case figure uses for the
     # time-window class, so the two figures read the same way.
     y = np.arange(len(fig_rows))[::-1]
-    series = [(m, r, off_i) for m, off_i in (("oracle", 0), ("greedy", 2))
-              for r in _ROUTE_SPLIT]
-    h = 0.19
-    vals = [v for _l, _p, per in fig_rows for st in per.values()
-            for v in (st[0], st[2]) if v is not None]
+    # Method order = benchmark first, then the policies in increasing
+    # sophistication (oracle -> LA -> greedy), matching the base-case figures.
+    _SENS_METHODS = ["oracle", "LA", "greedy"]
+    series = [(m, r) for m in _SENS_METHODS for r in _ROUTE_SPLIT]
+    # Bar height is derived from the series count so adding a method re-packs
+    # the group instead of overflowing into the neighbouring row (6 bars at the
+    # old hard-coded 0.19 would have spanned 1.14 of a 1.0 row).
+    _GROUP = 0.78
+    h = _GROUP / len(series)
+    vals = [st[m][0] for _l, _p, per in fig_rows for st in per.values()
+            for m in _SENS_METHODS if st[m][0] is not None]
 
-    fig, ax = plt.subplots(figsize=(6.6, 0.72 * len(fig_rows) + 1.5))
+    # +1.6 of non-bar height: no in-figure title, but the legend band above the
+    # axes needs room for its caption line plus the swatch row.
+    # Taller rows than the two-method version: six bars per axis need the room,
+    # and the legend now wraps onto two lines.
+    fig, ax = plt.subplots(figsize=(6.6, 0.95 * len(fig_rows) + 1.9))
     drawn_m, drawn_r = set(), set()
 
     for yi, (label, planned, per) in zip(y, fig_rows):
         any_here = False
-        for k, (meth, route, off_i) in enumerate(series):
-            mean_v = per[route][off_i]
+        for k, (meth, route) in enumerate(series):
+            mean_v = per[route][meth][0]
             if mean_v is None:
                 continue
             any_here = True
@@ -845,12 +930,12 @@ def section_sensitivity():
             drawn_r.add(route)
             col = ps.METHOD_COLOR[meth]
             face = ps.tint(col, 0.45) if route == "short" else col
-            off = (1.5 - k) * h
+            off = ((len(series) - 1) / 2 - k) * h
             ax.barh(yi + off, mean_v, height=h, color=face,
                     edgecolor=col, linewidth=0.5)
             ax.text(mean_v + np.sign(mean_v) * 0.18, yi + off, f"{mean_v:+.1f}",
                     ha="left" if mean_v >= 0 else "right", va="center",
-                    fontsize=6, color=INK)
+                    fontsize=5.5, color=INK)
         if not any_here:
             note = "pending" if planned else "pending (needs a model flag)"
             ax.text(0.2, yi, note, ha="left", va="center",
@@ -868,7 +953,7 @@ def section_sensitivity():
     # ONE legend naming each drawn bar exactly (method x route), so no reader
     # has to infer that the lighter shade means the shorter route
     handles, labels = [], []
-    for meth, route, _off in series:
+    for meth, route in series:
         if meth not in drawn_m or route not in drawn_r:
             continue
         col = ps.METHOD_COLOR[meth]
@@ -877,29 +962,39 @@ def section_sensitivity():
             facecolor=ps.tint(col, 0.45) if route == "short" else col,
             edgecolor=col, linewidth=0.5))
         labels.append(f"{ps.METHOD_LBL[meth]} · {route}")
+    # No in-figure title — the LaTeX \caption carries it (see results_section).
+    # The legend is a figure-level row above the axes rather than inside them:
+    # every in-axes corner is claimed by a bar or its value label at some point
+    # in the sweep, and the bottom-left corner it used to occupy became the
+    # largest negative bar the moment an axis was dropped from _SENS_ROWS.
+    fig.tight_layout(rect=(0, 0, 1, 0.88))
     if handles:
-        ax.legend(handles, labels, frameon=False, fontsize=7,
-                  loc="lower left", ncol=2,
-                  title="hindsight optimum vs myopic policy",
-                  title_fontsize=7, alignment="left")
-    ax.set_title("Sensitivity of route duration to charging infrastructure",
-                 loc="left")
+        # Wrap at 3 columns: with three methods x two route classes the single
+        # row the two-method version used would run past the figure width.
+        fig.legend(handles, labels, frameon=False, fontsize=7,
+                   loc="upper center", ncol=min(3, len(handles)),
+                   bbox_to_anchor=(0.5, 0.995),
+                   title="hindsight optimum vs online policies",
+                   title_fontsize=7.5,
+                   handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
     _save(fig, "additional_sens_effects")
 
     lines = [
         r"\begin{table}[ht]\centering",
         r"\caption{One-at-a-time sensitivity: mean change in route duration "
-        r"vs the base case (\%). Preliminary cells use greedy; final values "
-        r"use the hindsight optimum.}",
+        r"vs the base case (\%), paired per instance.  Greedy and LA are the "
+        r"online policies; Oracle is the hindsight optimum.  The last two "
+        r"columns split the Oracle column by route class.  Cells shown as "
+        r"``--'' have no paired runs yet.}",
         r"\label{tab:sensitivity}",
-        r"\begin{tabular}{lrrrr}", r"\hline",
-        r"Axis & Greedy $\Delta$ (\%) & Oracle $\Delta$ (\%) "
-        r"& Short & Medium \\",
+        r"\begin{tabular}{lrrrrr}", r"\hline",
+        r"Axis & Greedy $\Delta$ (\%) & LA $\Delta$ (\%) "
+        r"& Oracle $\Delta$ (\%) & Short & Medium \\",
         r"\hline",
     ]
-    for (label, _tag, g, _ng, o, _no, o_s, _ns, o_m, _nm,
+    for (label, _tag, g, _ng, l, _nl, o, _no, o_s, _ns, o_m, _nm,
          _status) in rows_out:
-        lines.append(f"{label} & {g or '--'} & {o or '--'} & "
+        lines.append(f"{label} & {g or '--'} & {l or '--'} & {o or '--'} & "
                      f"{o_s or '--'} & {o_m or '--'} \\\\")
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_sensitivity.tex", "\n".join(lines))

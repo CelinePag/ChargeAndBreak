@@ -58,6 +58,22 @@ def _classes():
     return [f"{r}{c}T{t}" for r in ROUTES for c in CUSTS for t in TWS]
 
 
+def _variant_of(path: str, stem: str) -> str | None:
+    """The run's method-configuration label, or None.
+
+    Cheap by design: only files whose NAME already looks labelled are opened,
+    and the label counts only when the run actually recorded it — a handful of
+    legacy manual run_ids look labelled but predate the flag entirely.
+    """
+    if not (_paths.parse_run_id(stem) or {}).get("variant"):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh).get("variant") or None
+    except Exception:
+        return None
+
+
 def scan(sol_dir: str, variants: bool):
     """-> runs[(cls, alg)] = {seed: n_files}, params[(cls,alg)] = set, bad[..]"""
     runs    = defaultdict(lambda: defaultdict(int))
@@ -69,13 +85,26 @@ def scan(sol_dir: str, variants: bool):
         if base.startswith("oracle_"):
             continue
         stem = base[:-5]
-        tagged = ("__" in stem) or ("_diesel_" in base)
+        # A method-configuration sweep (--variant) runs on the BASE instances,
+        # so its stem carries no "__tag": without this leg it would be counted
+        # as base coverage and its differing n_scenarios would show up as a
+        # parameter inconsistency of the base case.  The label in the file name
+        # is only a candidate — the STORED `variant` field decides, so the few
+        # legacy run_ids that merely look labelled (…_RO_box_…) keep counting as
+        # base coverage exactly as before.
+        labelled = _variant_of(path, stem)
+        tagged = ("__" in stem) or ("_diesel_" in base) or bool(labelled)
         if tagged != variants:
             continue
         m = _RUN_RE.match(stem.replace("__", "@@").split("@@")[0]
                           if variants else stem)
         if not m:
-            continue
+            # a labelled run on a base instance: strip the label so the
+            # class/seed still parse out of the remaining id
+            if labelled:
+                m = _RUN_RE.match(stem.replace(f"_{labelled}_", "_", 1))
+            if not m:
+                continue
         cls  = re.match(r"(R[a-z]+C[a-z]+T[a-z]+)_", m.group("inst")).group(1)
         alg  = m.group("alg")
         seed = int(m.group("inst").rsplit("_", 1)[1])
@@ -133,14 +162,20 @@ def main() -> None:
     ora  = oracle_coverage(args.dir)
     want = set(range(1, args.seeds + 1))
 
-    hdr = (f"{'class':<22}" + "".join(f"{_MLBL[m]:>16}" for m in METHODS)
-           + f"{'oracle':>9}")
+    # One cell = one column, separated by '|'.  The dup/flag suffixes used to
+    # be appended as space-separated tokens ("50/50  +50"), which read as an
+    # extra column and made every method after greedy — which carries a "+k"
+    # on every row — appear shifted one place left.  Suffixes are now bracketed
+    # inside their own cell and the separators make the boundaries explicit.
+    CW = 15                                   # per-method cell width
+    hdr = (f"{'class':<22}" + "|".join(f"{_MLBL[m]:>{CW}}" for m in METHODS)
+           + "|" + f"{'oracle':>{CW}}")
     print(hdr)
     print("-" * len(hdr))
     rows = []
     tot = defaultdict(lambda: [0, 0, 0, 0])
     for cls in _classes():
-        line = f"{cls:<22}"
+        cells = []
         for alg in METHODS:
             seen = runs.get((cls, alg), {})
             n    = len(seen)
@@ -149,25 +184,30 @@ def main() -> None:
             mx   = len(params.get((cls, alg), set())) > 1
             bd   = bad.get((cls, alg), 0)
             flag = ("!" if mx else "") + ("x" if bd else "")
-            line += f"{n:>4}{'/'+str(args.seeds):<4}{'+'+str(dup) if dup else '  ':>4}{flag:<4}"
+            sfx  = (f"+{dup}" if dup else "") + flag
+            cells.append(f"{n}/{args.seeds}" + (f"({sfx})" if sfx else ""))
             t = tot[alg]
             t[0] += n; t[1] += dup; t[2] += miss; t[3] += bd
             rows.append([cls, _MLBL[alg], n, dup, miss, bd,
                          ";".join(sorted(params.get((cls, alg), set())))])
-        no = len(ora.get(cls, set()))
-        line += f"{no:>5}/{args.seeds:<4}"
-        print(line)
+        cells.append(f"{len(ora.get(cls, set()))}/{args.seeds}")
+        print(f"{cls:<22}" + "|".join(f"{c:>{CW}}" for c in cells))
     print("-" * len(hdr))
-    print(f"{'TOTAL runs':<22}" + "".join(
-        f"{tot[m][0]:>4}{'/'+str(args.seeds*36):<12}" for m in METHODS)
-        + f"{sum(len(v) for v in ora.values()):>5}/{args.seeds*36}")
-    print(f"{'TOTAL dup files':<22}" + "".join(
-        f"{tot[m][1]:>4}{'':<12}" for m in METHODS))
-    print(f"{'TOTAL corrupt':<22}" + "".join(
-        f"{tot[m][3]:>4}{'':<12}" for m in METHODS))
-    print("\nlegend: n/50 distinct instances run, +k superseded duplicate "
-          "files,\n        '!' = runs of this method disagree on "
-          f"{ {k: v for k, v in _KEY_PARAM.items() if v} }, 'x' = corrupt file")
+    tot_n = args.seeds * 36
+    print(f"{'TOTAL runs':<22}"
+          + "|".join(f"{str(tot[m][0]) + '/' + str(tot_n):>{CW}}"
+                     for m in METHODS)
+          + "|" + f"{str(sum(len(v) for v in ora.values())) + '/' + str(tot_n):>{CW}}")
+    print(f"{'TOTAL dup files':<22}"
+          + "|".join(f"{tot[m][1]:>{CW}}" for m in METHODS))
+    print(f"{'TOTAL corrupt':<22}"
+          + "|".join(f"{tot[m][3]:>{CW}}" for m in METHODS))
+    print(f"\nlegend: n/{args.seeds} distinct instances run; suffixes in "
+          "brackets belong to THAT cell:\n"
+          "        (+k) k superseded duplicate files, (!) runs of this method "
+          "disagree on\n"
+          f"        { {k: v for k, v in _KEY_PARAM.items() if v} }, "
+          "(x) corrupt file")
 
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as fh:

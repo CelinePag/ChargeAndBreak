@@ -21,6 +21,12 @@ launched from here.  Each subcommand maps to one paper section:
                                                      numbers)
   gamma          8.5 Effect of uncertainty           ROBU price-of-robustness
                                                      frontier (--robu_gamma sweep)
+  la             8.3 LA configuration sensitivity    look-ahead horizon and
+                                                     scenario-count sweep, run on
+                                                     the BASE instances under a
+                                                     --variant label
+  la-report      8.3 LA configuration sensitivity    data_output/additional_la_
+                                                     stats.csv from those runs
   compile        8.3-8.5 tables                      re-run compile_solutions on
                                                      solutions/ (variant runs are
                                                      tagged by instance-stem suffix)
@@ -37,6 +43,15 @@ Design decisions baked in (agreed 2026-07-20 / 2026-07-29):
     carries a double-underscore tag (e.g. RshortCfewTlarge_1__cs30.json) so
     that solution files, oracle caches, and the latest-run-per-(instance,
     method) dedup in compile_solutions never collide with base runs.
+    This applies to axes that change the INSTANCE (cs_spacing, charger_power,
+    cv, ar1_rho, beta, no_split) — a different instance deserves a different
+    file, and a different oracle.
+  * An axis that changes only a METHOD's own configuration (the `la` block)
+    does NOT copy instances.  It runs on the base instances under a
+    --variant label carried in the run_id, which is what the compile dedup
+    keys on.  Copying would be doubly wrong there: the instance is unchanged,
+    and a copy would orphan the run from the instance's already-solved oracle
+    cache, forcing hours of needless re-solving to recover the gap.
 
 Everything is launched through runner_dispatch.py subprocesses, so all solver
 flags/logs behave exactly as in the base experiments.  Use --dry-run to print
@@ -65,6 +80,10 @@ Examples
 
   # 8.5: VSS / EVPI on the short/medium grid, 20 scenarios
   python -m src.output_analysis.additional_analysis vss --n-scenarios 20
+
+  # 8.3: LA look-ahead / scenario-count sweep (base instances, labelled runs)
+  python -m src.output_analysis.additional_analysis la --configs S25H12,S25H14,S10H24,S50H24
+  python -m src.output_analysis.additional_analysis la-report
 
   # refresh tables (Excel + LaTeX) after any block
   python -m src.output_analysis.additional_analysis compile --tex-dir tex/tables
@@ -411,6 +430,163 @@ def cmd_gamma(args) -> None:
                   extra=["--robu_gamma", str(g)])   # ROBU: no greedy guard
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 8.3 — LA CONFIGURATION SENSITIVITY (look-ahead horizon x scenario count)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# The base case actually run for the paper.  NOT the runner_dispatch CLI
+# defaults (10 / 12.0) — every stored LA run is S25 H24, and a sweep quoted
+# against the wrong centre point is meaningless.
+LA_BASE_SCEN    = 25
+LA_BASE_HORIZON = 24.0
+
+# One-at-a-time off (S25, H24): two horizons at the base scenario count, two
+# scenario counts at the base horizon.  The base cell itself is deliberately
+# absent — it is the existing unlabelled runs on these very instances.
+LA_DEFAULT_CONFIGS = "S25H12,S25H14,S10H24,S50H24"
+
+# Combos for the LA sweep.  Unlike the instance-level axes this one DOES span
+# long routes: the whole question is how the look-ahead behaves as the route
+# grows, and the base LA runs exist for all three.
+LA_COMBOS = ["RshortCmedium", "RmediumCmedium", "RlongCmedium"]
+LA_TW     = ["none"]
+
+
+def _parse_la_config(cfg: str) -> tuple[int, float]:
+    """'S25H12' -> (25, 12.0).  The label is also the run's variant tag."""
+    import re
+    m = re.fullmatch(r"S(?P<s>\d+)H(?P<h>\d+(?:\.\d+)?)", cfg.strip())
+    if not m:
+        raise SystemExit(
+            f"bad LA config '{cfg}': expected S<scenarios>H<horizon>, "
+            f"e.g. S25H12 or S50H24")
+    return int(m.group("s")), float(m.group("h"))
+
+
+def cmd_la(args) -> None:
+    """Section 8.3 — LA look-ahead horizon / scenario-count sensitivity.
+
+    Runs on the BASE instances, with each cell labelled by --variant.  No
+    instance copies: the instance is identical, so a copy would only orphan the
+    run from the oracle cache that is already solved for it.  The compile dedup
+    is keyed on (instance, method, supervised, variant), so these runs sit
+    alongside the base LA runs instead of displacing them, and the base cell of
+    the sweep IS those unlabelled runs.
+    """
+    seeds  = _expand_seeds(args.seeds)
+    combos = args.combos.split(",")
+    tws    = args.tw.split(",")
+
+    for cfg in [c.strip() for c in args.configs.split(",") if c.strip()]:
+        n_scen, horizon = _parse_la_config(cfg)
+        if (n_scen, horizon) == (LA_BASE_SCEN, LA_BASE_HORIZON):
+            print(f"skip     {cfg}: that is the base case — the unlabelled "
+                  f"runs already in solutions/ are this cell")
+            continue
+        files = []
+        for combo in combos:
+            route, cust = _split_combo(combo)
+            for tw in tws:
+                for seed in seeds:
+                    p = _base_instance_path(route, cust, tw, seed)
+                    if not os.path.isfile(p):
+                        print(f"missing  {p} (skipped)")
+                        continue
+                    files.append(p)
+        if not files:
+            print(f"skip     {cfg}: no instances matched")
+            continue
+        print(f"\n=== LA {cfg}: n_scenarios={n_scen} horizon={horizon:g}h "
+              f"on {len(files)} instance(s) ===")
+        # prune_quantile is NOT passed: the flag drives LA's action pruning and
+        # every base LA run was made without it, so passing it would confound
+        # the configuration axis with a guard change.
+        _dispatch(",".join(files), "LA", args.jobs, args.dry_run,
+                  extra=["--variant", cfg,
+                         "--n_scenarios", str(n_scen),
+                         "--horizon", f"{horizon:g}"],
+                  guard=None)
+
+
+def cmd_la_report(args) -> None:
+    """Write data_output/additional_la_stats.csv: one row per (config, route
+    class), with the unlabelled base runs as the reference row.
+
+    Cost is reported as decision_mean_s (per-stop decision time) as well as
+    wall clock, because wall clock is only comparable across configs when every
+    batch was launched with the same --jobs.
+    """
+    import csv
+    import statistics as stat
+    from src.output_analysis import compile_solutions as cs
+
+    rows = cs.load_solutions(_paths.solutions())
+    cs._annotate_instance_tags(rows)
+    cs._annotate_gap_to_oracle(rows, _paths.solutions())
+    cs._annotate_outcome(rows)
+    rows, _ = cs._dedup_latest(rows)
+
+    wanted_cfg = {c.strip() for c in args.configs.split(",") if c.strip()}
+    wanted_cfg.add("base")
+    combos = set(args.combos.split(","))
+
+    groups: dict = {}
+    for r in rows:
+        if r.get("method") != "LA" or r.get("status") != "OK":
+            continue
+        route, cust = r.get("route_class"), r.get("customers_class")
+        if not route or not cust:
+            continue
+        if f"R{route}C{cust}" not in combos:
+            continue
+        if r.get("window_class") not in set(args.tw.split(",")):
+            continue
+        cfg = r.get("variant") or "base"
+        if cfg not in wanted_cfg:
+            continue
+        groups.setdefault((cfg, route), []).append(r)
+
+    if not groups:
+        print("  no LA runs matched — nothing written")
+        return
+
+    def _agg(vals):
+        vals = [v for v in vals if v is not None]
+        return (stat.median(vals) if vals else None), len(vals)
+
+    _paths.ensure_dirs()
+    out = _paths.data_output("additional_la_stats.csv")
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["config", "n_scenarios", "horizon_h", "route_class",
+                    "n_runs", "n_infeasible", "gap_pen_median_pct",
+                    "gap_nopen_median_pct", "duration_median_h",
+                    "decision_mean_s_median", "wall_clock_s_median"])
+        for (cfg, route), recs in sorted(groups.items()):
+            gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
+                             if cs._gap_usable(r) and r.get("gap_pen") is not None])
+            gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
+                             if cs._gap_usable(r) and r.get("gap_nopen") is not None])
+            dur, _   = _agg([r.get("duration_h") for r in recs])
+            dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
+                             for r in recs])
+            wall, _  = _agg([r.get("wall_clock_s") for r in recs])
+            n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
+            ns = recs[0].get("n_scenarios")
+            hh = recs[0].get("horizon_hours")
+            w.writerow([cfg, ns, hh, route, len(recs), n_inf,
+                        None if gp is None else round(gp, 3),
+                        None if gn is None else round(gn, 3),
+                        None if dur is None else round(dur, 3),
+                        None if dec is None else round(dec, 4),
+                        None if wall is None else round(wall, 1)])
+            print(f"  {cfg:<8} {route:<7} n={len(recs):<3} "
+                  f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
+                  f"(from {n_gp} run(s) with an oracle bound)  "
+                  f"wall={'—' if wall is None else f'{wall:.0f}s'}")
+    print(f"  CSV saved   : {out}")
+
+
 def _latest_2sp_solution(stem: str) -> str | None:
     """Newest solutions/<stem>_2SP_*.json (run ids end in a timestamp, so
     lexicographic max = latest), for the RP leg of the VSS harness."""
@@ -543,6 +719,39 @@ def main() -> None:
                         "0.9,0.95,1.0; 1.0 = worst-case corner)")
     _add_common(p, "greedy")
     p.set_defaults(func=cmd_guard)
+
+    # LA configuration sweep — its own arg block rather than _add_common:
+    # the algorithm is fixed (LA) and --prune_quantile must NOT be offered,
+    # since that flag also drives LA's action pruning and would confound the
+    # axis with a guard change.
+    def _add_la_common(pp) -> None:
+        pp.add_argument("--configs", default=LA_DEFAULT_CONFIGS,
+                        help="Comma-separated S<scenarios>H<horizon> cells "
+                             f"(default: {LA_DEFAULT_CONFIGS}).  The base case "
+                             f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g} is skipped: "
+                             f"the existing unlabelled runs ARE that cell.")
+        pp.add_argument("--combos", default=",".join(LA_COMBOS),
+                        help=f"Route+customer combos (default: "
+                             f"{','.join(LA_COMBOS)})")
+        pp.add_argument("--tw", default=",".join(LA_TW),
+                        help=f"TW classes (default: {','.join(LA_TW)})")
+        pp.add_argument("--seeds", default=DEFAULT_SEEDS,
+                        help=f"Seed spec (default: {DEFAULT_SEEDS})")
+
+    p = sub.add_parser("la", help="8.3 LA horizon / scenario-count sweep")
+    _add_la_common(p)
+    p.add_argument("--jobs", type=int, default=8,
+                   help="Concurrent runs (default: 8, matching the base LA "
+                        "batch).  Keep it identical across every cell or the "
+                        "wall-clock column is contention, not compute.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print commands without executing anything")
+    p.set_defaults(func=cmd_la)
+
+    p = sub.add_parser("la-report",
+                       help="8.3 LA sweep -> data_output/additional_la_stats.csv")
+    _add_la_common(p)
+    p.set_defaults(func=cmd_la_report)
 
     p = sub.add_parser("vss", help="8.5 VSS / EVPI decomposition")
     p.add_argument("--n-scenarios", type=int, default=20,

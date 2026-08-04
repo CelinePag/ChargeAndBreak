@@ -62,6 +62,11 @@ Usage (CLI)
     --verbose / --quiet
     --oracle_tee
     --run_id STR
+    --variant STR         label a sweep over a method's OWN configuration
+                          (e.g. --variant S25H12 --n_scenarios 25 --horizon 12).
+                          Runs land on the BASE instances, keep their oracle
+                          caches, and are kept apart from the base runs by the
+                          reporting dedup instead of by duplicating instances.
 
   LA options:
     --n_scenarios INT     scenarios per stop (default: 10)
@@ -99,6 +104,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import re
 import sys
 from typing import Optional
 
@@ -210,6 +216,7 @@ def run_algorithm(
     verbose: bool          = True,
     oracle_tee: bool       = False,
     run_id: Optional[str]  = None,
+    variant: Optional[str] = None,    # method-config sweep label (e.g. "S25H12")
     m_man_h: Optional[float] = None,   # override stored M values (h); None = keep JSON value
     diesel_mode: bool      = False,    # treat vehicle as diesel (HoS only, no charging)
     supervised: bool       = False,    # S1: safety supervisor off by default (raw mode)
@@ -253,6 +260,14 @@ def run_algorithm(
     verbose         : print per-stop decisions
     oracle_tee      : show HiGHS output in oracle solve
     run_id          : override auto-generated run_id
+    variant         : label for a sweep over a METHOD's own configuration
+                      (e.g. "S25H12" for 25 scenarios / 12 h look-ahead).  It
+                      goes into the run_id, from which finalize_run stamps it
+                      into the solution JSON, and the reporting dedup is keyed
+                      on it — so a variant run coexists with the base run on
+                      the SAME instance instead of displacing it, and both are
+                      scored against that instance's existing oracle cache.
+                      None (default) = base case.
     m_man_h         : override the manoeuver time (h) stored in the JSON file.
                       The JSON was generated once with instances.make_data(); if
                       you have since changed M_man_h there, existing JSON files
@@ -298,6 +313,23 @@ def run_algorithm(
         full_data["title"] = _stem
         if isinstance(full_data.get("label"), str) and _old:
             full_data["label"] = full_data["label"].replace(_old, _stem, 1)
+
+    # ── Variant label -> run_id ──────────────────────────────────────────────
+    # Each method builds its own default run_id, so a single (non-batch) run
+    # would otherwise drop the label and be recorded as a base-case run.  Build
+    # the id here instead; run_batch does the same for every job it launches.
+    if variant and not run_id:
+        import datetime as _dt
+        run_id = _paths.make_run_id(
+            _stem, alg, _dt.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            variant=variant)
+    elif variant:
+        _p = _paths.parse_run_id(run_id)
+        if (_p or {}).get("variant") != variant:
+            print(f"  [!] --run_id '{run_id}' does not carry the variant "
+                  f"label '{variant}' in the "
+                  f"<instance>_<ALGO>_<VARIANT>_<ts> position; the run will be "
+                  f"recorded as variant={(_p or {}).get('variant')!r}.")
 
     # ── Diesel mode: remove all charging/energy constraints ───────────────────
     if diesel_mode:
@@ -596,12 +628,12 @@ def _run_one_job(job: dict) -> dict:
 # PARAMETERS only, not on the code version — after a modelling change, delete the
 # stale solutions (and oracle_*.json caches) rather than relying on the skip.
 _SIG_FIELDS = {
-    "GREEDY": ["safety_buffer", "supervised", "prune_quantile"],
-    "RO":     ["supervised", "prune_quantile"],
-    "ROBU":   ["robu_eps", "gamma", "supervised", "prune_quantile"],
-    "2SP":    ["n_scenarios", "supervised", "prune_quantile"],
-    "LA":     ["n_scenarios", "horizon_hours", "criterion", "solve_mode",
-               "charge_only", "supervised", "prune_quantile"],
+    "GREEDY": ["variant", "safety_buffer", "supervised", "prune_quantile"],
+    "RO":     ["variant", "supervised", "prune_quantile"],
+    "ROBU":   ["variant", "robu_eps", "gamma", "supervised", "prune_quantile"],
+    "2SP":    ["variant", "n_scenarios", "supervised", "prune_quantile"],
+    "LA":     ["variant", "n_scenarios", "horizon_hours", "criterion",
+               "solve_mode", "charge_only", "supervised", "prune_quantile"],
 }
 
 
@@ -609,23 +641,28 @@ def _requested_sig(alg: str, kw: dict) -> Optional[dict]:
     """Signature (method_meta field -> value) the requested run would record."""
     sup = bool(kw.get("supervised", False))
     pq  = kw.get("prune_quantile")
+    # The sweep label is part of every signature: a variant run must never be
+    # skipped because the BASE run of the same instance already exists (nor the
+    # other way round), even when the underlying parameters happen to match.
+    var = kw.get("variant")
     if alg == "GREEDY":
-        return dict(safety_buffer=kw.get("safety_buffer", 0.0),
+        return dict(variant=var, safety_buffer=kw.get("safety_buffer", 0.0),
                     supervised=sup, prune_quantile=pq)
     if alg == "RO":
-        return dict(supervised=sup, prune_quantile=pq)
+        return dict(variant=var, supervised=sup, prune_quantile=pq)
     if alg == "ROBU":
-        sig = dict(robu_eps=kw.get("robu_eps", 0.01),
+        sig = dict(variant=var, robu_eps=kw.get("robu_eps", 0.01),
                    gamma=kw.get("robu_gamma"),
                    supervised=sup, prune_quantile=pq)
         if sig["gamma"] is None:          # gamma is eps-derived -> match on eps
             sig.pop("gamma")
         return sig
     if alg == "2SP":
-        return dict(n_scenarios=kw.get("n_scenarios", 10),
+        return dict(variant=var, n_scenarios=kw.get("n_scenarios", 10),
                     supervised=sup, prune_quantile=pq)
     if alg == "LA":
-        return dict(n_scenarios=kw.get("n_scenarios", 10),
+        return dict(variant=var,
+                    n_scenarios=kw.get("n_scenarios", 10),
                     horizon_hours=kw.get("horizon_hours", 12.0),
                     criterion=kw.get("criterion", "mean"),
                     solve_mode=kw.get("solve_mode", "lp"),
@@ -749,10 +786,11 @@ def run_batch(json_files: list, algorithms: list, jobs: int = 1,
             return []
 
     ts_base = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    variant = kwargs.get("variant")
     jobs_list = []
     for idx, (jf, alg) in enumerate(combos):
         stem = os.path.splitext(os.path.basename(jf))[0]
-        run_id = f"{stem}_{alg}_{ts_base}_{idx:03d}"
+        run_id = _paths.make_run_id(stem, alg, ts_base, idx, variant)
         jobs_list.append(dict(kwargs, json_file=jf, algorithm=alg, run_id=run_id))
 
     print(f"\n  Batch: {len(jobs_list)} run(s)  "
@@ -820,6 +858,15 @@ if __name__ == "__main__":
                              "inside a single LA run.")
     parser.add_argument("--quiet",       action="store_true", default=False)
     parser.add_argument("--oracle_tee",  action="store_true", default=True)
+    parser.add_argument("--variant",     type=str,   default=None,
+                        help="Label for a sweep over a METHOD's own "
+                             "configuration, e.g. 'S25H12' (25 scenarios, 12h "
+                             "look-ahead).  Goes into the run_id and the "
+                             "solution JSON; reporting keys its dedup on it, so "
+                             "variant runs sit alongside the base runs of the "
+                             "same instances instead of displacing them, and "
+                             "reuse those instances' oracle caches.  Must start "
+                             "with a letter.")
 
     # LA
     parser.add_argument("--n_scenarios", type=int,   default=10)
@@ -980,7 +1027,15 @@ if __name__ == "__main__":
         supervised       = args.supervised,
         prune_quantile   = args.prune_quantile,
         resume           = args.resume,
+        variant          = args.variant,
     )
+
+    if args.variant and not re.match(r"^[A-Za-z][A-Za-z0-9_.-]*$", args.variant):
+        raise SystemExit(
+            f"--variant '{args.variant}' must start with a letter and contain "
+            f"only letters, digits, '_', '.' or '-' (it is parsed back out of "
+            f"the run_id, where a leading digit would collide with the "
+            f"timestamp).")
 
     if len(json_files) == 1 and len(algorithms) == 1:
         _match = (_find_matching_run(json_files[0], algorithms[0], common_kwargs)

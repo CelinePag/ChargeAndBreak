@@ -727,21 +727,22 @@ def select_best_action(full_data, stop: int, state,
 
 
         if not _fr["feasible"]:
-            # ── DEBUG: re-solve with tee=True to dump the LP and get HiGHS IIS ──
-            _p(f"     [FREE-] INFEASIBLE — re-solving with tee=True to dump LP")
-            solve_horizon(
-                full_data      = full_data,
-                start_stop     = stop,
-                end_stop       = end_stop,
-                init_state     = state.as_init_state(),
-                fixed_action   = None,
-                rho2_remaining = int(full_data.get("rho_bar", 3)) - state.rho2_used,
-                ext_remaining  = ext_rem,
-                tee            = True,          # ← dumps debug_stop23.lp
-                time_limit     = 30,
-                relax          = free_relax,
-            )
-            raise RuntimeError("DEBUG STOP — check debug_stop23.lp and stdout above")
+            # The free solve is ONLY a warm start for the scenario solves below
+            # (its sol is handed to each scenario as `warm_start`), so its
+            # infeasibility costs a cold start and nothing else: the decision
+            # still comes from the per-action scenario scores, and evaluate_action
+            # already prices infeasible scenarios at INFEASIBLE_PENALTY.
+            #
+            # This used to re-solve with tee=True and then `raise RuntimeError`.
+            # That killed the process mid-route, so the run wrote no solution
+            # JSON at all and was recorded as INCOMPLETE — excluded from the
+            # gaps, from n_infe, from every denominator.  It fired on 10.6% of
+            # long-route base runs, and those runs were then re-run until they
+            # happened to succeed, which biased LA's reported reliability upward
+            # exactly where LA is weakest.  Feasibility is BEHDV's call at
+            # execution time, not this warm start's.
+            _p(f"     [FREE-] INFEASIBLE — no warm start for this stop "
+               f"(scenario scores decide; execution feasibility is BEHDV's call)")
 
         si  = _fr.get("solve_info", {})
         tag = "LP" if free_relax else "MIP"

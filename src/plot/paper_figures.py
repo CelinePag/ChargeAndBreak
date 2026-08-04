@@ -19,9 +19,9 @@ Figure layout
   series (hue)  : method, fixed colour per method across all figures
   y axis        : gap to oracle (%)
 
-Three variants are produced so the best-looking one can be picked for the
-paper (all carry the same data):
-  box    — median + IQR box, 1.5 IQR whiskers, mean diamond   (recommended)
+Three variants carry the same data; box is the one reported in the paper and
+is what a bare run produces:
+  box    — median + IQR box, 1.5 IQR whiskers, mean diamond   (DEFAULT)
   bar    — mean bar with ±1 std whisker
   violin — kernel-density violin with median + quartile ticks
 
@@ -31,8 +31,9 @@ console and written to the stats CSV so the caption can report them.
 
 Usage
 -----
-  python -m src.plot.paper_figures                     # all three variants
-  python -m src.plot.paper_figures --kind box          # one variant
+  python -m src.plot.paper_figures                     # box (paper figure)
+  python -m src.plot.paper_figures --kind all          # box + bar + violin
+  python -m src.plot.paper_figures --all               # box + bar x tw/method
   python -m src.plot.paper_figures --metric gap_nopen  # penalty-free gap
   python -m src.plot.paper_figures --dir solutions --out-dir figures
 
@@ -141,6 +142,16 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
     if n_dup:
         print(f"  Dropped {n_dup} superseded duplicate run(s) "
               f"(same instance + method, older timestamp)")
+
+    # Method-configuration sweeps (--variant) run on the BASE instances, so they
+    # carry a valid route/customers/window class and would pool straight into
+    # the published figures.  Unlike the "__tag" instance variants, nothing else
+    # filters them out — this line is the only thing that does.
+    n_var = sum(1 for r in rows if r.get("variant"))
+    if n_var:
+        rows = [r for r in rows if not r.get("variant")]
+        print(f"  Excluded {n_var} method-variant run(s) from the paper "
+              f"figures (base case only)")
 
     gaps   = defaultdict(list)
     n_infe = defaultdict(int)
@@ -709,11 +720,11 @@ if __name__ == "__main__":
                         help="solutions directory (default: solutions)")
     parser.add_argument("--out-dir", default=_paths.figures(),
                         help="output directory (default: figures)")
-    parser.add_argument("--kind", default="bar",
+    parser.add_argument("--kind", default="box",
                         choices=["box", "bar", "violin", "all"],
-                        help="figure variant (default: bar — means with "
-                             "discreet ±1 std whiskers; box/violin get "
-                             "unreadable at full nesting density)")
+                        help="figure variant (default: box — median + IQR, "
+                             "the variant reported in the paper; 'bar' gives "
+                             "means with ±1 std whiskers, 'all' every variant)")
     parser.add_argument("--metric", default="gap_pen",
                         choices=["gap_pen", "gap_nopen"],
                         help="gap definition (default: gap_pen, window "
