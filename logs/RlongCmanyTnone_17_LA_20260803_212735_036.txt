@@ -1,0 +1,44 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-03 22:34:27)
+  Instance : RlongCmanyTnone_17   run_id=RlongCmanyTnone_17_LA_20260803_212735_036
+  Route    : 190 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 188/190 stops done, continuing from stop 188
+
+[LA] stop 188 (LAYBY)  t=149.998h  soc=139kWh  cd=0.21h  sd=0.21h  sw=0.21h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [188->190]  travel=0.44h  4 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   800000030.094h (0.014h)  ok=5/25  ws=0/25  tauc=0m  taub=0m  (0.5s)
+  y=0  brk=0    rst=r1  800000032.327h (0.014h)  ok=5/25  ws=0/25  tauc=0m  taub=0m  (0.4s)
+  y=0  brk=b45  rst=0   800000030.277h (0.014h)  ok=5/25  ws=0/25  tauc=0m  taub=45m  (0.4s)
+  y=0  brk=b15  rst=0   800000030.177h (0.014h)  ok=5/25  ws=0/25  tauc=0m  taub=15m  (0.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=149.998h  td=149.998h  (mean=800000030.094h)  1.6s
+  [!] FORCED REST (r1) at stop 188
+
+[LA] stop 189 (LAYBY)  t=161.391h  soc=119kWh  cd=0.23h  sd=0.23h  sw=0.23h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [189->190]  travel=0.22h  4 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   720000045.259h (0.024h)  ok=7/25  ws=0/25  tauc=0m  taub=0m  (0.5s)
+  y=0  brk=0    rst=r1  720000048.386h (0.024h)  ok=7/25  ws=0/25  tauc=0m  taub=0m  (0.3s)
+  y=0  brk=b45  rst=0   720000045.516h (0.024h)  ok=7/25  ws=0/25  tauc=0m  taub=45m  (0.4s)
+  y=0  brk=b15  rst=0   720000045.376h (0.024h)  ok=7/25  ws=0/25  tauc=0m  taub=15m  (0.4s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=161.391h  td=161.391h  (mean=720000045.259h)  1.6s
+  [!] FORCED REST (r1) at stop 189
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 172.763 h  (172:45)
+  Duration : 164.763 h
+  Wall     : 3.5 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RlongCmanyTnone_17_LA_20260803_212735_036_scenarios.json  (coverage=100.0%)
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  [!] Directive 2002/15/EC compliance issues (1):
+      stop 61: 6.81h consecutive work before the break (> 6.0h)
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RlongCmanyTnone_17_LA_20260803_212735_036.json

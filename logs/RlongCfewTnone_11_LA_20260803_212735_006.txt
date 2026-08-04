@@ -1,0 +1,35 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-03 21:33:03)
+  Instance : RlongCfewTnone_11   run_id=RlongCfewTnone_11_LA_20260803_212735_006
+  Route    : 174 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 119/174 stops done, continuing from stop 119
+
+[LA] stop 119 (LAYBY)  t=81.654h  soc=213kWh  cd=3.48h  sd=3.48h  sw=5.24h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [119->160]  travel=10.95h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.4s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (1.3s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=81.654h  td=81.654h  (mean=1000000000.000h)  5.9s
+  [!] FORCED REST (r1) at stop 119
+
+[LA] stop 120 (LAYBY)  t=93.209h  soc=190kWh  cd=0.39h  sd=0.39h  sw=0.39h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [120->163]  travel=11.63h +1rest  4 actions × 25 scen  8w  [mean,lp]
+  y=0  brk=0    rst=0   720000033.228h (0.234h)  ok=7/25  ws=0/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  720000034.088h (0.494h)  ok=7/25  ws=0/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=b45  rst=0   720000033.482h (0.234h)  ok=7/25  ws=0/25  tauc=0m  taub=45m  (1.7s)
+  y=0  brk=b15  rst=0   720000033.344h (0.234h)  ok=7/25  ws=0/25  tauc=0m  taub=15m  (1.7s)
+     [DIAG] max per-scenario delta spread across actions: 46.91 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=93.209h  td=93.209h  (mean=720000033.228h)  6.6s
+  [!] FORCED REST (r1) at stop 120
+
+[LA] stop 121 (CUST)  t=104.642h  soc=164kWh  cd=0.27h  sd=0.27h  sw=0.27h  phi=0  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [121->164]  travel=11.65h +1rest  4 actions × 25 scen  8w  [mean,lp]  ws=prev
+     [FREE-] INFEASIBLE — re-solving with tee=True to dump LP
