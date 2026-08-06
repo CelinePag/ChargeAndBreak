@@ -45,6 +45,7 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 
 from src.settings import T_START, BETA_TW
@@ -935,27 +936,36 @@ def section_sensitivity():
     # (light = short, full = medium).  Shading an ordinal dimension inside a
     # categorical hue is the same device the base-case figure uses for the
     # time-window class, so the two figures read the same way.
-    y = np.arange(len(fig_rows))[::-1]
+    # Landscape orientation: the swept axes run along x and the effect along y,
+    # so the response variable gets the tall, gridded axis it needs to be read
+    # quantitatively (the horizontal version had to be read against ticks that
+    # were 5 rows apart).
+    # The sweep is two distinct experiments (charger spacing vs charger power)
+    # and the levels are only comparable within one.  That grouping is carried
+    # by SPACING alone — levels of the same experiment sit close together, the
+    # two experiments are pushed apart — so no separator rule is needed.
+    _grp = ["CS spacing" if t.startswith("cs") else "Charger power"
+            for _l, t, _p in _SENS_ROWS]
+    bounds = [i for i in range(1, len(_grp)) if _grp[i] != _grp[i - 1]]
+    _BLOCK_GAP = 0.85
+    x = np.array([i + _BLOCK_GAP * sum(1 for b in bounds if b <= i)
+                  for i in range(len(fig_rows))], dtype=float)
     # Method order = benchmark first, then the policies in increasing
     # sophistication (oracle -> LA -> greedy), matching the base-case figures.
     _SENS_METHODS = ["oracle", "LA", "greedy"]
     series = [(m, r) for m in _SENS_METHODS for r in _ROUTE_SPLIT]
-    # Bar height is derived from the series count so adding a method re-packs
-    # the group instead of overflowing into the neighbouring row (6 bars at the
-    # old hard-coded 0.19 would have spanned 1.14 of a 1.0 row).
-    _GROUP = 0.78
-    h = _GROUP / len(series)
+    # Bar width is derived from the series count so adding a method re-packs
+    # the group instead of overflowing into the neighbouring column.  Near-unit
+    # width leaves only a hairline between levels of the same experiment.
+    _GROUP = 0.94
+    w = _GROUP / len(series)
     vals = [st[m][0] for _l, _p, per in fig_rows for st in per.values()
             for m in _SENS_METHODS if st[m][0] is not None]
 
-    # +1.6 of non-bar height: no in-figure title, but the legend band above the
-    # axes needs room for its caption line plus the swatch row.
-    # Taller rows than the two-method version: six bars per axis need the room,
-    # and the legend now wraps onto two lines.
-    fig, ax = plt.subplots(figsize=(6.6, 0.95 * len(fig_rows) + 1.9))
+    fig, ax = plt.subplots(figsize=(1.3 * (x[-1] + 1) + 1.2, 3.9))
     drawn_m, drawn_r = set(), set()
 
-    for yi, (label, planned, per) in zip(y, fig_rows):
+    for xi, (label, planned, per) in zip(x, fig_rows):
         any_here = False
         for k, (meth, route) in enumerate(series):
             mean_v = per[route][meth][0]
@@ -966,25 +976,48 @@ def section_sensitivity():
             drawn_r.add(route)
             col = ps.METHOD_COLOR[meth]
             face = ps.tint(col, 0.45) if route == "short" else col
-            off = ((len(series) - 1) / 2 - k) * h
-            ax.barh(yi + off, mean_v, height=h, color=face,
-                    edgecolor=col, linewidth=0.5)
-            ax.text(mean_v + np.sign(mean_v) * 0.18, yi + off, f"{mean_v:+.1f}",
-                    ha="left" if mean_v >= 0 else "right", va="center",
-                    fontsize=5.5, color=INK)
+            off = (k - (len(series) - 1) / 2) * w
+            ax.bar(xi + off, mean_v, width=w, color=face,
+                   edgecolor=col, linewidth=0.5)
+            ax.text(xi + off, mean_v + np.sign(mean_v) * 0.15, f"{mean_v:+.1f}",
+                    ha="center", va="bottom" if mean_v >= 0 else "top",
+                    rotation=90, fontsize=5.5, color=INK)
         if not any_here:
             note = "pending" if planned else "pending (needs a model flag)"
-            ax.text(0.2, yi, note, ha="left", va="center",
+            ax.text(xi, 0.2, note, ha="center", va="bottom", rotation=90,
                     fontsize=6.5, color=MUT, style="italic")
 
-    ax.axvline(0, color=INK, lw=0.9)
-    ax.set_xlim(min(-2.0, (min(vals) if vals else 0) - 3.0),
-                max(3.0, (max(vals) if vals else 0) + 3.0))
-    ax.set_ylim(-0.6, len(fig_rows) - 0.4)
-    ax.set_yticks(y, [r[0] for r in fig_rows])
-    ax.set_xlabel("Change in route duration vs base case (%)")
-    ax.xaxis.grid(True, color=GRID, lw=0.6)
+    ax.axhline(0, color=INK, lw=0.9)
+    lo = min(-2.0, (min(vals) if vals else 0) - 2.0)
+    hi = max(3.0, (max(vals) if vals else 0) + 2.0)
+    # Extra headroom above the tallest bar so the in-axes legend sits over empty
+    # space instead of over data.
+    ax.set_ylim(lo, hi + 0.24 * (hi - lo))
+    ax.set_xlim(x[0] - 0.6, x[-1] + 0.6)
+    # Tick labels keep only the level ("30 km", "150 kW"); the swept quantity is
+    # carried once per block by the group label under the axis.
+    ax.set_xticks(x, [" ".join(r[0].split()[-2:]) for r in fig_rows])
+    ax.set_ylabel("Change in route duration vs base case (%)")
+
+    # Major + minor grid on the response axis only: the reader compares bar
+    # heights across blocks, and the minor lines make ~1% differences legible.
+    ax.yaxis.set_major_locator(
+        mticker.MaxNLocator(nbins=8, steps=[1, 2, 2.5, 5, 10]))
+    ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(5))
+    ax.yaxis.grid(True, which="major", color=GRID, lw=0.6)
+    ax.yaxis.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
+    ax.tick_params(axis="y", which="minor", length=2)
     ax.set_axisbelow(True)
+
+    # One label per block, centred under its levels — the gap above does the
+    # separating, so nothing is drawn inside the axes.
+    span = ax.get_xaxis_transform()  # x in data coords, y in axes fraction
+    for s, e in zip([0] + bounds, bounds + [len(_grp)]):
+        # Fixed point offset (not an axes fraction) so the block label clears
+        # the tick labels by the same margin whatever the figure height is.
+        ax.annotate(_grp[s], xy=(float(x[s:e].mean()), 0), xycoords=span,
+                    xytext=(0, -24), textcoords="offset points",
+                    ha="center", va="top", fontsize=7.5, color=MUT)
 
     # ONE legend naming each drawn bar exactly (method x route), so no reader
     # has to infer that the lighter shade means the shorter route
@@ -998,21 +1031,17 @@ def section_sensitivity():
             facecolor=ps.tint(col, 0.45) if route == "short" else col,
             edgecolor=col, linewidth=0.5))
         labels.append(f"{ps.METHOD_LBL[meth]} · {route}")
-    # No in-figure title — the LaTeX \caption carries it (see results_section).
-    # The legend is a figure-level row above the axes rather than inside them:
-    # every in-axes corner is claimed by a bar or its value label at some point
-    # in the sweep, and the bottom-left corner it used to occupy became the
-    # largest negative bar the moment an axis was dropped from _SENS_ROWS.
-    fig.tight_layout(rect=(0, 0, 1, 0.88))
+    # No title of any kind — the LaTeX \caption carries it (see
+    # results_section).  The legend lives INSIDE the axes, in the headroom
+    # reserved above the tallest bar by the set_ylim above.
     if handles:
-        # Wrap at 3 columns: with three methods x two route classes the single
-        # row the two-method version used would run past the figure width.
-        fig.legend(handles, labels, frameon=False, fontsize=7,
-                   loc="upper center", ncol=min(3, len(handles)),
-                   bbox_to_anchor=(0.5, 0.995),
-                   title="hindsight optimum vs online policies",
-                   title_fontsize=7.5,
-                   handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
+        ax.legend(handles, labels, frameon=True, framealpha=0.9,
+                  edgecolor="none", facecolor="white", fontsize=7,
+                  loc="upper center", ncol=min(3, len(handles)),
+                  handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
+    # Bottom reserve: the block labels hang below the axes and tight_layout
+    # does not measure annotations drawn outside them.
+    fig.tight_layout(rect=(0, 0.09, 1, 1))
     _save(fig, "additional_sens_effects")
 
     lines = [
@@ -1042,7 +1071,9 @@ def section_sensitivity():
 
 # Regulatory breakpoints the horizon axis is read against (settings.T_SPR1 and
 # Tr1).  A horizon shorter than the spread cannot see the end of the current
-# duty; one equal to spread + daily rest sees a whole duty cycle.
+# duty; one equal to spread + daily rest sees a whole duty cycle.  They are no
+# longer drawn as reference lines — the text makes the point — but the ladder
+# below is chosen to straddle them, so they stay documented here.
 _LA_SPREAD_H = 13.0
 _LA_CYCLE_H  = 24.0
 
@@ -1105,6 +1136,22 @@ def _la_num(row, col):
     return f if np.isfinite(f) else None
 
 
+# Every series in this figure is the LA policy, so it takes LA's Okabe-Ito hue
+# and route class becomes the ordinal SHADE within it — the same grammar as the
+# sensitivity figure (method = hue, route = shade), instead of the standalone
+# blue ramp this figure used to own.  The three steps are spread wide in
+# lightness (pale -> full -> near-black) because three neighbouring tints of one
+# hue are not separable on a thin line; the marker SHAPE repeats the same
+# ordering so the series stay distinguishable in greyscale and for readers who
+# cannot rank the shades.
+_LA_ROUTE_SHADE = {
+    "short":  ps.tint(GREEN, 0.50),
+    "medium": GREEN,
+    "long":   ps.shade(GREEN, 0.62),
+}
+_LA_ROUTE_MARK = {"short": "o", "medium": "s", "long": "^"}
+
+
 def _la_cfg(n_scen: int, horizon: float) -> str:
     return f"S{n_scen}H{horizon:g}"
 
@@ -1132,9 +1179,25 @@ def section_la():
     # the whole point: the reader compares the shape of the horizon response
     # against the shape of the scenario response, and any difference in slope
     # is then real rather than an artefact of two independent scales.
-    fig, axes = plt.subplots(2, 2, figsize=(6.6, 4.4),
-                             sharex="col", sharey="row")
-    (ax_hq, ax_sq), (ax_hc, ax_sc) = axes
+    # A third, short row carries the infeasibility heat strip — the same device
+    # the base-case box figure puts under each panel.  It is not optional
+    # decoration: a configuration that strands the truck drops those runs from
+    # the gap median above, so a cell can look BETTER precisely because it
+    # failed more often.  The strip is where that shows up.
+    fig = plt.figure(figsize=(6.6, 5.1))
+    gs  = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.34],
+                           hspace=0.16, wspace=0.12)
+    ax_hq = fig.add_subplot(gs[0, 0])
+    ax_sq = fig.add_subplot(gs[0, 1], sharey=ax_hq)
+    ax_hc = fig.add_subplot(gs[1, 0], sharex=ax_hq)
+    ax_sc = fig.add_subplot(gs[1, 1], sharex=ax_sq, sharey=ax_hc)
+    st_h  = fig.add_subplot(gs[2, 0], sharex=ax_hq)
+    st_s  = fig.add_subplot(gs[2, 1], sharex=ax_sq)
+    axes  = np.array([[ax_hq, ax_sq], [ax_hc, ax_sc]])
+    for ax in (ax_hq, ax_sq, ax_hc, ax_sc):
+        ax.tick_params(labelbottom=False)   # rung labels live under the strip
+    for ax in (ax_sq, ax_sc):
+        ax.tick_params(labelleft=False)
 
     for ax_q, ax_c, ladder, is_h in ((ax_hq, ax_hc, _LA_HORIZONS, True),
                                      (ax_sq, ax_sc, _LA_SCENARIOS, False)):
@@ -1154,14 +1217,15 @@ def section_la():
                 if not xs:
                     continue
                 drew = True
-                col = ps.ROUTE_COLOR[route]
+                col = _LA_ROUTE_SHADE[route]
                 sty = _LA_TW_STYLE[tw]
+                mk  = _LA_ROUTE_MARK[route]
                 for ax, ys in ((ax_q, gq), (ax_c, gc)):
                     pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
                     if not pts:
                         continue
                     ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                            sty, color=col, marker="o", ms=3.4, lw=1.2,
+                            sty, color=col, marker=mk, ms=3.8, lw=1.3,
                             mfc=col, mec=col)
                     # The base cell is the reference the sweep is quoted
                     # against, so it is marked rather than left as one dot
@@ -1169,7 +1233,7 @@ def section_la():
                     bx = _LA_BASE[1] if is_h else _LA_BASE[0]
                     for x, y in pts:
                         if x == bx:
-                            ax.plot(x, y, "o", ms=7, mfc="none", mec=col,
+                            ax.plot(x, y, mk, ms=7.5, mfc="none", mec=col,
                                     lw=0.9)
         if not drew:
             for ax in (ax_q, ax_c):
@@ -1177,43 +1241,140 @@ def section_la():
                         fontsize=7.5, color=MUT, style="italic",
                         transform=ax.transAxes)
 
-    # Regulatory reference lines: the horizon axis is a threshold story, and
-    # the thresholds are HOS constants, not fitted breakpoints.
-    for ax in (ax_hq, ax_hc):
-        ax.axvline(_LA_SPREAD_H, color=MUT, lw=0.7, ls=":", zorder=0)
-        ax.axvline(_LA_CYCLE_H,  color=MUT, lw=0.7, ls=":", zorder=0)
-    ax_hq.annotate("spread\n13 h", (_LA_SPREAD_H, 1.0), xytext=(2, -2),
-                   textcoords="offset points", xycoords=("data", "axes fraction"),
-                   ha="left", va="top", fontsize=6, color=MUT)
-    ax_hq.annotate("duty cycle\n24 h", (_LA_CYCLE_H, 1.0), xytext=(2, -2),
-                   textcoords="offset points", xycoords=("data", "axes fraction"),
-                   ha="left", va="top", fontsize=6, color=MUT)
+    # Both ladders are RATIO ladders (12/24/48, 10/25/50), so a log x-axis puts
+    # the rungs at equal distances and the tick set is exactly the rungs — no
+    # auto-ticks between them, no minor ticks to imply a continuum that was
+    # never sampled.  (The HOS reference lines at 13 h / 24 h were dropped with
+    # their labels.)
+    for ax_st, ladder in ((st_h, _LA_HORIZONS), (st_s, _LA_SCENARIOS)):
+        rungs = [float(v) for v in ladder]
+        ax_st.set_xscale("log")     # sharex carries this up the whole column
+        ax_st.set_xticks(rungs, [f"{v:g}" for v in rungs])
+        ax_st.xaxis.set_minor_locator(mticker.NullLocator())
+        ax_st.set_xlim(min(rungs) / 1.22, max(rungs) * 1.22)
 
-    ax_hc.set_xticks(_LA_HORIZONS, [f"{h:g}" for h in _LA_HORIZONS])
-    ax_sc.set_xticks(_LA_SCENARIOS, [str(s) for s in _LA_SCENARIOS])
-    ax_hc.set_xlabel(r"Look-ahead horizon $L$ (h)   [$|\Xi| = 25$]")
-    ax_sc.set_xlabel(r"Scenarios $|\Xi|$   [$L = 24$ h]")
+    st_h.set_xlabel(r"Look-ahead horizon $L$ (h)   [$|\Xi| = 25$]")
+    st_s.set_xlabel(r"Scenarios $|\Xi|$   [$L = 24$ h]")
     ax_hq.set_ylabel("Gap to hindsight\noptimum (%)")
     ax_hc.set_ylabel("Decision time\nper stop (s)")
-    for ax in axes.ravel():
-        ax.yaxis.grid(True, color=GRID, lw=0.6)
-        ax.set_axisbelow(True)
-    # Log cost axis: the scenario ladder spans 5x and the horizon ladder more,
-    # so equal ratios must read as equal distances — but the tick labels stay
-    # plain seconds, since "2.2 x 10^1 s" helps no one.
-    ax_hc.set_yscale("log")
-    _log_ticks_plain(ax_hc.yaxis)
 
-    handles = [plt.Line2D([], [], color=ps.ROUTE_COLOR[r], lw=1.4, marker="o",
-                          ms=3.4) for r in routes]
+    # Both response axes are LINEAR and evenly ticked.  The cost axis used to be
+    # log so that equal ratios read as equal distances, but a scale whose grid
+    # spacing changes at 10 s invites the reader to measure it as if it were
+    # linear and get the wrong slope; a uniform grid costs some resolution at the
+    # short-route end and lies about nothing.
+    # Grid: vertical rules at the ladder rungs (so a point can be traced to its
+    # configuration) plus major+minor horizontal rules on the response axes.
+    for ax in axes.ravel():
+        ax.yaxis.set_major_locator(
+            mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.grid(True, which="major", color=GRID, lw=0.6)
+        ax.grid(True, which="minor", axis="y", color=GRID, lw=0.35, alpha=0.6)
+        ax.set_axisbelow(True)
+        ax.tick_params(axis="y", which="minor", length=2)
+        ax.tick_params(axis="x", which="minor", length=0)
+
+    # ── infeasibility heat strip ────────────────────────────────────────────
+    # Same traffic-light ramp as the base-case figure (Okabe-Ito bluish green ->
+    # yellow -> vermillion) and, as there, scaled to the WORST rate actually
+    # observed so the red end marks a real cell rather than a hypothetical 100%.
+    # Layout: one ROW per route class (top to bottom = short, medium, long, the
+    # legend's order) and, at each rung, one cell per window class — solid-line
+    # class ("none") left, dashed ("tight") right, keyed by the header letters.
+    from matplotlib.patches import Rectangle as _Rect
+    from matplotlib.colors import LinearSegmentedColormap as _LSC
+    _reds = _LSC.from_list("infeas", ["#009E73", "#F0E442", "#D55E00"])
+
+    def _infeas(ns, hh, route, tw):
+        n = _la_cell(stats, ns, hh, route, tw, "n_runs")
+        i = _la_cell(stats, ns, hh, route, tw, "n_infeasible")
+        return (i / n) if (n and i is not None) else None
+
+    def _coords(is_h, v):
+        return (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
+
+    fracs = [f for ax_st, ladder, is_h in ((st_h, _LA_HORIZONS, True),
+                                           (st_s, _LA_SCENARIOS, False))
+             for v in ladder for route in routes for tw in tws
+             for f in [_infeas(*_coords(is_h, v), route, tw)] if f]
+    fmax = max(fracs) if fracs else 1.0
+
+    # Cells are sized in DEX because the x-axis is log: a fixed multiplicative
+    # half-width keeps every group the same visual width at every rung.
+    _HALF_DEX = 0.085
+    for ax_st, ladder, is_h in ((st_h, _LA_HORIZONS, True),
+                                (st_s, _LA_SCENARIOS, False)):
+        ax_st.set_ylim(0, len(routes))
+        ax_st.set_yticks([])
+        ax_st.tick_params(axis="x", length=0)
+        for s in ax_st.spines.values():
+            s.set_visible(False)
+        for v in ladder:
+            ns, hh = _coords(is_h, v)
+            for ri, route in enumerate(routes):
+                y0 = len(routes) - 1 - ri + 0.10      # short on top
+                for ti, tw in enumerate(tws):
+                    f = _infeas(ns, hh, route, tw)
+                    if f is None:
+                        continue                       # not run -> left blank
+                    l0 = np.log10(float(v)) - _HALF_DEX + ti * _HALF_DEX
+                    x0, x1 = 10 ** l0, 10 ** (l0 + _HALF_DEX)
+                    ax_st.add_patch(_Rect(
+                        (x0, y0), x1 - x0, 0.80,
+                        facecolor=_reds(min(1.0, f / fmax)),
+                        edgecolor="#8a8a8a", lw=0.35, zorder=3))
+
+    # Row key on the left panel only, in the route shades used by the lines.
+    # Initials, not words: they are keyed by the SHADE, which is the same one
+    # the lines above use, so "S/M/L" decodes off the legend at a glance and the
+    # strip keeps its narrow left margin.
+    for ri, route in enumerate(routes):
+        st_h.annotate(ps.ROUTE_LBL[route][0], xy=(0, len(routes) - 0.5 - ri),
+                      xycoords=("axes fraction", "data"),
+                      xytext=(-3, 0), textcoords="offset points",
+                      ha="right", va="center", fontsize=5.6,
+                      color=_LA_ROUTE_SHADE[route])
+    # Which half of a pair is which window class, stated once.
+    for ti, tw in enumerate(tws):
+        l0 = np.log10(float(_LA_HORIZONS[0])) - _HALF_DEX + (ti + 0.5) * _HALF_DEX
+        st_h.annotate(ps.TW_LBL[tw][0], xy=(10 ** l0, len(routes)),
+                      xytext=(0, 1.5), textcoords="offset points",
+                      ha="center", va="bottom", fontsize=5.0, color=MUT)
+    # Strip name goes in the y-label slot, outside the row keys, so it cannot
+    # collide with the N/T header letters.
+    st_h.set_ylabel("Infeas.\nrate", fontsize=5.8, color=MUT, labelpad=13,
+                    linespacing=0.95)
+
+    handles = [plt.Line2D([], [], color=_LA_ROUTE_SHADE[r], lw=1.4,
+                          marker=_LA_ROUTE_MARK[r], ms=3.8) for r in routes]
     labels  = [ps.ROUTE_LBL[r] for r in routes]
     handles += [plt.Line2D([], [], color=MUT, lw=1.2, ls=_LA_TW_STYLE[t])
                 for t in tws]
     labels  += [f"{ps.TW_LBL[t]} windows" for t in tws]
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    # Explicit margins rather than tight_layout: the heat-strip axes carry only
+    # patches and annotations, which tight_layout cannot measure (it warns and
+    # guesses).  Fixed margins also make the colourbar placement below exact.
+    fig.subplots_adjust(left=0.135, right=0.925, top=0.895, bottom=0.105,
+                        hspace=0.16, wspace=0.12)
     fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
                ncol=5, bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
                handletextpad=0.4, columnspacing=1.4)
+
+    # Compact colour key for the strip, tucked to its right (as in the base-case
+    # figure).  Placed after tight_layout so the axes positions are final.
+    import matplotlib.cm as _cm
+    from matplotlib.colors import Normalize as _Norm
+    _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_reds)
+    _sm.set_array([])
+    _p  = st_s.get_position()
+    _cax = fig.add_axes([_p.x1 + 0.010, _p.y0, 0.010, _p.height])
+    _cb  = fig.colorbar(_sm, cax=_cax, orientation="vertical",
+                        ticks=[0, 100.0 * fmax])
+    _cb.ax.set_yticklabels(["0", f"{100.0 * fmax:.0f}"])
+    _cb.outline.set_linewidth(0.3)
+    _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
+    _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
     _save(fig, "additional_la_config")
 
     # ── figure 2: what a per-decision compute budget buys ────────────────────

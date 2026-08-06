@@ -619,6 +619,7 @@ def select_best_action(full_data, stop: int, state,
                        precomputed_scenarios=None,
                        ext_shift_used: int = 0,
                        prune_quantile: float | None = GUARD_QUANTILE,
+                       tiebreak_min: float = 5.0,
                        cmp_log: list = None) -> tuple:
     """
     Enumerate, prune, score, and select the best action at ``stop``.
@@ -822,8 +823,12 @@ def select_best_action(full_data, stop: int, state,
            f"{max_nonconstant*60:.2f} min"
            f"  ({'constant shift' if max_nonconstant < 1/60 else 'non-constant -- downstream decisions differ'})")
 
-    # ── 6. Tie-breaking: prefer y=1 within same (brk, rst) if ≤5 min extra and prefer brk taken if y=1 anyway ───
-    TIEBREAK = 5.0 / 60.0
+    # ── 6. Tie-breaking: prefer y=1 within same (brk, rst) if ≤ tiebreak_min extra and prefer brk taken if y=1 anyway ───
+    # The threshold is a POLICY parameter, not a constant: it fires on ~8% of
+    # decisions and systematically buys opportunistic charge/break dwell, which
+    # is a much larger effect than the scenario count.  tiebreak_min=0 leaves
+    # only exact ties and gives the pure argmin policy.
+    TIEBREAK = float(tiebreak_min) / 60.0
     winner   = min(scored, key=lambda s: s[1])
     tb_flag  = False
     if winner[0]["y"] == 0 and (winner[0].get("break_type") not in (None, "0")
@@ -1094,7 +1099,8 @@ def run_simulation(full_data: dict,
                    include_worst: bool = False,
                    run_id: str         = None,
                    supervised: bool    = False,
-                   prune_quantile: float | None = GUARD_QUANTILE) -> dict:
+                   prune_quantile: float | None = GUARD_QUANTILE,
+                   tiebreak_min: float = 5.0) -> dict:
     """
     Run the rolling-horizon look-ahead simulation from stop 0 to stop N.
 
@@ -1202,6 +1208,7 @@ def run_simulation(full_data: dict,
                 tracker        = tracker,
                 ext_shift_used = vehicle.ext_shift_used,
                 prune_quantile = prune_quantile,
+                tiebreak_min   = tiebreak_min,
                 cmp_log        = events["cmp_log"],
             )
 
@@ -1294,6 +1301,7 @@ def run_simulation(full_data: dict,
             charge_only   = charge_only,
             supervised    = supervised,
             prune_quantile= prune_quantile,
+            tiebreak_min  = tiebreak_min,
             seed          = seed,
         ),
     )
@@ -1323,6 +1331,7 @@ def run_simulation_precomputed(
     oracle_tee: bool             = False,
     supervised: bool             = False,
     prune_quantile: float | None = GUARD_QUANTILE,
+    tiebreak_min: float          = 5.0,
     resume: bool                 = False,
 ) -> dict:
     """
@@ -1482,6 +1491,7 @@ def run_simulation_precomputed(
                 tracker               = tracker,
                 ext_shift_used        = vehicle.ext_shift_used,
                 prune_quantile        = prune_quantile,
+                tiebreak_min          = tiebreak_min,
                 cmp_log               = events["cmp_log"],
             )
 
@@ -1577,6 +1587,7 @@ def run_simulation_precomputed(
             charge_only   = charge_only,
             supervised    = supervised,
             prune_quantile= prune_quantile,
+            tiebreak_min  = tiebreak_min,
         ),
     )
     return results

@@ -114,6 +114,7 @@ _COLS = [
     ("oracle_tw_misses", ("oracle_tw_misses",),                           "0",     13),
     ("gap_pen_%",        ("gap_pen",),                                    "0.00%", 12),
     ("gap_nopen_%",      ("gap_nopen",),                                  "0.00%", 13),
+    ("solver_gap_%",     ("solver_gap",),                                 "0.00%", 12),
     ("oracle_mipgap_%",  ("oracle", "gap"),                               "0.00%", 14),
     ("oracle_feasible",  ("oracle", "feasible"),                          "@",     13),
     ("oracle_optimal",   ("oracle", "optimal"),                           "@",     13),
@@ -420,6 +421,44 @@ def _annotate_instance_tags(rows: list[dict]):
     instance id (e.g. "RshortCfewTtight_1" -> short / few / tight)."""
     for rec in rows:
         rec.update(_parse_instance_tags(rec.get("instance")))
+
+
+# Gurobi's closing line, e.g.
+#   "Best objective 1.726e+02, best bound 1.699e+02, gap 1.5735%"
+# A run stopped before any incumbent prints "gap -", which parses to None.
+_GUROBI_GAP_RE = re.compile(
+    r"best bound\s+[-\d.e+]+,\s*gap\s+([\d.]+)%", re.IGNORECASE)
+
+
+def _annotate_solver_gap(rows: list[dict], logs_dir: str):
+    """Attach ``solver_gap`` — the offline MIP's own final relative gap.
+
+    The methods store only status/optimal flags, so the distance between the
+    plan they returned and the best bound their solver proved lives in the
+    Gurobi log alone.  The stored ``gurobi_log`` path is the one the run wrote
+    (possibly on a cluster filesystem), so only its basename is trusted and
+    resolved against the local logs directory; runs whose log was not kept
+    simply get None and drop out of the average.
+    """
+    n_hit = 0
+    for rec in rows:
+        rec["solver_gap"] = None
+        cand = rec.get("gurobi_log") or (
+            f"{rec.get('run_id')}_gurobi.log" if rec.get("run_id") else None)
+        if not cand:
+            continue
+        path = os.path.join(logs_dir, os.path.basename(str(cand)))
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                hits = _GUROBI_GAP_RE.findall(fh.read())
+        except OSError:
+            continue
+        if hits:
+            rec["solver_gap"] = float(hits[-1]) / 100.0
+            n_hit += 1
+    return n_hit
 
 
 _ORACLE_CACHE: dict = {}   # instance -> oracle dict (or None), memoized per run
@@ -813,7 +852,8 @@ def _method_labels(rows):
 
 
 def build_gap_latex(rows, metric: str = "gap_pen",
-                    full_grid: bool = True) -> list[str]:
+                    full_grid: bool = True,
+                    secondary: str | None = None) -> list[str]:
     """
     Table 1 — gap to oracle (%) by Route × Customers × Time-Window × method.
 
@@ -826,10 +866,11 @@ def build_gap_latex(rows, metric: str = "gap_pen",
       "gap_nopen" — pure route duration, window penalties excluded (beta-
                     independent efficiency gap).  Oracle (h) excludes penalties.
 
-    Each gap cell carries a superscript with the FEASIBLE/TOTAL run count for
-    that (class, method); it is a single number when all runs were feasible and
-    ``feas/total`` when some were excluded as infeasible, so sample size and
-    per-cell reliability are visible next to the gap.
+    ``secondary`` optionally puts a second gap definition in parentheses next
+    to the main number (used for the paper table: penalised gap outside,
+    duration-only gap inside).  When it is None the parentheses instead carry
+    the FEASIBLE/TOTAL run count for that (class, method) — a single number
+    when all runs were feasible — so sample size stays visible.
     """
     pen = (metric == "gap_pen")
     ora_field = "oracle_duration_pen_h" if pen else "oracle_duration_h"
@@ -847,6 +888,7 @@ def build_gap_latex(rows, metric: str = "gap_pen",
 
     # aggregate: gaps[(route,cust,tw)][method_group] = [gaps]; oracle by instance
     gaps:    dict = defaultdict(lambda: defaultdict(list))
+    gaps2:   dict = defaultdict(lambda: defaultdict(list))  # `secondary` metric
     n_total: dict = defaultdict(lambda: defaultdict(int))   # ASSESSABLE runs
     n_nobnd: dict = defaultdict(lambda: defaultdict(int))   # feasible, no oracle
     oracle:  dict = defaultdict(dict)
@@ -865,6 +907,8 @@ def build_gap_latex(rows, metric: str = "gap_pen",
             if _gap_usable(r) and r.get(metric) is not None:
                 n_total[cell][mg] += 1
                 gaps[cell][mg].append(r[metric])
+                if secondary and r.get(secondary) is not None:
+                    gaps2[cell][mg].append(r[secondary])
                 n_seeds[cell].add(r.get("instance"))
             elif not _is_feasible(r):
                 # a genuine failure: no gap exists for it BY DEFINITION, so it
@@ -882,6 +926,14 @@ def build_gap_latex(rows, metric: str = "gap_pen",
         vals = gaps[cell].get(mg, [])
         tot  = n_total[cell].get(mg, 0)
         nb   = n_nobnd[cell].get(mg, 0)
+        if secondary:
+            # main number = `metric`; parentheses = `secondary` on the same runs
+            if not vals:
+                return "--"
+            sec = gaps2[cell].get(mg, [])
+            body = _pct(_mean(vals), 1)
+            return (rf"{body}~{{\scriptsize({_pct(_mean(sec), 1)})}}" if sec
+                    else body)
         if tot == 0:
             # no assessable run; [n] flags feasible runs still awaiting an
             # oracle bound, so "no data yet" never looks like "all failed"
@@ -908,8 +960,6 @@ def build_gap_latex(rows, metric: str = "gap_pen",
 
     routes = (_ROUTE_ORDER if full_grid
               else _present_sorted((c[0] for c in oracle), _ROUTE_ORDER))
-    cv    = _mode([r.get("cv") for r in pop])
-    cv_s  = f"{cv:g}" if cv is not None else r"\langle CV\rangle"
     seed_counts = sorted({len(s) for s in n_seeds.values()})
     if not seed_counts:
         n_real = r"\langle N\rangle"
@@ -935,22 +985,27 @@ def build_gap_latex(rows, metric: str = "gap_pen",
 
     pen_txt = ("window penalties included" if pen
                else "route duration only, window penalties excluded")
+    # the travel-time distribution is described in the running text, not here
+    if secondary:
+        paren_txt = (r"  Parentheses give the same gap over the same runs "
+                     r"with window penalties excluded (route duration only).  "
+                     r"ROBU is solved on the short-route instances only.")
+    else:
+        paren_txt = (r"  Parentheses give the feasible/total run count per "
+                     r"cell among runs the oracle bound can assess (a single "
+                     r"number when all were feasible); square brackets give "
+                     r"feasible runs still awaiting an oracle bound, which "
+                     r"are excluded from both counts.")
     lbl = "tab:gap" + ("" if pen else "-nopen")
     L = []
     L.append(r"\begin{table}[htbp]")
     L.append(r"\centering")
     L.append(rf"\caption{{Gap to oracle (\%) in route duration "
              rf"({pen_txt}) by instance class and "
-             rf"method, averaged over {n_real} seed(s) per instance class; "
-             rf"travel-time multiplier $\xi_i$ shifted-lognormal on "
-             rf"$[0.889, 1.6]$ with $\mathrm{{E}}[\xi]=1$, "
-             rf"$\mathrm{{CV}} = {cv_s}$.  Parentheses give the feasible/total "
-             rf"run count per cell among runs the oracle bound can assess "
-             rf"(a single number when all were feasible); square brackets "
-             rf"give feasible runs still awaiting an oracle bound, which are "
-             rf"excluded from both counts."
-             rf"{cfg_txt}}}")
+             rf"method, averaged over {n_real} realizations per instance "
+             rf"class.{paren_txt}{cfg_txt}}}")
     L.append(rf"\label{{{lbl}}}")
+    L.append(r"\resizebox{\textwidth}{!}{%")
     L.append(r"\begin{tabular}{lll c ccccc}")
     L.append(r"\toprule")
     L.append(r"\multirow{2}{*}{\textbf{\small Route}} "
@@ -990,7 +1045,8 @@ def build_gap_latex(rows, metric: str = "gap_pen",
             L.append(r"\midrule")
 
     L.append(r"\bottomrule")
-    L.append(r"\end{tabular}")
+    L.append(r"\end{tabular}%")
+    L.append(r"}")
     L.append(r"\end{table}")
     return L
 
@@ -1003,48 +1059,49 @@ def build_feasibility_latex(rows) -> list[str]:
     computed over CERTIFIED runs only — runs whose plan the offline solver
     actually finished — so a solver that timed out without certifying its plan
     (ROBU C&CG not converged) does not masquerade as a stranding failure.  Two
-    extra columns expose exactly what was set aside:
+    columns describe the offline solve itself:
 
       Not opt. (\%)   fraction of runs where the offline optimiser returned a
                       valid plan but did not prove optimality (time limit);
                       '--' for the online policies, which have no offline
                       optimum.  These runs still count as feasible/infeasible.
-      Not solved (\%) fraction whose plan was never certified (ROBU did not
-                      converge); excluded from the robustness rates above.
+      Opt. gap (\%)   mean final relative MIP gap over the NOT-optimal solves
+                      only — a proven optimum contributes no gap, so averaging
+                      it in would dilute the number the column is there to
+                      report.  Read back from the Gurobi log; '--' where no log
+                      was kept (ROBU writes none, its master solves being
+                      iterative).
+
+    Which solves count as not-optimal comes from the status the run recorded
+    (ro_optimal / twosp_optimal / robu_converged), never from a route-class
+    expectation: the short and medium routes do overwhelmingly close, and the
+    long ones overwhelmingly do not, but where the record says otherwise the
+    record wins.  Non-optimal solves whose log was not retained are simply
+    unmeasured and drop out of the mean, so the caption reports how many solves
+    each number rests on.
+
+    Repairs are '--' for the box-robust plans (RO, ROBU): the simulator never
+    invokes a repair for them, so a rate of 0\% would read as a measured result
+    rather than an inapplicable cell.
     """
     ok = [r for r in rows if _is_ok(r)]
-    labels = _method_labels(ok)
 
+    # Plain method names: the scenario/horizon configuration belongs in the
+    # caption or the running text, not in a parenthesis on every row label.
     # (data method value, display label, repairs-applicable?, has offline opt?)
     method_rows = [
-        ("greedy", labels["greedy"], False, False),
-        ("RO",     labels["RO"],     True,  True),
-        ("ROBU",   labels.get("ROBU", "ROBU"), True, True),
-        ("LA",     labels["LA_mean"], False, False),
-        ("2SP",    labels["twosp"],  True,  True),
+        ("greedy", "Greedy", False, False),
+        ("RO",     "RO",     False, True),
+        ("ROBU",   "ROBU",   False, True),
+        ("LA",     "LA",     False, False),
+        ("2SP",    "SP",     True,  True),
     ]
 
     def _rate(recs, pred):
         return (sum(1 for r in recs if pred(r)) / len(recs)) if recs else None
 
-    L = []
-    L.append(r"\begin{table}[htbp]")
-    L.append(r"\centering")
-    L.append(r"\caption{Feasibility and robustness statistics by method: "
-             r"HoS-violation rate, stranding rate, repair frequency (offline "
-             r"plans), and window hit rate, computed over runs whose plan the "
-             r"solver certified.  ``Not opt.'' is the share of runs returned at "
-             r"the time limit without a proven optimum; ``Not solved'' the "
-             r"share whose plan was never certified (excluded from the rates "
-             r"to their left).}")
-    L.append(r"\label{tab:feasibility}")
-    L.append(r"\begin{tabular}{lcccccc}")
-    L.append(r"\toprule")
-    L.append(r"\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{Stranding (\%)} "
-             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)} "
-             r"& \textbf{Not opt. (\%)} & \textbf{Not solved (\%)}\\")
-    L.append(r"\midrule")
-
+    # rows first, so the caption can state what the Opt. gap column rests on
+    body, cover = [], []
     for mval, label, has_repair, has_opt in method_rows:
         u      = [r for r in ok if r.get("method") == mval]
         solved = [r for r in u if not _is_unsolved(r)]
@@ -1053,16 +1110,50 @@ def build_feasibility_latex(rows) -> list[str]:
         rep  = (_rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0)
                 if has_repair else None)
         twh  = _mean([_mval(r, "tw_hit_rate") for r in solved])
-        nopt = (_rate(u, lambda r: r.get("solve_status") == "time_limit")
-                if has_opt else None)
-        nsol = _rate(u, _is_unsolved)
+        # the offline solves that did NOT prove optimality: the only ones with
+        # a gap to optimal worth averaging
+        nopt_runs = [r for r in u if r.get("solve_status") == "time_limit"]
+        nopt = (len(nopt_runs) / len(u) if (has_opt and u) else None)
+        meas = [r.get("solver_gap") for r in nopt_runs
+                if r.get("solver_gap") is not None]
+        ogap = _mean(meas) if (has_opt and meas) else None
+        if has_opt and nopt_runs:
+            cover.append(rf"{label} {len(meas)} of {len(nopt_runs)}")
         rep_s  = _pct(rep, 1) if has_repair else "--"
         nopt_s = _pct(nopt, 1) if has_opt else "--"
-        L.append(f"{label} & {_pct(hos,1)} & {_pct(strd,1)} & {rep_s} "
-                 f"& {_pct(twh,1)} & {nopt_s} & {_pct(nsol,1)} \\\\")
+        ogap_s = _pct(ogap, 1) if ogap is not None else "--"
+        body.append(f"{label} & {_pct(hos,1)} & {_pct(strd,1)} & {rep_s} "
+                    f"& {_pct(twh,1)} & {nopt_s} & {ogap_s} \\\\")
+    cover_txt = ("  It averages the solver logs retained for "
+                 + ", ".join(cover) + " such solves.") if cover else ""
 
+    L = []
+    L.append(r"\begin{table}[htbp]")
+    L.append(r"\centering")
+    L.append(r"\caption{Feasibility and robustness statistics by method: "
+             r"HoS-violation rate, SOC-violation (stranding) rate, repair "
+             r"frequency (offline plans), and window hit rate, computed over "
+             r"runs whose plan the "
+             r"solver certified.  ``Not opt.'' is the share of runs returned at "
+             r"the time limit without a proven optimum and ``Opt.\ gap'' the "
+             r"mean final MIP gap over those solves alone, the proven optima "
+             r"contributing no gap; both are undefined for the online "
+             r"policies, which solve no offline program."
+             + cover_txt + r"}")
+    L.append(r"\label{tab:feasibility}")
+    L.append(r"\resizebox{\textwidth}{!}{%")
+    L.append(r"\begin{tabular}{lcccccc}")
+    L.append(r"\toprule")
+    # "SOC viol." rather than "Stranding": the paper's wording for the same
+    # metric (the battery hitting its floor in execution).
+    L.append(r"\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{SOC viol. (\%)} "
+             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)} "
+             r"& \textbf{Not opt. (\%)} & \textbf{Opt. gap (\%)}\\")
+    L.append(r"\midrule")
+    L += body
     L.append(r"\bottomrule")
-    L.append(r"\end{tabular}")
+    L.append(r"\end{tabular}%")
+    L.append(r"}")
     L.append(r"\end{table}")
     return L
 
@@ -1148,6 +1239,8 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     _annotate_instance_tags(rows)
     _annotate_gap_to_oracle(rows, solutions_dir)
     _annotate_outcome(rows)
+    n_gl = _annotate_solver_gap(rows, logs_dir)
+    print(f"  Read a final MIP gap from {n_gl} Gurobi log(s)")
 
     rows, n_dup = _dedup_latest(rows)
     if n_dup:
@@ -1175,7 +1268,8 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     build_summary_sheet(wb.create_sheet(), base_rows)
 
     # LaTeX tables — penalised (objective) gap and duration-only gap
-    gap_pen_tab = build_gap_latex(base_rows, metric="gap_pen")
+    gap_pen_tab = build_gap_latex(base_rows, metric="gap_pen",
+                                  secondary="gap_nopen")
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap", gap_pen_tab)
     gap_np_tab  = build_gap_latex(base_rows, metric="gap_nopen")
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_nopen", gap_np_tab)

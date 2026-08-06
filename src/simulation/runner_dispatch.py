@@ -74,6 +74,8 @@ Usage (CLI)
     --time_limit INT      per-scenario solver time limit s (default: 300)
     --n_workers INT       parallel workers (default: 8)
     --solve_mode STR      lp | mip | both (default: lp)
+    --tiebreak_min FLOAT  minutes the action tie-break pays to charge / to
+                          take a break (default: 5.0; 0 = pure argmin)
     --charge_only         enumerate charge decision only
     --criterion STR       mean | worst | best (default: mean)
 
@@ -185,6 +187,7 @@ def run_algorithm(
     solve_mode: str        = "lp",
     charge_only: bool      = False,
     criterion: str         = "mean",
+    tiebreak_min: float    = 5.0,
     include_best: bool     = False,
     include_worst: bool    = False,
     # RO options
@@ -512,6 +515,7 @@ def run_algorithm(
             solve_mode         = solve_mode,
             charge_only        = charge_only,
             criterion          = criterion,
+            tiebreak_min       = tiebreak_min,
             include_best       = include_best,
             include_worst      = include_worst,
             run_id             = run_id,
@@ -633,7 +637,8 @@ _SIG_FIELDS = {
     "ROBU":   ["variant", "robu_eps", "gamma", "supervised", "prune_quantile"],
     "2SP":    ["variant", "n_scenarios", "supervised", "prune_quantile"],
     "LA":     ["variant", "n_scenarios", "horizon_hours", "criterion",
-               "solve_mode", "charge_only", "supervised", "prune_quantile"],
+               "solve_mode", "charge_only", "supervised", "prune_quantile",
+               "tiebreak_min"],
 }
 
 
@@ -667,7 +672,11 @@ def _requested_sig(alg: str, kw: dict) -> Optional[dict]:
                     criterion=kw.get("criterion", "mean"),
                     solve_mode=kw.get("solve_mode", "lp"),
                     charge_only=bool(kw.get("charge_only", False)),
-                    supervised=sup, prune_quantile=pq)
+                    supervised=sup, prune_quantile=pq,
+                    # Runs made before the flag existed carry no tiebreak_min
+                    # and were all made at 5.0, so that is what a missing field
+                    # must compare equal to.
+                    tiebreak_min=float(kw.get("tiebreak_min", 5.0)))
     return None
 
 
@@ -681,6 +690,18 @@ def _val_eq(a, b) -> bool:
         return abs(float(a) - float(b)) < 1e-6
     except (TypeError, ValueError):
         return str(a) == str(b)
+
+
+# Value a run made BEFORE a signature field existed was effectively run with.
+# Without this, adding a field would make every legacy run look different from
+# a default-parameter request and --skip-existing would re-solve the whole
+# archive.
+_LEGACY_SIG_DEFAULTS = {"tiebreak_min": 5.0}
+
+
+def _stored_sig_val(sol: dict, field: str):
+    v = sol.get(field)
+    return _LEGACY_SIG_DEFAULTS.get(field) if v is None else v
 
 
 def _find_matching_run(json_file: str, alg: str, kw: dict,
@@ -729,7 +750,7 @@ def _find_matching_run(json_file: str, alg: str, kw: dict,
             continue
         if str(sol.get("instance", "")).endswith("_diesel") != want_diesel:
             continue
-        if all(_val_eq(v, sol.get(k)) for k, v in req.items()):
+        if all(_val_eq(v, _stored_sig_val(sol, k)) for k, v in req.items()):
             return path
     return None
 
@@ -880,6 +901,12 @@ if __name__ == "__main__":
                         choices=["mean", "worst", "best", "cvar_0.8"],
                         help="RH3: scenario aggregation for LA scoring; "
                              "cvar_0.8 = mean of the worst 20 percent.")
+    parser.add_argument("--tiebreak_min", type=float, default=5.0,
+                        help="LA: minutes of extra cost the action tie-break "
+                             "will pay to charge (or to take a break when "
+                             "already charging).  Default 5.0 — the value every "
+                             "base run used.  0 disables it, leaving the pure "
+                             "argmin over the scenario scores.")
     parser.add_argument("--supervised",   action="store_true", default=False,
                         help="S1: enable the safety supervisor guard. "
                              "Default off (raw mode): each method's intrinsic "
@@ -999,6 +1026,7 @@ if __name__ == "__main__":
         solve_mode       = args.solve_mode,
         charge_only      = args.charge_only,
         criterion        = args.criterion,
+        tiebreak_min     = args.tiebreak_min,
         ro_time_limit    = args.ro_time_limit,
         ro_mip_gap       = args.ro_mip_gap,
         robu_eps         = args.robu_eps,

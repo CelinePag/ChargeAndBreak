@@ -307,9 +307,10 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
     levels present in the data.
 
     The infeasibility heat strip below each panel shades the GENUINE
-    infeasibility rate (certified plans that still fail); cells that also hold
-    unsolved (uncertified) runs are marked with a diagonal hatch so a
-    non-converged solve is visually distinct from a true failure.
+    infeasibility rate (certified plans that still fail).  Unsolved
+    (uncertified) runs are not drawn at all — they are reported on the console
+    and in the stats CSV only — so a cell without an assessable rate stays
+    blank rather than carrying a marker of its own.
     """
     if n_unsl is None:
         n_unsl = {}
@@ -401,9 +402,7 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         tops = [v for vals in gaps.values() for v in vals]
     y_top = 1.06 * max(tops) if tops else 1.0
 
-    any_unsolved = any(n_unsl.values())
-
-    def _legend(fig, tw_shades: bool = False, has_unsolved: bool = False):
+    def _legend(fig, tw_shades: bool = False):
         """Single legend row: method colours, then (when ``tw_shades`` is set)
         a "TW:" lead-in and the four shade swatches keyed T=Tight ... N=None
         (dark = Tight -> light = None), so the window class is readable from the
@@ -428,9 +427,6 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
             handles += [Patch(facecolor=_tint("#4d4d4d", _TW_TINT[t]),
                               edgecolor="#4d4d4d",
                               label=f"{_TW_SHORT[t]}={_TW_LBL[t]}") for t in tws]
-        if has_unsolved:
-            handles.append(Patch(facecolor="white", edgecolor="#4d4d4d",
-                                 hatch="////", label="not solved"))
         fig.legend(handles=handles, loc="upper center",
                    ncol=len(handles), frameon=False, fontsize=6.5,
                    handlelength=1.1, handletextpad=0.4, columnspacing=0.9,
@@ -641,22 +637,13 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     for ii, iv in enumerate(inner_list):
                         m, tw = (ov, iv) if inner_is_tw else (iv, ov)
                         frac = _infeas_frac(route, cust, tw, m)
-                        n_u  = n_unsl.get((route, cust, tw, m), 0)
-                        if frac is None and not n_u:
-                            continue        # not run -> leave blank
-                        # base colour: green->red over the GENUINE infeas rate;
-                        # a cell that is only unsolved (frac is None) stays light
-                        face = (_reds(min(1.0, frac / _fmax))
-                                if frac is not None else "#f2f2f2")
+                        if frac is None:
+                            continue        # nothing assessable -> leave blank
+                        # green -> red over the GENUINE infeasibility rate
                         axst.add_patch(_Rect(
                             (_x(ci, oi, ii) - 0.46, 0.30), 0.92, 0.60,
-                            facecolor=face,
+                            facecolor=_reds(min(1.0, frac / _fmax)),
                             edgecolor="#8a8a8a", lw=0.35, zorder=3))
-                        if n_u:                       # uncertified solves: hatch
-                            axst.add_patch(_Rect(
-                                (_x(ci, oi, ii) - 0.46, 0.30), 0.92, 0.60,
-                                facecolor="none", edgecolor="#4d4d4d",
-                                lw=0.0, hatch="////", zorder=4))
             # customer-class labels sit UNDER the strip (no overlap now)
             centers = [ci * grp + (n_o * blk - gap_b - 1) / 2
                        for ci in range(len(custs))]
@@ -686,7 +673,7 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                                 color=_INK_PRIMARY)
         # inner="tw": TW is read from the shade key in the legend; inner=
         # "method": TW is the on-axis block, so no shade key needed.
-        _legend(fig, tw_shades=inner_is_tw, has_unsolved=any_unsolved)
+        _legend(fig, tw_shades=inner_is_tw)
         fig.tight_layout(rect=(0, 0.0, 1, 0.90))
 
         # compact colour key, tucked to the right of the strip row
