@@ -79,7 +79,7 @@ import numpy as np
 
 from src.settings import (
     ECR_A as _ECR_A, ECR_B as _ECR_B, ECR_C as _ECR_C, ecr as _ecr,
-    V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS, TBAR,
+    V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS,
     Tb45, Tb15, Tb30, ALLOW_SPLIT_BREAK, Tr1, Tr2,
     Tdrv_cons, Tdrv_sh1, Tdrv_sh2, Twrk_cons1, Twrk_cons2, Twrk_sh,
     T_SPR1, T_SPR2, TWK_60, TWK_DRV, RHO_BAR, EXT_BAR, BETA_TW,
@@ -87,7 +87,7 @@ from src.settings import (
     M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H, M_LAYBY_H,
     LAYBY_SPACING_KM, LAYBY_MIN_LEG_H,
     SERVICE_TIME_H, CS_SPACING_KM, T_START as _T_START,
-    CHARGER_POWER_BASE_KW, scale_tbar, XI_MAX,
+    CHARGER_POWER_BASE_KW, charging_curve, XI_MAX,
 )
 from src import paths as _paths
 
@@ -315,8 +315,10 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
     Ecap = Bcap
     Emin = SOC_MIN_FRAC * Bcap
     Ebar = {r: EBAR_FRACS[r] * Bcap for r in EBAR_FRACS}
-    # I2: rescale the PWL charging-time breakpoints to the requested power class
-    Tbar = (scale_tbar(charger_power_kw) if charger_power_kw else dict(TBAR))
+    # I2: the curve is derived from the charge point's rated output and THIS
+    # instance's pack capacity, so the base case and the power classes share one
+    # code path and the curve tracks Bcap instead of assuming 500 kWh.
+    Tbar = charging_curve(charger_power_kw or CHARGER_POWER_BASE_KW, Bcap)
 
     R    = sorted(Ebar.keys())
     Rseg = R[1:]

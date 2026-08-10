@@ -45,22 +45,65 @@ BATTERY_CAPACITY: float = 500.0  # kWh default battery capacity
 SOC_MIN_FRAC: float = 0.20       # Emin = SOC_MIN_FRAC * Ecap
 
 # ── PWL charging curve ─────────────────────────────────────────────────────────
-# Ebar breakpoints as fractions of Ecap; Tbar is in hours.
-# Base case: 500 kWh in 2.5 h ≈ 200 kW average (CCS-class fast charging).
-EBAR_FRACS: dict[int, float] = {0: 0.0, 1: 0.40, 2: 0.80, 3: 1.0}
-TBAR: dict[int, float] = {0: 0.0, 1: 0.55, 2: 1.367, 3: 2.50}
+# Two concave segments, DERIVED from two physical inputs — the charge point's
+# rated output P and the pack capacity Ecap:
+#
+#   0 → 80 % SOC    charger-limited, flat at the rated output P.
+#   80 → 100 % SOC  battery-limited (CC→CV transition), flat at
+#                   min(P, TAIL_C_RATE * Ecap).
+#
+# Ebar breakpoints are fractions of Ecap; Tbar is cumulative hours.
+EBAR_KNEE:  float = 0.80   # SOC at which the pack, not the charger, takes over
+EBAR_FRACS: dict[int, float] = {0: 0.0, 1: EBAR_KNEE, 2: 1.0}
 
-# I2 sensitivity axis: charger power classes.  The PWL time breakpoints scale
-# inversely with average power: Tbar_scaled = Tbar * (P_BASE / P_charger).
-CHARGER_POWER_BASE_KW: float = 200.0   # implied by TBAR above (500 kWh / 2.5 h)
-CHARGER_POWER_CLASSES_KW: tuple = (150.0, 200.0, 350.0, 1000.0)  # incl. MCS 1 MW
+# Tail acceptance as a fraction of Ecap per hour: 0.40/h = 200 kW on a 500 kWh
+# pack.  This is a BATTERY property, so it does NOT rise with charger power once
+# the charger exceeds it, and a charge point rated below it never tapers at all.
+# Modelling it as charger-proportional (as the old scale_tbar did) had a 150 kW
+# point tapering to 86 kW — below its own rated output, which is unphysical.
+TAIL_C_RATE: float = 0.40
+
+# Base case: 350 kW, the minimum station output that Regulation (EU) 2023/1804
+# (AFIR) mandates every 60 km on the TEN-T core network by 2030
+# (http://data.europa.eu/eli/reg/2023/1804/oj).  Current tractors accept this
+# over CCS: Volvo FH Aero 350 kW, MAN eTGX 375 kW, Mercedes eActros 600 400 kW.
+# NOTE: these are RATED outputs, not 0-100 % averages.  The base curve averages
+# 304 kW over a full charge and sustains the full 350 kW across 20-80 % SOC.
+CHARGER_POWER_BASE_KW: float = 350.0
+# I2 sensitivity axis.  700 kW = Volvo FH Aero / MAN eTGX over MCS;
+# 1000 kW = Mercedes eActros 600 over MCS; 150 kW = pre-AFIR / depot CCS.
+CHARGER_POWER_CLASSES_KW: tuple = (150.0, 350.0, 700.0, 1000.0)
 
 
-def scale_tbar(power_kw: float, tbar: dict | None = None) -> dict:
-    """Return TBAR rescaled to a charger of average power `power_kw` (I2)."""
-    base = dict(TBAR if tbar is None else tbar)
-    f = CHARGER_POWER_BASE_KW / float(power_kw)
-    return {r: t * f for r, t in base.items()}
+def charging_curve(power_kw: float, ecap: float = BATTERY_CAPACITY) -> dict:
+    """PWL cumulative-time breakpoints (h) for a charge point rated `power_kw`.
+
+    Flat at the rated output up to EBAR_KNEE, then flat at the pack's tail
+    acceptance.  Keys align with EBAR_FRACS.  The base case and every power
+    class go through this one function, so Tbar cannot drift out of sync with
+    the power it claims to represent.
+    """
+    p      = float(power_kw)
+    ecap   = float(ecap)
+    p_tail = min(p, TAIL_C_RATE * ecap)
+    t: dict[int, float] = {0: 0.0}
+    for r in sorted(EBAR_FRACS)[1:]:
+        de   = (EBAR_FRACS[r] - EBAR_FRACS[r - 1]) * ecap
+        rate = p if EBAR_FRACS[r] <= EBAR_KNEE + 1e-12 else p_tail
+        t[r] = t[r - 1] + de / rate
+    return t
+
+
+TBAR: dict[int, float] = charging_curve(CHARGER_POWER_BASE_KW)
+
+# Emin = SOC_MIN_FRAC * Ecap confines the truck to the 20-80 % band, where the
+# charger must be the binding constraint (mirrors the E1 ECR check above).
+_e_lo   = SOC_MIN_FRAC * BATTERY_CAPACITY
+_e_hi   = EBAR_KNEE * BATTERY_CAPACITY
+_p_band = (_e_hi - _e_lo) / (TBAR[1] - _e_lo / CHARGER_POWER_BASE_KW)
+assert abs(_p_band - CHARGER_POWER_BASE_KW) < 1e-9, (
+    f"base curve sustains {_p_band:.1f} kW over the {100*SOC_MIN_FRAC:.0f}-"
+    f"{100*EBAR_KNEE:.0f}% band, not the rated {CHARGER_POWER_BASE_KW:.0f} kW")
 
 
 # ── HoS limits (EU Regulation 561/2006 + Directive 2002/15/EC) ─────────────────
@@ -101,9 +144,10 @@ EXT_BAR: int = 2       # extended (10 h) driving shifts allowed per week (Art. 6
 #     min  ta[N] + BETA_TW * sum(delta_i),   delta_i ∈ {0,1}.
 # Expressed in objective-hours per missed window (early = late = same cost:
 # the disruption is being unannounced, not its magnitude — paper §3.1).
-# Base case 2 h (Table 5); report the beta-sensitivity {1, 2, 5} h.
-BETA_TW: float = 1.0
-BETA_TW_CLASSES: tuple = (1.0, 2.0, 5.0)
+# Base case 0.5 h (30 min) — one missed window costs the same as half an hour
+# of route duration.  Report the beta-sensitivity {1, 2, 5} h above it.
+BETA_TW: float = 0.5
+BETA_TW_CLASSES: tuple = (0.5, 1.0, 2.0, 5.0)
 
 # ── Queue wait time at CS stops — lognormal distribution ──────────────────────
 # S6: Q_i is a KNOWN parameter (expected access delay at the charger), drawn
@@ -115,7 +159,7 @@ QUEUE_WAIT_STD_MIN:  float = 8.0   # std dev (minutes)
 # ── Maneuver / overhead times at CS stops ─────────────────────────────────────
 M_STOP_H: float = 10.0 / 60   # stop overhead per CS activity (h)
 M_SEQ_H:  float = 5.0 / 60    # sequential-mode repositioning overhead (h)
-M_MAN_DEFAULT_H: float = 15.0 / 60  # default maneuver at non-CS stop (h)
+M_MAN_DEFAULT_H: float = 10.0 / 60  # default maneuver at non-CS stop (h)
 
 # ── Service time at customer stops ────────────────────────────────────────────
 SERVICE_TIME_H: float = 0.5  # 30 min per customer delivery (h)

@@ -48,7 +48,7 @@ import numpy as np
 from src.instance_gen.instances import make_data
 from src.instance_gen.instance_io import _to_json_safe, generate_time_windows
 from src.settings import (V_NOM, ecr, XI_MIN, XI_MAX, TRAVEL_TIME_CV,
-                      TRAVEL_TIME_AR1_RHO, sample_multipliers, scale_tbar)
+                      TRAVEL_TIME_AR1_RHO, sample_multipliers)
 from src import paths as _paths
 
 DATA_DIR = _paths.data("norway")
