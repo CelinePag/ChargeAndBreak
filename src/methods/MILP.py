@@ -54,6 +54,7 @@ import math as _mi
 import pyomo.environ as pyo
 
 from src.instance_gen.instances import compute_time_bounds
+from src.settings import BETA_TW
 from src import paths as _paths
 
 FIGURES_DIR        = _paths.figures()
@@ -251,7 +252,7 @@ def _declare_common_params(m, data):
     # M9 — weekly working-time cap (Directive 2002/15/EC)
     m.Twk60 = pyo.Param(initialize=data.get("Twk60", 60.0))
     # TW2 — fixed out-of-window service penalty (h-equivalent per missed window)
-    m.beta  = pyo.Param(initialize=data.get("beta", 2.0))
+    m.beta  = pyo.Param(initialize=data.get("beta", BETA_TW))
     # C1 — horizon big-M H: a valid upper bound on any feasible arrival span.
     # There is NO arrival deadline; H is used ONLY as the big-M in the window
     # indicators (eqs. 5–6) and the rest bound (eq. 36).  Computed per instance
@@ -1423,7 +1424,7 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         t0=t0,                      # sub-window start time
         H=H_bigM,                   # C1 window / rest big-M (full-route bound)
         hard_tw=full_data.get("hard_tw", False),
-        beta=full_data.get("beta", 2.0),
+        beta=full_data.get("beta", BETA_TW),
         allow_split=full_data.get("allow_split", True),
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],

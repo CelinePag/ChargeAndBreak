@@ -52,6 +52,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.ticker import FuncFormatter
+from src.settings import BETA_TW
 from src import paths as _paths
 
 # ── Shared colour palette ─────────────────────────────────────────────────────
@@ -506,7 +507,7 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
     # The objective everywhere is  arrival + beta·(#missed windows).  tend is
     # the penalty-FREE physical arrival; the oracle obj already bakes the
     # penalty in — so a like-for-like gap needs both split out consistently.
-    beta   = float(full_data.get("beta", 2.0))
+    beta   = float(full_data.get("beta", BETA_TW))
     Wha    = full_data.get("Wha", {})
     Whf    = full_data.get("Whf", {})
     _n_miss_sim = 0                              # same rule as BEHDV.step (1e-3 tol)

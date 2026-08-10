@@ -8,16 +8,45 @@ All times in hours, energies in kWh, distances in km.
 from __future__ import annotations
 import numpy as np
 
-# ── ECR energy model (Younes et al. 2020) ──────────────────────────────────────
-# Formula: ECR(v) = A/v + B + C·v²  (kWh/km)
-# Reference: https://doi.org/10.1016/j.est.2020.101758
-# Calibration cross-check (E1): a loaded 40-t BET at highway speed should land
-# in ~1.0–1.5 kWh/km.  See Nykvist & Olsson (2021, Joule,
-# https://doi.org/10.1016/j.joule.2021.06.007) and NACFE Run on Less—Electric
-# (https://runonless.com).  ECR(80) ≈ 1.10 kWh/km with the parameters below.
-ECR_A: float = 33.055
-ECR_B: float = 0.2256
-ECR_C: float = 7.2e-5
+# ── ECR energy model — simplified road load ────────────────────────────────────
+# ECR(v) = A/v + B + C·v²  (kWh/km) is not a fitted curve: it is the road-load
+# equation divided by speed, so every coefficient is DERIVED from a physical
+# parameter rather than regressed.
+#
+#     A/v   auxiliaries            P_aux / v
+#     B     rolling resistance     C_rr·m·g / η
+#     C·v²  aerodynamic drag       ½·ρ·C_d·A_f·v² / η
+#
+# Parameters follow the 40-t tractor-semitrailer of
+#   Earl, Mathieu, Cornelis, Kenny, Calvo Ambel & Nix (2018), "Analysis of
+#   long haul battery electric trucks in EU", 8th Commercial Vehicle Workshop,
+#   Graz — European Federation for Transport and Environment.
+#   https://www.transportenvironment.org/uploads/files/20180725_T.pdf
+# Running the block below with C_d = 0.60 reproduces their published 1.44 kWh/km
+# at 90 km/h, and with C_d = 0.36 their 1.15 kWh/km — the model is theirs.
+VEH_MASS_KG:     float = 40000.0  # EU max GVW, 5-axle artic (Directive 96/53/EC)
+C_RR:            float = 0.0055   # C-rated tyres (Earl et al. 2018)
+FRONTAL_AREA_M2: float = 10.0     # 2.5 m wide × 4.0 m high (Directive 96/53/EC)
+RHO_AIR:         float = 1.2      # kg/m³ (Earl et al. 2018)
+ETA_DRIVETRAIN:  float = 0.85     # BET total drivetrain (Earl et al. 2018, Tab. 1)
+# Continuous cabin HVAC + electrical load.  Earl et al. exclude auxiliaries;
+# VECTO (Reg. (EU) 2017/2400) models them explicitly (air compressor, HVAC,
+# alternator, cooling fan, steering pump) and the BET powertrain literature puts
+# the aggregate at ~3.2 kW.  Only material below ~40 km/h.
+P_AUX_KW:        float = 3.2
+# The one judgement call.  Earl et al. bracket it: 0.60 = 2018 EU fleet average,
+# 0.36 = best in class but requires a shortened trailer (less load volume).  0.50
+# reflects the aerodynamic redesign of current long-haul BETs (Mercedes eActros
+# 600, Volvo FH Aero).  The bracket spans 1.09–1.32 kWh/km at 80 km/h and is the
+# natural sensitivity axis if the base value is challenged.
+C_D:             float = 0.50
+
+_G = 9.81  # m/s²
+# N·km → kWh is a factor 1/3600; v in km/h → (v/3.6)² introduces the 12.96.
+ECR_A: float = P_AUX_KW
+ECR_B: float = C_RR * VEH_MASS_KG * _G / 3600.0 / ETA_DRIVETRAIN
+ECR_C: float = (0.5 * RHO_AIR * C_D * FRONTAL_AREA_M2
+                / 12.96 / 3600.0 / ETA_DRIVETRAIN)
 
 # Speed range for ECR evaluation — truck operating envelope
 ECR_V_MIN: float = 20.0   # km/h
@@ -32,10 +61,13 @@ def ecr(v_kmh: float) -> float:
     return ECR_A / v + ECR_B + ECR_C * v ** 2
 
 
-# E1: assert the calibrated loaded-highway ECR is in the plausible BET range.
-assert 1.0 <= ecr(V_NOM) <= 1.5, (
-    f"ECR({V_NOM}) = {ecr(V_NOM):.3f} kWh/km outside the calibrated "
-    f"[1.0, 1.5] kWh/km range for a loaded 40-t BET (E1)")
+# E1: the derived ECR must land in the range measured for 40-t battery electric
+# tractors — 1.1–1.4 kWh/km.  Anchors: 1.3 kWh/km on a 40-t Stockholm–Malmö run
+# (600 kWh usable, cold); ~1.3 kWh/km for electric tractor units in real
+# operation; Öko-Institut real-world BET data for Germany.  ECR(80) ≈ 1.23.
+assert 1.1 <= ecr(V_NOM) <= 1.4, (
+    f"ECR({V_NOM}) = {ecr(V_NOM):.3f} kWh/km outside the measured "
+    f"[1.1, 1.4] kWh/km range for a loaded 40-t BET (E1)")
 
 
 # ── Battery defaults ───────────────────────────────────────────────────────────

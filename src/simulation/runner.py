@@ -67,6 +67,7 @@ from src.methods.oracle import check_simulation_feasibility, \
                    check_directive_compliance, \
                    print_simulation_log, print_oracle_log
 from src.paths import parse_run_id as _parse_run_id
+from src.settings import BETA_TW
 from src.plot.plots import plot_simulation_results
 from src.simulation.scenarios import ScenarioTracker
 
@@ -213,7 +214,7 @@ def finalize_run(
         tw_n_late             = _n_late,
         tw_hit_rate           = _hit_rate,
         tw_misses_by_stop     = tw_misses,
-        tw_penalty_h          = float(full_data.get("beta", 2.0)) * _n_miss,
+        tw_penalty_h          = float(full_data.get("beta", BETA_TW)) * _n_miss,
         n_interventions       = len(events.get("interventions", [])),
         interventions         = events.get("interventions", []),
         n_repairs             = len(events.get("repairs", [])),

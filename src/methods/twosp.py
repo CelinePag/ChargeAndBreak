@@ -90,7 +90,7 @@ from src.methods.MILP      import (
 from src.simulation.scenarios import ScenarioTracker, generate_scenarios
 from src.methods.recourse  import run_plan_with_recourse
 from src.simulation.runner    import finalize_run
-from src.settings  import GUARD_QUANTILE
+from src.settings  import GUARD_QUANTILE, BETA_TW
 from src import paths as _paths
 
 
@@ -231,7 +231,7 @@ def build_2sp_model(data: dict, scenarios: list[dict],
     m.delta    = pyo.Var(m.Cset, m.Scen, domain=pyo.Binary)
 
     # ── Objective (TW2): arrival + fixed penalty per missed window ────────────
-    beta = float(data.get("beta", 2.0))
+    beta = float(data.get("beta", BETA_TW))
 
     def _scen_obj(s):
         return m.ta[N, s] + beta * sum(m.delta[i, s] for i in C)

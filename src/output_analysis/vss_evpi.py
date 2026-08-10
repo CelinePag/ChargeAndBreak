@@ -43,6 +43,7 @@ import sys
 
 import numpy as np
 
+from src.settings                import BETA_TW
 from src.instance_gen.instance_io import load_instance_json
 from src.methods.oracle      import oracle_solve
 from src.methods.recourse    import run_plan_with_recourse
@@ -96,7 +97,7 @@ def _execute_plan(full_data, plan, D, E, cv, label) -> dict:
     vehicle, tracker, events = run_plan_with_recourse(
         full_data, plan, D, E, method_name=label,
         log_fn=lambda *_: None, cv=cv, supervised=False, verbose=False)
-    beta     = float(full_data.get("beta", 2.0))
+    beta     = float(full_data.get("beta", BETA_TW))
     misses   = len(getattr(vehicle, "tw_misses", {}) or {})
     feasible = (not vehicle.violations) and (not events["plan_violations"])
     return dict(arrival=float(vehicle.t_arr),

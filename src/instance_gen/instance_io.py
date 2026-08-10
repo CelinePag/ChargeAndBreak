@@ -103,7 +103,7 @@ import numpy as np
 from src.instance_gen.instances import instance_realistic
 from src.simulation.scenarios import _ecr
 from src.settings  import (V_NOM, sample_multipliers,
-                       XI_MIN, XI_MAX,
+                       XI_MIN, XI_MAX, BETA_TW,
                        TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO)
 from src.methods.greedy    import compute_nominal_arrivals
 from src import paths as _paths
@@ -577,7 +577,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     # that JSON files generated before it still load and solve.
     _defaults = dict(
         L=[], M_lay={},
-        T_dead=None, hard_tw=False, beta=2.0, allow_split=True,
+        T_dead=None, hard_tw=False, beta=BETA_TW, allow_split=True,
         Tspr1=13.0, Tspr2=15.0, Twk60=60.0,
         rho_bar=3, ext_bar=2,
         Tdrv_sh2=10.0,
