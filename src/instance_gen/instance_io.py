@@ -49,10 +49,10 @@ Generating all files
 --------------------
   python -m src.instance_gen.instance_io [output_dir] [n_seeds] [cv]
 
-  Defaults: output_dir="instances"  n_seeds=50  cv=0.15
+  Defaults: output_dir="instances"  n_seeds=25  cv=0.15
 
   This produces n_seeds files per (route_class, customers_class, window_class)
-  combo, i.e. 9 route/customer combos × 4 window classes × 50 seeds = 1800
+  combo, i.e. 9 route/customer combos × 4 window classes × 25 seeds = 900
   files total.
 
 Loading a file
@@ -468,7 +468,7 @@ def generate_instance_file(route_class: str,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_all(output_dir: str  = _paths.instances(),
-                 n_seeds: int     = 50,
+                 n_seeds: int     = 25,
                  cv: float        = TRAVEL_TIME_CV,
                  first_seed: int  = 1,
                  combos           = None,
@@ -484,12 +484,12 @@ def generate_all(output_dir: str  = _paths.instances(),
     DIFFERENT routes, customer placements, and D_real / E_real — not just
     different Wha/Whf.
 
-    Total files: len(combos) * n_seeds  (default: 9*4 * 50 = 1800 files)
+    Total files: len(combos) * n_seeds  (default: 9*4 * 25 = 900 files)
 
     Parameters
     ----------
     output_dir   : directory where files are written (created if absent)
-    n_seeds      : how many independent instances per combo (default 50)
+    n_seeds      : how many independent instances per combo (default 25)
     cv           : CV of the travel-time multiplier (default settings.TRAVEL_TIME_CV)
     first_seed   : starting seed value (default 1); seeds are first_seed..first_seed+n_seeds-1
     combos       : list of (route_class, customers_class, window_class) to
@@ -632,7 +632,7 @@ def describe_file(filepath: str) -> dict:
 if __name__ == "__main__":
     # Usage: python -m src.instance_gen.instance_io [output_dir] [n_seeds] [cv] [first_seed]
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else _paths.instances()
-    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 50
+    n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 25
     cv           = float(sys.argv[3]) if len(sys.argv) > 3 else TRAVEL_TIME_CV
     first_seed   = int(sys.argv[4])   if len(sys.argv) > 4 else 1
 
