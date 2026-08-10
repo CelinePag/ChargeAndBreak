@@ -70,7 +70,7 @@ import pyomo.environ as pyo
 
 from src.methods.recourse  import run_plan_static
 from src.settings  import (ecr as _ecr, V_NOM, XI_MIN, XI_MAX,
-                       TRAVEL_TIME_CV, GUARD_QUANTILE)
+                       TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE)
 from src.simulation.runner    import finalize_run
 from src.methods import twosp as _twosp
 from src import paths as _paths
@@ -394,7 +394,7 @@ def _certify_candidate(full_data: dict, fs: dict, scenario: dict,
 def run_robu(full_data: dict,
              D_real: list,
              E_real: list,
-             cv: float         = TRAVEL_TIME_CV,
+             cv: float         = TRAVEL_TIME_CV_TARGET,
              time_limit: int   = 2 * 3600,
              wall_limit: int | None = None,
              mip_gap: float    = 0.005,

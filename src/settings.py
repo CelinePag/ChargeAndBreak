@@ -241,11 +241,29 @@ V_FLOOR_KMH:   float = 50.0   # worst leg-average speed under congestion
 XI_MIN: float = V_NOM / V_LIMITER_KMH   # ≈ 0.889 — fast bound
 XI_MAX: float = V_NOM / V_FLOOR_KMH     # = 1.6   — slow bound
 
-# Coefficient of variation of xi (base + sensitivity axis).  25 km legs that
-# may skirt congested peri-urban motorways sit at the upper end of empirical
-# inter-urban CVs.
-TRAVEL_TIME_CV: float = 0.15
-TRAVEL_TIME_CV_CLASSES: tuple = (0.10, 0.15, 0.25)
+# TARGET coefficient of variation of xi — an INPUT to the calibration, NOT the
+# dispersion you get out.  sigma is solved from the UNCLIPPED relation and only
+# mu is re-solved after the cap (see lognormal_params), so the mass above XI_MAX
+# is folded onto XI_MAX.  A point sitting on the boundary carries far less
+# variance than the tail it replaced, and the realised sd therefore always falls
+# short of the target — by more as the target grows and more mass hits the cap:
+#
+#     target    realised sd    shortfall    legs at cap
+#      0.10       0.0958         -4.2%         0.26%
+#      0.15       0.1249        -16.7%         1.08%     <- base
+#      0.25       0.1530        -38.8%         2.55%
+#
+# ALWAYS report xi_realised_sd(cv), never the target: the labels overstate the
+# spread, and because the shortfall is non-linear the sensitivity axis is
+# compressed at the top end (0.25 delivers only ~23% more dispersion than the
+# base, not the ~67% the labels imply).
+#
+# The realised base value (0.125) sits inside the empirically reported range for
+# road travel-time CV (~0.08-0.17, motorways at the lower end; Van Lint & Van
+# Zuylen 2005, TRR 1917; Tu, Van Lint & Van Zuylen 2007, TRR 1993), so the base
+# case remains defensible — it is the LABEL that was wrong, not the model.
+TRAVEL_TIME_CV_TARGET: float = 0.15
+TRAVEL_TIME_CV_TARGET_CLASSES: tuple = (0.10, 0.15, 0.25)
 
 # AR(1) correlation between consecutive-leg multipliers (0 = i.i.d. base case).
 # With ~25 km legs one congestion event spans several consecutive legs, so
@@ -310,7 +328,7 @@ def _clipped_mean(mu: float, sigma: float) -> float:
 _LN_CACHE: dict[float, tuple[float, float]] = {}
 
 
-def lognormal_params(cv: float = TRAVEL_TIME_CV) -> tuple[float, float]:
+def lognormal_params(cv: float = TRAVEL_TIME_CV_TARGET) -> tuple[float, float]:
     """
     (mu, sigma) of the eta driver for a target CV of xi.
 
@@ -338,7 +356,42 @@ def lognormal_params(cv: float = TRAVEL_TIME_CV) -> tuple[float, float]:
     return mu, sigma
 
 
-def xi_quantile(q: float, cv: float = TRAVEL_TIME_CV) -> float:
+def xi_realised_sd(cv: float = TRAVEL_TIME_CV_TARGET) -> float:
+    """
+    Standard deviation of xi that `cv` ACTUALLY produces, in closed form.
+
+    E[xi] = 1 by calibration, so this is also the realised coefficient of
+    variation.  It is strictly below `cv` because the cap at XI_MAX collapses
+    the upper tail onto a point (see the note beside TRAVEL_TIME_CV_TARGET).
+    Quote this in write-ups, not the target.  Matches Monte Carlo to 4 d.p.
+    """
+    cv = float(cv)
+    if cv <= 0.0:
+        return 0.0
+    from math import exp, log, sqrt
+    mu, sigma = lognormal_params(cv)
+    k    = XI_MAX - XI_MIN
+    lk   = log(k)
+    p_gt = 1.0 - _phi((lk - mu) / sigma)          # P(eta > k), the atom mass
+    # truncated moments of eta below k, plus the atom at k
+    m1 = exp(mu + 0.5 * sigma ** 2) * _phi((lk - mu - sigma ** 2) / sigma) \
+        + k * p_gt
+    m2 = exp(2 * mu + 2 * sigma ** 2) * _phi((lk - mu - 2 * sigma ** 2) / sigma) \
+        + k * k * p_gt
+    return sqrt(max(0.0, m2 - m1 * m1))
+
+
+def xi_atom_mass(cv: float = TRAVEL_TIME_CV_TARGET) -> float:
+    """Fraction of legs landing exactly on the XI_MAX cap (P(xi = XI_MAX))."""
+    cv = float(cv)
+    if cv <= 0.0:
+        return 0.0
+    from math import log
+    mu, sigma = lognormal_params(cv)
+    return 1.0 - _phi((log(XI_MAX - XI_MIN) - mu) / sigma)
+
+
+def xi_quantile(q: float, cv: float = TRAVEL_TIME_CV_TARGET) -> float:
     """
     q-quantile of the bounded multiplier xi (quantiles commute with the cap).
     cv <= 0 degenerates to the deterministic nominal case (xi = 1); q = 1
@@ -358,7 +411,7 @@ def xi_quantile(q: float, cv: float = TRAVEL_TIME_CV) -> float:
 def sample_multipliers(
     n_legs: int,
     rng,
-    cv: float = TRAVEL_TIME_CV,
+    cv: float = TRAVEL_TIME_CV_TARGET,
     ar1_rho: float = TRAVEL_TIME_AR1_RHO,
 ):
     """
@@ -403,7 +456,7 @@ def sample_multipliers(
 def sample_travel_time(
     D_i,
     rng,
-    cv: float = TRAVEL_TIME_CV,
+    cv: float = TRAVEL_TIME_CV_TARGET,
     n: int = 1,
 ):
     """Sample realised travel time(s) D_i * xi for one leg (i.i.d. draws)."""

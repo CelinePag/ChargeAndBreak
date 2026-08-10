@@ -47,7 +47,7 @@ import time
 from src.simulation.BEHDV      import BEHDV
 from src.methods.MILP       import solve_horizon
 from src.simulation.scenarios  import ScenarioTracker
-from src.settings   import TRAVEL_TIME_CV, GUARD_QUANTILE
+from src.settings   import TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE
 from src.simulation.supervisor import supervise_action
 
 
@@ -78,7 +78,7 @@ def run_plan_with_recourse(full_data: dict,
                            E_real: list,
                            method_name: str,
                            log_fn,
-                           cv: float = TRAVEL_TIME_CV,
+                           cv: float = TRAVEL_TIME_CV_TARGET,
                            supervised: bool = False,
                            prune_quantile: float | None = GUARD_QUANTILE,
                            time_limit: int = 60,
@@ -220,7 +220,7 @@ def run_plan_static(full_data: dict,
                     E_real: list,
                     method_name: str,
                     log_fn,
-                    cv: float = TRAVEL_TIME_CV,
+                    cv: float = TRAVEL_TIME_CV_TARGET,
                     supervised: bool = False,
                     prune_quantile: float | None = GUARD_QUANTILE,
                     verbose: bool = True) -> tuple:

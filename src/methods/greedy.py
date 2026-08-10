@@ -91,7 +91,7 @@ from typing import Optional
 from src.simulation.BEHDV      import BEHDV, _energy_after_charging, _charging_time_needed
 from src.simulation.scenarios  import ScenarioTracker
 from src.simulation.supervisor import compute_flags, supervise_action
-from src.settings   import TRAVEL_TIME_CV, GUARD_QUANTILE
+from src.settings   import TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE
 from src.simulation.runner     import finalize_run
 from src.plot.plots      import plot_simulation_results   # re-exported for callers
 from src import paths as _paths
@@ -172,7 +172,7 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
-                    cv: float = TRAVEL_TIME_CV,
+                    cv: float = TRAVEL_TIME_CV_TARGET,
                     guard_quantile: float | None = GUARD_QUANTILE,
                     safety_buffer_frac: float = 0.0,
                     queue_threshold: Optional[float] = None,
@@ -406,7 +406,7 @@ def compute_nominal_arrivals(full_data: dict) -> list[float]:
 def run_greedy(full_data: dict,
                D_real: list,
                E_real: list,
-               cv: float                        = TRAVEL_TIME_CV,
+               cv: float                        = TRAVEL_TIME_CV_TARGET,
                guard_quantile: float | None     = GUARD_QUANTILE,
                safety_buffer: float             = 0.0,
                queue_threshold: Optional[float] = None,   # deprecated, ignored

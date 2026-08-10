@@ -104,7 +104,7 @@ from src.instance_gen.instances import instance_realistic
 from src.simulation.scenarios import _ecr
 from src.settings  import (V_NOM, sample_multipliers,
                        XI_MIN, XI_MAX, BETA_TW,
-                       TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO)
+                       TRAVEL_TIME_CV_TARGET, TRAVEL_TIME_AR1_RHO)
 from src.methods.greedy    import compute_nominal_arrivals
 from src import paths as _paths
 
@@ -314,7 +314,7 @@ def generate_instance_file(route_class: str,
                            window_class: str,
                            seed: int,
                            output_dir: str  = _paths.instances(),
-                           cv: float        = TRAVEL_TIME_CV,
+                           cv: float        = TRAVEL_TIME_CV_TARGET,
                            verbose: bool    = True,
                            ar1_rho: float   = TRAVEL_TIME_AR1_RHO,
                            cs_spacing_km: float | None = None,
@@ -469,7 +469,7 @@ def generate_instance_file(route_class: str,
 
 def generate_all(output_dir: str  = _paths.instances(),
                  n_seeds: int     = 25,
-                 cv: float        = TRAVEL_TIME_CV,
+                 cv: float        = TRAVEL_TIME_CV_TARGET,
                  first_seed: int  = 1,
                  combos           = None,
                  verbose: bool    = True) -> list[str]:
@@ -490,7 +490,7 @@ def generate_all(output_dir: str  = _paths.instances(),
     ----------
     output_dir   : directory where files are written (created if absent)
     n_seeds      : how many independent instances per combo (default 25)
-    cv           : CV of the travel-time multiplier (default settings.TRAVEL_TIME_CV)
+    cv           : CV of the travel-time multiplier (default settings.TRAVEL_TIME_CV_TARGET)
     first_seed   : starting seed value (default 1); seeds are first_seed..first_seed+n_seeds-1
     combos       : list of (route_class, customers_class, window_class) to
                    generate, or None for all 36 combinations
@@ -561,7 +561,7 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     full_data = _restore_int_keys(data["instance"])
     D_real    = data["D_real"]
     E_real    = data["E_real"]
-    cv_file   = data["meta"].get("cv", TRAVEL_TIME_CV)
+    cv_file   = data["meta"].get("cv", TRAVEL_TIME_CV_TARGET)
 
     # Back-fill M_stop / M_seq for JSON files generated before model_v5.
     # Use the legacy M dict as the stop-overhead value; default M_seq to 5 min.
@@ -633,7 +633,7 @@ if __name__ == "__main__":
     # Usage: python -m src.instance_gen.instance_io [output_dir] [n_seeds] [cv] [first_seed]
     output_dir   = sys.argv[1] if len(sys.argv) > 1 else _paths.instances()
     n_seeds      = int(sys.argv[2])   if len(sys.argv) > 2 else 25
-    cv           = float(sys.argv[3]) if len(sys.argv) > 3 else TRAVEL_TIME_CV
+    cv           = float(sys.argv[3]) if len(sys.argv) > 3 else TRAVEL_TIME_CV_TARGET
     first_seed   = int(sys.argv[4])   if len(sys.argv) > 4 else 1
 
     print("=" * 60)

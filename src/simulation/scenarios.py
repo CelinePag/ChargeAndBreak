@@ -59,7 +59,7 @@ import numpy as np
 # ── ECR curve ─────────────────────────────────────────────────────────────────
 from src.settings import (ecr as _ecr, sample_travel_time, sample_multipliers,
                       V_NOM, XI_MIN, XI_MAX,
-                      TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO)
+                      TRAVEL_TIME_CV_TARGET, TRAVEL_TIME_AR1_RHO)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -87,7 +87,7 @@ def generate_scenarios(full_data: dict,
     (see settings).  ar1_rho > 0 gives positively correlated deviations
     across consecutive legs (AR(1) on the normal driver) — congestion
     persists in time; i.i.d. draws tend to understate the value of adaptive
-    policies.  Defaults (None) fall back to settings.TRAVEL_TIME_CV /
+    policies.  Defaults (None) fall back to settings.TRAVEL_TIME_CV_TARGET /
     settings.TRAVEL_TIME_AR1_RHO.
 
     Parameters
@@ -110,7 +110,7 @@ def generate_scenarios(full_data: dict,
     D_nom = full_data["D"]
     L_nom = full_data.get("km", {})   # leg lengths in km (optional)
 
-    cv      = cv      if cv      is not None else TRAVEL_TIME_CV
+    cv      = cv      if cv      is not None else TRAVEL_TIME_CV_TARGET
     ar1_rho = ar1_rho if ar1_rho is not None else TRAVEL_TIME_AR1_RHO
 
     legs   = list(range(start_stop, min(end_stop, N)))

@@ -870,7 +870,7 @@ def run_2sp(full_data: dict,
     E_real            : list[float] — precomputed realised energies (kWh), length N
     n_scenarios       : number of full-route scenarios to draw (default 10)
     cv                : CV of the travel-time multiplier used to draw scenarios
-                        (None → settings.TRAVEL_TIME_CV)
+                        (None → settings.TRAVEL_TIME_CV_TARGET)
     scenario_seed     : seed for scenario generation (None = unseeded/random)
     time_limit        : solver wall-clock limit in seconds (default 2h)
     mip_gap           : MIP relative gap tolerance (default 0.5%)

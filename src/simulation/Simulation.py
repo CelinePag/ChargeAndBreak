@@ -57,7 +57,7 @@ import numpy as np
 from src.simulation.BEHDV      import BEHDV
 from src.methods.MILP       import solve_horizon, INFEASIBLE_PENALTY
 from src.simulation.scenarios  import generate_scenarios, ScenarioTracker
-from src.settings   import (TRAVEL_TIME_CV, GUARD_QUANTILE, V_NOM, ecr,
+from src.settings   import (TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE, V_NOM, ecr,
                         sample_travel_time)
 from src.simulation.supervisor import compute_flags, action_passes, supervise_action
 from src.simulation.runner     import finalize_run
@@ -609,7 +609,7 @@ def evaluate_action(full_data, start_stop, end_stop, state,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def select_best_action(full_data, stop: int, state,
-                       n_scenarios=10, horizon_hours=12, cv=TRAVEL_TIME_CV,
+                       n_scenarios=10, horizon_hours=12, cv=TRAVEL_TIME_CV_TARGET,
                        scenario_seed=None, time_limit=20,
                        verbose=True, n_workers=1, solve_mode="lp",
                        charge_only=False, criterion="mean",
@@ -1087,7 +1087,7 @@ def select_best_action(full_data, stop: int, state,
 def run_simulation(full_data: dict,
                    n_scenarios: int    = 10,
                    horizon_hours: float = 12.0,
-                   cv: float           = TRAVEL_TIME_CV,
+                   cv: float           = TRAVEL_TIME_CV_TARGET,
                    seed: int           = 42,
                    time_limit: int     = 20,
                    verbose: bool       = True,
@@ -1318,7 +1318,7 @@ def run_simulation_precomputed(
     E_real: list,
     n_scenarios: int             = 10,
     horizon_hours: float         = 12.0,
-    cv: float                    = TRAVEL_TIME_CV,
+    cv: float                    = TRAVEL_TIME_CV_TARGET,
     time_limit: int              = 20,
     verbose: bool                = True,
     n_workers                    = None,
@@ -1606,7 +1606,7 @@ if __name__ == "__main__":
     name          = sys.argv[1]               if len(sys.argv) > 1 else "break_forced"
     n_scenarios   = int(sys.argv[2])          if len(sys.argv) > 2 else 5
     horizon_hours = float(sys.argv[3])        if len(sys.argv) > 3 else 8.0
-    cv            = float(sys.argv[4])        if len(sys.argv) > 4 else TRAVEL_TIME_CV
+    cv            = float(sys.argv[4])        if len(sys.argv) > 4 else TRAVEL_TIME_CV_TARGET
     n_workers     = int(sys.argv[5])          if len(sys.argv) > 5 else None
     solve_mode    = {"0":"lp","lp":"lp","1":"mip","mip":"mip",
                      "2":"both","both":"both"}.get(

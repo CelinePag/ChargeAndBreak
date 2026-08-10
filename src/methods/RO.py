@@ -48,7 +48,7 @@ import pyomo.environ as pyo
 
 from src.methods.recourse  import run_plan_static
 from src.simulation.scenarios import _ecr
-from src.settings  import V_NOM, XI_MIN, XI_MAX, TRAVEL_TIME_CV, GUARD_QUANTILE
+from src.settings  import V_NOM, XI_MIN, XI_MAX, TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE
 from src.simulation.runner    import finalize_run
 from src.plot.plots     import plot_simulation_results
 from src.methods import twosp as _twosp
@@ -92,7 +92,7 @@ def _plan_from_model(model, full_data: dict) -> list[dict]:
 def run_ro(full_data: dict,
            D_real: list,
            E_real: list,
-           cv: float         = TRAVEL_TIME_CV,
+           cv: float         = TRAVEL_TIME_CV_TARGET,
            time_limit: int   = 2 * 3600,
            mip_gap: float    = 0.005,
            heuristics: float | None = 0.2,

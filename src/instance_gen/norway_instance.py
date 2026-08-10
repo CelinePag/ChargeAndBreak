@@ -47,7 +47,7 @@ import numpy as np
 
 from src.instance_gen.instances import make_data
 from src.instance_gen.instance_io import _to_json_safe, generate_time_windows
-from src.settings import (V_NOM, ecr, XI_MIN, XI_MAX, TRAVEL_TIME_CV,
+from src.settings import (V_NOM, ecr, XI_MIN, XI_MAX, TRAVEL_TIME_CV_TARGET,
                       TRAVEL_TIME_AR1_RHO, sample_multipliers)
 from src import paths as _paths
 
@@ -96,10 +96,10 @@ def build_norway_instance(seed: int = 1) -> tuple[dict, float, float]:
     disp_path = os.path.join(DATA_DIR, "dispersion.json")
     if os.path.isfile(disp_path):
         disp = json.load(open(disp_path, encoding="utf-8"))
-        cv, ar1 = float(disp.get("cv", TRAVEL_TIME_CV)), \
+        cv, ar1 = float(disp.get("cv", TRAVEL_TIME_CV_TARGET)), \
                   float(disp.get("ar1_rho", TRAVEL_TIME_AR1_RHO))
     else:
-        cv, ar1 = TRAVEL_TIME_CV, TRAVEL_TIME_AR1_RHO
+        cv, ar1 = TRAVEL_TIME_CV_TARGET, TRAVEL_TIME_AR1_RHO
 
     # index stops 0..N
     I = list(range(len(stops) + 2))
