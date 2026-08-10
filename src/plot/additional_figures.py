@@ -41,6 +41,7 @@ import csv
 import glob
 import json
 import os
+import re
 
 import matplotlib
 matplotlib.use("Agg")
@@ -1087,6 +1088,24 @@ _LA_SCENARIOS = [10, 25, 50]
 # line chart the window class moves to the dash pattern instead.
 _LA_TW_STYLE = {"none": "-", "tight": "--"}
 
+# Traffic-light ramp for every infeasibility heat strip in this module, built
+# from the project's Okabe-Ito palette so it matches the base-case box figure:
+# bluish green (all feasible) -> yellow -> vermillion (all infeasible).
+from matplotlib.colors import LinearSegmentedColormap as _LSC  # noqa: E402
+_INFEAS_CMAP = _LSC.from_list("infeas", ["#009E73", "#F0E442", "#D55E00"])
+
+# The LA sweep has TWO axes and they are not comparable.  S<n>H<h> tags are the
+# CONFIGURATION ladder (how much compute); anything else is a POLICY variant
+# (what the policy does with it) and gets its own figure, because a policy tag
+# has no position on a scenario/horizon ladder.  Listing the expected ones here
+# means a variant that has not been run yet still draws a labelled empty slot,
+# the same convention the rest of this module uses.
+_LA_POLICY_ORDER = ["TB0", "MIPTAIL"]
+_LA_POLICY_LBL = {
+    "TB0":     "TB0 (no 5-min tie-break)",
+    "MIPTAIL": "MIPTAIL (MIP look-ahead)",
+}
+
 
 def _log_ticks_plain(axis) -> None:
     """Label a log axis in plain seconds at 1-2-5 steps.
@@ -1283,8 +1302,7 @@ def section_la():
     # legend's order) and, at each rung, one cell per window class — solid-line
     # class ("none") left, dashed ("tight") right, keyed by the header letters.
     from matplotlib.patches import Rectangle as _Rect
-    from matplotlib.colors import LinearSegmentedColormap as _LSC
-    _reds = _LSC.from_list("infeas", ["#009E73", "#F0E442", "#D55E00"])
+    _reds = _INFEAS_CMAP
 
     def _infeas(ns, hh, route, tw):
         n = _la_cell(stats, ns, hh, route, tw, "n_runs")
@@ -1631,8 +1649,258 @@ def section_vss():
 
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Effect measures the policy figure can be drawn against.  "pen" is the model's
+# actual objective (arrival + beta * window misses, expressed as a duration);
+# "dur" is route duration alone.  They differ whenever a configuration trades
+# lateness for a shorter route — the duration view scores that as a win.
+_LA_EFFECT = {
+    "dur": dict(col="delta_vs_base_pct", n="n_paired", sfx="",
+                ylabel="Paired change in route\nduration vs base (%)",
+                tex="route duration"),
+    "pen": dict(col="delta_pen_vs_base_pct", n="n_paired_pen", sfx="_pen",
+                ylabel="Paired change in penalised\nobjective vs base (%)",
+                tex=r"penalised objective (arrival $+\ \beta\times$ misses)"),
+}
+
+
+def section_la_policy(effect: str = "dur"):
+    """§8.3 — LA POLICY variants (TB0, MIPTAIL), one figure + one table.
+
+    Separate from section_la on purpose.  The S/H sweep asks "how much compute
+    should LA get?" and its cells sit on two ladders; these variants ask "what
+    should LA do with it?" and have no position on a ladder, so plotting them
+    on the same axes would invent an ordering that does not exist.
+
+    The effect measure is the PAIRED delta against the base cell, not the gap
+    level: the oracle cancels out of a difference of two policy runs on the same
+    instance, so the delta is unaffected by the oracle's own residual MIP gap
+    (structural, ~9% on long routes).  The gap level is still printed in the
+    table as the calibration.
+    """
+    eff = _LA_EFFECT[effect]
+    print(f"== Sec 8.3 look-ahead policy variants [{effect}] ==")
+    stats = _la_stats()
+    routes = ps.ROUTE_ORDER
+    tws    = ["none", "tight"]
+
+    have = {c for (c, _r, _t) in stats}
+    extra = sorted(c for c in have
+                   if c != "base" and c not in _LA_POLICY_ORDER
+                   and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
+    cfgs = _LA_POLICY_ORDER + extra
+    if not cfgs:
+        print("  no policy variants in additional_la_stats.csv — nothing drawn")
+        return
+
+    def cell(cfg, route, tw, col):
+        return _la_num(stats.get((cfg, route, tw)), col)
+
+    # ── x layout: 6 cells, grouped into route blocks by SPACING ──────────────
+    _BLOCK_GAP = 0.7
+    xs, keys = [], []
+    for ri, route in enumerate(routes):
+        for ti, tw in enumerate(tws):
+            xs.append(ri * (len(tws) + _BLOCK_GAP) + ti)
+            keys.append((route, tw))
+    xs = np.asarray(xs, dtype=float)
+
+    # Every series here is the LA policy, so they take LA's hue and separate by
+    # lightness — the same grammar as the configuration figure.
+    face = {"base": ps.tint(GREEN, 0.62)}
+    for i, c in enumerate(cfgs):
+        face[c] = (GREEN if i == 0 else
+                   ps.shade(GREEN, min(0.62, 0.30 + 0.18 * i)))
+
+    fig = plt.figure(figsize=(7.0, 5.0))
+    gs  = fig.add_gridspec(3, 1, height_ratios=[1.0, 0.72, 0.30], hspace=0.18)
+    ax_d = fig.add_subplot(gs[0])                      # paired effect
+    ax_c = fig.add_subplot(gs[1], sharex=ax_d)         # cost
+    ax_s = fig.add_subplot(gs[2], sharex=ax_d)         # infeasibility strip
+    ax_d.tick_params(labelbottom=False)
+    ax_c.tick_params(labelbottom=False)
+
+    # ── row 0: paired delta vs base (base is the zero line by construction) ──
+    w = 0.78 / max(1, len(cfgs))
+    drawn = []
+    for k, cfg in enumerate(cfgs):
+        vals = [cell(cfg, r, t, eff["col"]) for r, t in keys]
+        if all(v is None for v in vals):
+            continue
+        drawn.append(cfg)
+        off = (k - (len(cfgs) - 1) / 2) * w
+        for x, v in zip(xs, vals):
+            if v is None:
+                continue
+            ax_d.bar(x + off, v, width=w, color=face[cfg],
+                     edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
+            # Point offset, not a data offset: the two effect measures live on
+            # different scales and a fixed data nudge would collide on one of
+            # them.
+            ax_d.annotate(f"{v:+.2f}", xy=(x + off, v),
+                          xytext=(0, 2 if v >= 0 else -2),
+                          textcoords="offset points", ha="center",
+                          va="bottom" if v >= 0 else "top",
+                          rotation=90, fontsize=5.2, color=INK)
+    pending = [c for c in cfgs if c not in drawn]
+    if pending:
+        # Parked in the corner, not on the zero line: the zero line is the base
+        # reference and a note sitting on it reads as a data label.
+        ax_d.text(0.012, 0.03, "pending: " + ", ".join(pending),
+                  transform=ax_d.transAxes, ha="left", va="bottom",
+                  fontsize=6.5, color=MUT, style="italic")
+    ax_d.axhline(0, color=INK, lw=0.9)
+    ax_d.set_ylabel(eff["ylabel"])
+
+    # ── row 1: what it costs (base drawn too — the cost may move on its own) ─
+    w2 = 0.78 / (len(cfgs) + 1)
+    for k, cfg in enumerate(["base"] + cfgs):
+        vals = [cell(cfg, r, t, "decision_mean_s_median") for r, t in keys]
+        if all(v is None for v in vals):
+            continue
+        off = (k - len(cfgs) / 2) * w2
+        for x, v in zip(xs, vals):
+            if v is None:
+                continue
+            ax_c.bar(x + off, v, width=w2, color=face[cfg],
+                     edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
+    ax_c.set_ylabel("Decision time\nper stop (s)")
+
+    for ax in (ax_d, ax_c):
+        ax.yaxis.set_major_locator(
+            mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.grid(True, which="major", axis="y", color=GRID, lw=0.6)
+        ax.grid(True, which="minor", axis="y", color=GRID, lw=0.35, alpha=0.6)
+        ax.set_axisbelow(True)
+        ax.tick_params(axis="y", which="minor", length=2)
+
+    # ── row 2: infeasibility strip, one row per config ───────────────────────
+    # Same device and ramp as the base-case box figure: a variant that strands
+    # more drops those runs from the delta above, so it can look better for the
+    # wrong reason.  This is where that shows.
+    from matplotlib.patches import Rectangle as _Rect
+    strip_cfgs = ["base"] + drawn
+
+    def infeas(cfg, route, tw):
+        n = cell(cfg, route, tw, "n_runs")
+        i = cell(cfg, route, tw, "n_infeasible")
+        return (i / n) if (n and i is not None) else None
+
+    fr = [f for cfg in strip_cfgs for r, t in keys
+          for f in [infeas(cfg, r, t)] if f]
+    fmax = max(fr) if fr else 1.0
+    ax_s.set_ylim(0, len(strip_cfgs))
+    ax_s.set_yticks([])
+    for s in ax_s.spines.values():
+        s.set_visible(False)
+    for ci, cfg in enumerate(strip_cfgs):
+        y0 = len(strip_cfgs) - 1 - ci + 0.12
+        for x, (r, t) in zip(xs, keys):
+            f = infeas(cfg, r, t)
+            if f is None:
+                continue
+            ax_s.add_patch(_Rect((x - 0.42, y0), 0.84, 0.76,
+                                 facecolor=_INFEAS_CMAP(min(1.0, f / fmax)),
+                                 edgecolor="#8a8a8a", lw=0.35, zorder=3))
+        ax_s.annotate(cfg, xy=(0, len(strip_cfgs) - 0.5 - ci),
+                      xycoords=("axes fraction", "data"),
+                      xytext=(-3, 0), textcoords="offset points",
+                      ha="right", va="center", fontsize=5.6,
+                      color=face[cfg] if cfg != "base" else MUT)
+    ax_s.set_ylabel("Infeas.\nrate", fontsize=5.8, color=MUT, labelpad=22,
+                    linespacing=0.95)
+
+    # window class on the ticks, route class as the block label underneath
+    ax_s.set_xticks(xs, [ps.TW_LBL[t] for _r, t in keys])
+    ax_s.set_xlim(xs[0] - 0.7, xs[-1] + 0.7)
+    ax_s.tick_params(axis="x", length=0)
+    span = ax_s.get_xaxis_transform()
+    for ri, route in enumerate(routes):
+        c = xs[ri * len(tws):(ri + 1) * len(tws)].mean()
+        ax_s.annotate(ps.ROUTE_LBL[route], xy=(c, 0), xycoords=span,
+                      xytext=(0, -22), textcoords="offset points",
+                      ha="center", va="top", fontsize=7.5, color=MUT)
+
+    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=face[c],
+                             edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
+               for c in ["base"] + drawn]
+    labels = ["base ($|\\Xi|=25$, $L=24$ h)"] + [
+        _LA_POLICY_LBL.get(c, c) for c in drawn]
+    ax_d.legend(handles, labels, frameon=True, framealpha=0.9,
+                edgecolor="none", facecolor="white", fontsize=7,
+                loc="upper center", ncol=min(3, len(handles)),
+                handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
+    # Headroom above for the legend, room below for the rotated value labels
+    # under the negative bars (they are drawn outside the data range).
+    lo, hi = ax_d.get_ylim()
+    ax_d.set_ylim(lo - 0.22 * (hi - lo), hi + 0.42 * (hi - lo))
+    fig.subplots_adjust(left=0.145, right=0.915, top=0.975, bottom=0.115)
+
+    # Colour key for the strip — without it "red" has no magnitude, and the
+    # ramp is scaled to the worst cell in THIS figure, not to 100%.
+    import matplotlib.cm as _cm
+    from matplotlib.colors import Normalize as _Norm
+    _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_INFEAS_CMAP)
+    _sm.set_array([])
+    _p = ax_s.get_position()
+    _cax = fig.add_axes([_p.x1 + 0.012, _p.y0, 0.010, _p.height])
+    _cb = fig.colorbar(_sm, cax=_cax, orientation="vertical",
+                       ticks=[0, 100.0 * fmax])
+    _cb.ax.set_yticklabels(["0", f"{100.0 * fmax:.0f}"])
+    _cb.outline.set_linewidth(0.3)
+    _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
+    _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
+    _save(fig, f"additional_la_policy{eff['sfx']}")
+
+    # ── table ────────────────────────────────────────────────────────────────
+    body = []
+    for cfg in ["base"] + drawn:
+        for tw in tws:
+            cells = []
+            for route in routes:
+                cells += [_fmt(cell(cfg, route, tw, "gap_pen_median_pct"), ".1f"),
+                          "--" if cfg == "base"
+                          else _fmt(cell(cfg, route, tw, eff["col"]), "+.2f"),
+                          _fmt(cell(cfg, route, tw, "decision_mean_s_median"),
+                               ".0f")]
+            body.append((f"{cfg} & {ps.TW_LBL[tw]}", cells))
+
+    lines = [
+        r"\begin{table}[htbp]\centering",
+        r"\caption{Look-ahead POLICY variants, against the base cell "
+        r"($|\Xi| = 25$, $L = 24$\,h).  TB0 removes the 5-minute tie-break that "
+        r"buys opportunistic charging; MIPTAIL solves the look-ahead tail as a "
+        r"MIP instead of an LP relaxation.  Gap is the median gap to the "
+        r"hindsight optimum, $\Delta$ the median paired change in "
+        + eff["tex"] +
+        r" (positive = worse), $t_{\text{dec}}$ the median decision "
+        r"time per stop.}",
+        r"\label{tab:la_policy" + eff["sfx"] + r"}",
+        r"\resizebox{\textwidth}{!}{%",
+        r"\begin{tabular}{ll" + "rrr" * len(routes) + r"}", r"\toprule",
+        " & ".join([r"Config & Windows"]
+                   + [r"\multicolumn{3}{c}{" + ps.ROUTE_LBL[r] + "}"
+                      for r in routes]) + r" \\",
+        r"\midrule",
+        " & ".join([r" & "] + [r"Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s)"
+                               for _ in routes]) + r" \\",
+        r"\midrule",
+    ]
+    for head, cells in body:
+        lines.append(f"{head} & " + " & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}%", r"}", r"\end{table}", ""]
+    _write_tex(f"additional_la_policy{eff['sfx']}.tex", "\n".join(lines))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+
 _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
-                 la=section_la, gamma=section_gamma, vss=section_vss)
+                 la=section_la,
+                 # both effect measures: route duration and the penalised
+                 # objective the model actually minimises
+                 la_policy=lambda: (section_la_policy("dur"),
+                                    section_la_policy("pen")),
+                 gamma=section_gamma, vss=section_vss)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Real tables/figures for the "

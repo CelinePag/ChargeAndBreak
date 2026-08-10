@@ -19,11 +19,15 @@ Figure layout
   series (hue)  : method, fixed colour per method across all figures
   y axis        : gap to oracle (%)
 
-Three variants carry the same data; box is the one reported in the paper and
+Four variants carry the same data; box is the one reported in the paper and
 is what a bare run produces:
   box    — median + IQR box, 1.5 IQR whiskers, mean diamond   (DEFAULT)
   bar    — mean bar with ±1 std whisker
   violin — kernel-density violin with median + quartile ticks
+  line   — same slots as box, but the four TW marks inside each method block
+           are CONNECTED: median (solid) and mean (dashed) lines over an IQR
+           band, so the slope across the window classes is read directly
+           (--line-no-band drops the bands)
 
 Infeasible runs (stranding / HoS breach) carry no meaningful gap and are
 EXCLUDED from the distributions — the per-group counts are printed to the
@@ -285,7 +289,8 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
 def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     metric: str = "gap_pen", out_dir: str = _paths.figures(),
                     annotate_n: bool = True, full_grid: bool = True,
-                    layout: str = "row", inner: str = "tw") -> list:
+                    layout: str = "row", inner: str = "tw",
+                    line_band: bool = True) -> list:
     """
     Render the gap-distribution figure and save PDF + PNG; returns the paths.
 
@@ -397,6 +402,14 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
             q1, q3 = np.percentile(a, [25, 75])
             inside = a[a <= q3 + 1.5 * (q3 - q1)]
             tops.append(float(inside.max()) if inside.size else float(a.max()))
+    elif kind == "line":
+        # highest mark drawn is Q3, or the mean where the tail pulls it above
+        tops = []
+        for v in gaps.values():
+            if not v:
+                continue
+            a = np.asarray(v, dtype=float)
+            tops.append(max(float(np.percentile(a, 75)), float(a.mean())))
     else:
         # violin draws the full distribution, extremes included
         tops = [v for vals in gaps.values() for v in vals]
@@ -411,10 +424,25 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         if kind == "bar":
             handles = [Patch(facecolor=_METHOD_COLOR[m], alpha=0.85,
                              label=_METHOD_LBL[m]) for m in methods]
+        elif kind == "line":
+            handles = [Line2D([], [], color=_METHOD_COLOR[m], lw=1.6,
+                              label=_METHOD_LBL[m]) for m in methods]
         else:
             handles = [Patch(facecolor=_tint(_METHOD_COLOR[m]),
                              edgecolor=_METHOD_COLOR[m],
                              label=_METHOD_LBL[m]) for m in methods]
+        if kind == "line":
+            # TW is read from POSITION inside the block here, not from a shade,
+            # so the swatch key is replaced by the summary marks.
+            handles += [
+                Line2D([], [], color=_INK_MUTED, lw=1.2, marker="o", ms=2.6,
+                       label="median"),
+                Line2D([], [], color=_INK_MUTED, lw=0.9, ls="--", marker="D",
+                       ms=2.4, markerfacecolor="white", label="mean"),
+            ]
+            if line_band:
+                handles.append(Patch(facecolor=_tint(_INK_MUTED, 0.80),
+                                     edgecolor="none", label="IQR"))
         if kind == "box":
             handles.append(Line2D([], [], marker="D", linestyle="none",
                                   markerfacecolor=_INK_MUTED,
@@ -536,7 +564,51 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
             axst = strip_axes[ri]
             _style_axes(ax)
             route_empty = True
+            if kind == "line":
+                # Same slots as the boxes, different mark: within each method
+                # block the four TW slots are CONNECTED instead of drawn as
+                # four independent boxes, so the reader sees the slope (how
+                # much a method gains as the windows loosen) rather than having
+                # to compare four heights across gaps.  Requires inner="tw" —
+                # methods are categorical, so a line across them would imply an
+                # order that does not exist.
+                for ci, cust in enumerate(custs):
+                    for oi, m in enumerate(outer_list):
+                        px, med, avg, q1, q3 = [], [], [], [], []
+                        for ii, tw in enumerate(inner_list):
+                            vals = gaps.get((route, cust, tw, m), [])
+                            px.append(_x(ci, oi, ii))
+                            if not vals:
+                                med.append(np.nan); avg.append(np.nan)
+                                q1.append(np.nan);  q3.append(np.nan)
+                                continue
+                            route_empty = False
+                            d = np.asarray(vals, dtype=float)
+                            med.append(float(np.median(d)))
+                            avg.append(float(d.mean()))
+                            _a, _b = np.percentile(d, [25, 75])
+                            q1.append(float(_a)); q3.append(float(_b))
+                        if all(np.isnan(v) for v in med):
+                            continue
+                        col = _METHOD_COLOR[m]
+                        px = np.asarray(px, dtype=float)
+                        q1 = np.asarray(q1); q3 = np.asarray(q3)
+                        # A TW class with no runs breaks the line (NaN) rather
+                        # than interpolating across it.
+                        if line_band:
+                            ax.fill_between(px, q1, q3, color=col, alpha=0.16,
+                                            linewidth=0, zorder=2)
+                            for edge in (q1, q3):
+                                ax.plot(px, edge, "-", color=col, lw=0.5,
+                                        alpha=0.65, zorder=3)
+                        ax.plot(px, med, "-", color=col, lw=1.2, marker="o",
+                                ms=2.4, mfc=col, mec=col, zorder=5)
+                        ax.plot(px, avg, "--", color=col, lw=0.9, marker="D",
+                                ms=2.2, mfc="white", mec=col, mew=0.6,
+                                zorder=6)
             for ci, cust in enumerate(custs):
+                if kind == "line":
+                    break
                 for oi, ov in enumerate(outer_list):
                     for ii, iv in enumerate(inner_list):
                         m, tw = (ov, iv) if inner_is_tw else (iv, ov)
@@ -673,7 +745,7 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                                 color=_INK_PRIMARY)
         # inner="tw": TW is read from the shade key in the legend; inner=
         # "method": TW is the on-axis block, so no shade key needed.
-        _legend(fig, tw_shades=inner_is_tw)
+        _legend(fig, tw_shades=inner_is_tw and kind != "line")
         fig.tight_layout(rect=(0, 0.0, 1, 0.90))
 
         # compact colour key, tucked to the right of the strip row
@@ -708,10 +780,12 @@ if __name__ == "__main__":
     parser.add_argument("--out-dir", default=_paths.figures(),
                         help="output directory (default: figures)")
     parser.add_argument("--kind", default="box",
-                        choices=["box", "bar", "violin", "all"],
+                        choices=["box", "bar", "violin", "line", "all"],
                         help="figure variant (default: box — median + IQR, "
                              "the variant reported in the paper; 'bar' gives "
-                             "means with ±1 std whiskers, 'all' every variant)")
+                             "means with ±1 std whiskers; 'line' puts the TW "
+                             "class on the x axis and draws median/mean lines "
+                             "with an IQR band per method; 'all' every variant)")
     parser.add_argument("--metric", default="gap_pen",
                         choices=["gap_pen", "gap_nopen"],
                         help="gap definition (default: gap_pen, window "
@@ -730,6 +804,11 @@ if __name__ == "__main__":
                              "blocks holding their four TW boxes (default); "
                              "'method' = TW blocks holding the four methods "
                              "side by side (files get a '_methods' suffix)")
+    parser.add_argument("--line-no-band", dest="line_band",
+                        action="store_false", default=True,
+                        help="--kind line: drop the IQR bands and draw only "
+                             "the median and mean lines (five overlapping "
+                             "bands can be muddy in a dense panel)")
     parser.add_argument("--layout", default="row", choices=["row", "grid"],
                         help="'row' = all data in one horizontal band "
                              "(9 panels side by side, default); "
@@ -762,12 +841,17 @@ if __name__ == "__main__":
     if args.all:
         combos = [(k, i) for k in ("box", "bar") for i in ("tw", "method")]
     else:
-        kinds  = (["box", "bar", "violin"] if args.kind == "all"
+        kinds  = (["box", "bar", "violin", "line"] if args.kind == "all"
                   else [args.kind])
         combos = [(k, args.inner) for k in kinds]
+    # The line mark connects the four TW slots inside a method block, so it
+    # only means anything with inner="tw": methods are categorical and a line
+    # across them would imply an order that does not exist.
+    combos = [(k, "tw" if k == "line" else i) for k, i in combos]
     for kind, inner in combos:
         for p in plot_gap_figure(gaps, n_infe, n_unsl, n_feas, kind=kind,
                                  metric=args.metric, out_dir=args.out_dir,
                                  full_grid=not args.present_only,
-                                 layout=args.layout, inner=inner):
+                                 layout=args.layout, inner=inner,
+                                 line_band=args.line_band):
             print(f"  Figure    : {p}")

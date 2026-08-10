@@ -25,7 +25,12 @@ is the colour.
 from __future__ import annotations
 
 # ── categorical: method identity (Okabe-Ito) ─────────────────────────────────
-METHOD_ORDER = ["greedy", "RO", "ROBU", "LA", "2SP", "oracle"]
+# Plot order, left to right (and the legend order that must match it): the two
+# robust models first, then the stochastic program, then the online policies.
+# Only the ORDER lives here — colour is keyed by name in METHOD_COLOR below, so
+# reordering never reassigns a hue.  ORACLE stays last and is filtered out of
+# the method figures, where it is a bound rather than a competing policy.
+METHOD_ORDER = ["ROBU", "RO", "2SP", "greedy", "LA", "oracle"]
 METHOD_LBL = {
     "greedy": "Greedy", "RO": "RO", "ROBU": "ROBU",
     "LA": "LA", "2SP": "2SP", "oracle": "Oracle",

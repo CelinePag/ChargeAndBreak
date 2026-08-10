@@ -1,5 +1,5 @@
 \begin{table}[ht]\centering
-\caption{Refuelling is credited post hoc rather than modelled: it has no binding location choice, any truck stop serving, and occurs at most once on these corridors.  Route lengths are short 824--1219\,km ($n=80$); medium 1541--2536\,km ($n=80$).  A fuel stop costs 19\,min (access manoeuvre, queue, pumping).  The headline tables assume short 0, medium 1 stop(s), shown against what each tank specification would derive instead.  Crediting a stop lengthens the diesel makespan and so shrinks the reported penalty; the zero-stop row is the conservative bound.}
+\caption{Refuelling is credited post hoc rather than modelled: it has no binding location choice, any truck stop serving, and occurs at most once on these corridors.  Route lengths are short 824--1219\,km ($n=80$); medium 1541--2536\,km ($n=80$); long 3042--4025\,km ($n=80$).  A fuel stop costs 19\,min (access manoeuvre, queue, pumping).  The headline tables assume short 0, medium 1, long 2 stop(s), shown against what each tank specification would derive instead.  Crediting a stop lengthens the diesel makespan and so shrinks the reported penalty; the zero-stop row is the conservative bound.}
 \label{tab:diesel-refuel}
 \begin{tabular}{llrrr}
 \hline
@@ -17,6 +17,12 @@ Medium & 900 L @ 25 L/100km & 0.00 & 0 & $+10.03$ \\
 Medium & 900 L @ 33 L/100km & 0.15 & 15 & $+9.95$ \\
 Medium & 600 L @ 25 L/100km & 0.39 & 39 & $+9.81$ \\
 Medium & 600 L @ 33 L/100km & 0.95 & 95 & $+9.41$ \\
+Long & assumed (headline) & 2.00 & -- & $+10.85$ \\
+Long & no fuel stop & 0.00 & -- & $+11.58$ \\
+Long & 900 L @ 25 L/100km & 0.80 & 80 & $+11.29$ \\
+Long & 900 L @ 33 L/100km & 1.00 & 100 & $+11.21$ \\
+Long & 600 L @ 25 L/100km & 1.00 & 100 & $+11.21$ \\
+Long & 600 L @ 33 L/100km & 1.77 & 100 & $+10.93$ \\
 \hline
 \end{tabular}
 \end{table}

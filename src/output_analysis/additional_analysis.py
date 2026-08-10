@@ -622,6 +622,14 @@ def cmd_la_report(args) -> None:
     base_dur = {(r.get("instance"), r.get("window_class")): r.get("duration_h")
                 for (c, _rt, _tw), recs in groups.items() if c == "base"
                 for r in recs if not cs._is_truly_infeasible(r)}
+    # Same pairing on the PENALISED duration (arrival + beta * window misses),
+    # which is the model's actual objective.  A configuration can shorten the
+    # route by arriving late at customers, and the duration-only delta scores
+    # that as an improvement; the penalised delta does not.
+    base_pen = {(r.get("instance"), r.get("window_class")):
+                r.get("duration_pen_h")
+                for (c, _rt, _tw), recs in groups.items() if c == "base"
+                for r in recs if not cs._is_truly_infeasible(r)}
 
     _paths.ensure_dirs()
     out = _paths.data_output("additional_la_stats.csv")
@@ -631,6 +639,8 @@ def cmd_la_report(args) -> None:
                     "window_class", "n_runs", "n_infeasible",
                     "gap_pen_median_pct", "gap_nopen_median_pct",
                     "duration_median_h", "delta_vs_base_pct", "n_paired",
+                    "duration_pen_median_h", "delta_pen_vs_base_pct",
+                    "n_paired_pen",
                     "decision_mean_s_median", "decision_max_s_median",
                     "wall_clock_s_median"])
         for (cfg, route, tw), recs in sorted(groups.items()):
@@ -646,15 +656,21 @@ def cmd_la_report(args) -> None:
             wall, _  = _agg([r.get("wall_clock_s") for r in recs])
             n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
 
-            deltas = []
+            durp, _  = _agg([r.get("duration_pen_h") for r in recs])
+
+            deltas, deltas_pen = [], []
             for r in recs:
                 if cs._is_truly_infeasible(r):
                     continue
-                b = base_dur.get((r.get("instance"), r.get("window_class")))
-                d = r.get("duration_h")
+                key = (r.get("instance"), r.get("window_class"))
+                b, d = base_dur.get(key), r.get("duration_h")
                 if b and d:
                     deltas.append(100.0 * (d / b - 1.0))
+                bp, dp = base_pen.get(key), r.get("duration_pen_h")
+                if bp and dp:
+                    deltas_pen.append(100.0 * (dp / bp - 1.0))
             dl, n_pair = _agg(deltas)
+            dlp, n_pair_pen = _agg(deltas_pen)
 
             ns = recs[0].get("n_scenarios")
             hh = recs[0].get("horizon_hours")
@@ -663,6 +679,8 @@ def cmd_la_report(args) -> None:
                         None if gn is None else round(gn, 3),
                         None if dur is None else round(dur, 3),
                         None if dl is None else round(dl, 3), n_pair,
+                        None if durp is None else round(durp, 3),
+                        None if dlp is None else round(dlp, 3), n_pair_pen,
                         None if dec is None else round(dec, 4),
                         None if decx is None else round(decx, 4),
                         None if wall is None else round(wall, 1)])

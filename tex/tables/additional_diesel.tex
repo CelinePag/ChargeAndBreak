@@ -1,13 +1,13 @@
 \begin{table}[ht]\centering
-\caption{EV vs diesel route duration (\%) on the same instances and realizations.  Coupling = share of charging time credited inside a mandatory break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum). ``EV cert.'' is the worst remaining MIP gap on the EV oracle: where it exceeds the solver tolerance the EV schedule is an incumbent, not a proven optimum, so the penalty is an upper bound on the true optimal one.}
+\caption{EV vs diesel route duration (\%) on the same instances and realizations.  Coupling = share of charging time credited inside a mandatory break ($\Sigma g_i/\Sigma\tau^c_i$, hindsight optimum). ``EV cert.'' is the worst remaining MIP gap on the EV oracle: where it exceeds the solver tolerance the EV schedule is an incumbent, not a proven optimum, so the penalty is an upper bound on the true optimal one.  The certification shown is the worst gap among the instances that recorded one; no bound was recorded for long (11).}
 \label{tab:diesel}
-\begin{tabular}{lrrrrrr}
+\begin{tabular}{lrrrrrrr}
 \hline
-Route & Diesel (h) & EV (h) & Greedy (\%) & Oracle (\%) & Coupling (\%) & EV cert. (\%) \\
+Route & Diesel (h) & EV (h) & Greedy (\%) & Oracle (\%) & Coupling (\%) & EV cert. (\%) & $n$ \\
 \hline
-Short & 26.6 & 28.7 & 20.0 & 8.0 & 76 & 0.5 \\
-Medium & 53.2 & 58.2 & 23.0 & 9.4 & 70 & 0.5 \\
-Long & -- & -- & 21.0 & -- & -- & -- \\
+Short & 26.6 & 28.7 & 19.9 & 8.0 & 76 & 0.5 & 80/80 \\
+Medium & 53.2 & 58.2 & 22.5 & 9.4 & 70 & 0.5 & 80/80 \\
+Long & 96.4 & 106.9 & 21.0 & 10.8 & 68 & 9.3 & 80/80 \\
 \hline
 \end{tabular}
 \end{table}
