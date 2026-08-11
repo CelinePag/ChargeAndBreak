@@ -443,6 +443,7 @@ def instance_realistic(route_class: str = "medium",
                        rng: np.random.Generator | None = None,
                        cs_spacing_km: float | None = None,
                        charger_power_kw: float | None = None,
+                       battery_kwh: float | None = None,
                        add_laybys: bool = True,
                        layby_spacing_km: float = LAYBY_SPACING_KM) -> dict:
     """
@@ -459,6 +460,12 @@ def instance_realistic(route_class: str = "medium",
                        | "long" (3000–4000 km)
     clusters         : 1 | 2 | 3 — number of customer delivery clusters
     customers_class  : "few" (1–3) | "medium" (4–6) | "many" (7–15)
+    battery_kwh      : pack capacity (kWh) for the I3 sensitivity axis.
+                       None keeps settings.BATTERY_CAPACITY.  Only the pack is
+                       resized here; make_data derives Emin, Ebar and Tbar from
+                       it, so the 20 % floor scales WITH the pack and the tail
+                       acceptance (TAIL_C_RATE·Ecap) moves too — a bigger pack
+                       therefore also shifts where the charge curve tapers.
 
     Notes
     -----
@@ -470,7 +477,7 @@ def instance_realistic(route_class: str = "medium",
     customers = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
     average_speed    = V_NOM
     CS_spacing       = int(cs_spacing_km) if cs_spacing_km else CS_SPACING_KM
-    Battery_capacity = BATTERY_CAPACITY
+    Battery_capacity = float(battery_kwh) if battery_kwh else BATTERY_CAPACITY
 
     nb_customers   = random.randint(*customers[customers_class])
     route_distance = random.randint(*distances[route_class])

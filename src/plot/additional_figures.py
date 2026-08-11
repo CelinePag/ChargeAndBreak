@@ -19,7 +19,6 @@ Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
   figures/additional_la_frontier.png|pdf     §8.3 cost/quality frontier
   tex/tables/additional_la.tex               (both read
   additional_analysis.py's data_output/additional_la_stats.csv)
-  figures/additional_gamma_frontier.png|pdf  §8.5 frontier (endpoints only yet)
   tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
   data_output/additional_vss_stats.csv             results_vss/ fills up)
 
@@ -31,7 +30,7 @@ misleading zero.
 
 Usage
   python -m src.plot.additional_figures                 # all sections
-  python -m src.plot.additional_figures --section diesel|sensitivity|gamma|vss
+  python -m src.plot.additional_figures --section diesel|sensitivity|vss
 """
 
 from __future__ import annotations
@@ -849,11 +848,18 @@ def _diesel_decomposition(routes) -> None:
 # +0.23 % on RshortCfewTlarge_17/18/11 and RshortCmanyTtight_1).  Reinstating the
 # row therefore requires the whole variant set re-solved to proven optimality,
 # not just a rerun of this script.
+#
+# The BASE CASE is the zero line, not a row: settings.CS_SPACING_KM = 60 km and
+# settings.CHARGER_POWER_BASE_KW = 350 kW.  Every tag below must correspond to a
+# directory actually produced by additional_analysis.py sensitivity --values,
+# because a tag with no runs renders as a blank "pending" row rather than an
+# error — and a value that was RUN but is not listed here is dropped silently.
+# Keep this list in step with the --values you sweep.
 _SENS_ROWS = [
     ("CS spacing 30 km",        "cs30",   True),
-    ("CS spacing 90 km",        "cs90",   True),
+    ("CS spacing 100 km",       "cs100",  True),
     ("Charger power 150 kW",    "kw150",  True),
-    ("Charger power 350 kW",    "kw350",  True),
+    ("Charger power 700 kW",    "kw700",  True),
     ("Charger power 1000 kW",   "kw1000", True),
 ]
 
@@ -1508,99 +1514,6 @@ def section_la():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# §8.5 — GAMMA FRONTIER (endpoints from base case until the sweep runs)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def section_gamma():
-    print("== Sec 8.5 gamma frontier ==")
-    # sweep points (from tagged runs, none yet) --------------------------------
-    sweep = {}
-    for gam in (0, 1, 2, 4, 8):
-        gaps, infeas, tot = [], 0, 0
-        for route, cust in COMBOS:
-            if route != "short":
-                continue
-            for tw in TWS:
-                for seed in SEEDS:
-                    st = _stem(route, cust, tw, seed)
-                    f = (_latest(_paths.solutions(f"{st}__g{gam}_ROBU_*.json"))
-                         or _latest(_paths.solutions(f"{st}_g{gam}_ROBU_*.json")))
-                    if not f:
-                        continue
-                    d = _load(f) or {}
-                    m = d.get("metrics") or {}
-                    tot += 1
-                    if m.get("run_infeasible"):
-                        infeas += 1
-                    o = _oracle(st)
-                    if o and d.get("duration_h") and not m.get(
-                            "run_infeasible"):
-                        gaps.append(100 * (d["duration_h"] / o["duration"]
-                                           - 1))
-        if tot:
-            sweep[gam] = (_mean(gaps), 100 * infeas / tot, tot)
-
-    # base-case endpoints from paper_gap_stats.csv -----------------------------
-    end = {}
-    try:
-        with open(_paths.data_output("paper_gap_stats.csv"), encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                if row["route_class"] != "short":
-                    continue
-                m = row["method"]
-                if m not in ("RO", "ROBU"):
-                    continue
-                nf = int(row["n_feasible"]); ni = int(
-                    row["n_infeasible_excluded"])
-                e = end.setdefault(m, dict(g=[], w=[], inf=0, tot=0))
-                if row["gap_mean_%"]:
-                    e["g"].append(float(row["gap_mean_%"])); e["w"].append(nf)
-                e["inf"] += ni; e["tot"] += nf + ni
-    except OSError:
-        pass
-
-    cats = ["0", "1", "2", "4", "8", r"$\sqrt{N}$" + "\n(base ROBU)",
-            r"$N$" + "\n(box = RO)"]
-    xs   = np.arange(len(cats))
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(4.8, 3.6), sharex=True,
-                                   height_ratios=[3, 2])
-    for i, gam in enumerate((0, 1, 2, 4, 8)):
-        if gam in sweep:
-            ax1.plot(xs[i], sweep[gam][0], "o", color=ORAN, ms=5)
-            ax2.plot(xs[i], sweep[gam][1], "o", color=ORAN, ms=5)
-        else:
-            for ax in (ax1, ax2):
-                ax.text(xs[i], 0.5, "pending", rotation=90, ha="center",
-                        va="center", fontsize=6.5, color=MUT, style="italic",
-                        transform=ax.get_xaxis_transform())
-    for m, xi, col in (("ROBU", xs[5], ORAN), ("RO", xs[6], VERM)):
-        e = end.get(m)
-        if e and e["g"]:
-            gap = float(np.average(e["g"], weights=e["w"]))
-            inf = 100 * e["inf"] / e["tot"] if e["tot"] else None
-            ax1.plot(xi, gap, "s", color=col, ms=6)
-            ax1.annotate(f"{gap:.1f}", (xi, gap), xytext=(-4, -10),
-                         textcoords="offset points", ha="right", fontsize=7)
-            if inf is not None:
-                ax2.plot(xi, inf, "s", color=col, ms=6)
-                ax2.annotate(f"{inf:.1f}", (xi, inf), xytext=(-4, 4),
-                             textcoords="offset points", ha="right",
-                             fontsize=7)
-    ax1.margins(y=0.2)
-    ax2.margins(y=0.2)
-    ax1.set_ylabel("Realized gap to oracle (%)")
-    ax2.set_ylabel("Infeasible runs (%)")
-    ax2.set_xticks(xs, cats)
-    ax2.set_xlabel(r"Uncertainty budget $\Gamma$")
-    for ax in (ax1, ax2):
-        ax.yaxis.grid(True, color=GRID, lw=0.6)
-        ax.set_axisbelow(True)
-    ax1.set_title("Price of robustness (short routes) — sweep pending, "
-                  "endpoints from base case", loc="left")
-    _save(fig, "additional_gamma_frontier")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # §8.5 — VSS / EVPI
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1900,7 +1813,7 @@ _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
                  # objective the model actually minimises
                  la_policy=lambda: (section_la_policy("dur"),
                                     section_la_policy("pen")),
-                 gamma=section_gamma, vss=section_vss)
+                 vss=section_vss)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Real tables/figures for the "

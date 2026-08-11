@@ -9,8 +9,14 @@ launched from here.  Each subcommand maps to one paper section:
   sensitivity    8.3 Sensitivity analysis            one-at-a-time sweeps off the
                                                      base case (CS spacing, charger
                                                      power, beta, travel CV, AR(1)
-                                                     rho, no-split break; battery
-                                                     is a guarded stub until plumbed)
+                                                     rho, no-split break, battery
+                                                     capacity)
+  grid           8.3 Sensitivity analysis            two axes crossed instead of
+                                                     one-at-a-time; default is
+                                                     battery x charger power,
+                                                     which one-at-a-time cannot
+                                                     separate (the pack moves
+                                                     both range and the taper)
   diesel         8.4 VS diesel trucks                same instances re-run with
                                                      --diesel (HoS only, no
                                                      charging) for the EV-vs-diesel
@@ -19,8 +25,6 @@ launched from here.  Each subcommand maps to one paper section:
                                                      experiments/vss_evpi.py
                                                      (EEV / RP / WS, common random
                                                      numbers)
-  gamma          8.5 Effect of uncertainty           ROBU price-of-robustness
-                                                     frontier (--robu_gamma sweep)
   la             8.3 LA configuration sensitivity    look-ahead horizon and
                                                      scenario-count sweep, run on
                                                      the BASE instances under a
@@ -75,8 +79,11 @@ Examples
   # 8.3: no-split-break regime (Art. 7 15'+30' split forbidden; no --values)
   python -m src.output_analysis.additional_analysis sensitivity --axis no_split
 
-  # 8.5: budget frontier on short routes
-  python -m src.output_analysis.additional_analysis gamma --gammas 0,1,2,4,8 --combos RshortCfew
+  # 8.3: pack x charge point.  ALWAYS --dry-run first — a grid multiplies out
+  # fast (3 x 3 cells x 160 instances = 1440 runs per algorithm).
+  python -m src.output_analysis.additional_analysis grid --dry-run
+  python -m src.output_analysis.additional_analysis grid \
+      --x-values 500,600,800 --y-values 350,700 --seeds 1-5 --jobs 4
 
   # 8.5: VSS / EVPI on the short/medium grid, 20 scenarios
   python -m src.output_analysis.additional_analysis vss --n-scenarios 20
@@ -98,6 +105,7 @@ import shutil
 import subprocess
 import sys
 from src import paths as _paths
+from src.settings import BATTERY_CAPACITY, CHARGER_POWER_BASE_KW
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DEFAULTS
@@ -131,19 +139,35 @@ VSS_DIR     = _paths.results_vss()       # per-instance VSS/EVPI json results
 _AXES = {
     "cs_spacing":    dict(kind="regen", kw="cs_spacing_km",
                           default_values=[30, 90], tag="cs"),
+    # `base` = the value the UNLABELLED base-case runs already carry.  Only the
+    # axes the grid can cross need it, so that a cell landing on the base case
+    # is skipped rather than regenerated under a variant tag (which would
+    # duplicate the base case under a second name and split its dedup group).
     "charger_power": dict(kind="regen", kw="charger_power_kw",
-                          default_values=[150, 350, 1000], tag="kw"),
+                          default_values=[150, 350, 1000], tag="kw",
+                          base=CHARGER_POWER_BASE_KW),
     "cv":            dict(kind="regen", kw="cv",
                           default_values=[0.10, 0.25], tag="cv"),
     "ar1_rho":       dict(kind="regen", kw="ar1_rho",
                           default_values=[0.4], tag="rho"),
     "beta":          dict(kind="patch", kw="beta",
                           default_values=[2.0, 5.0], tag="beta"),
-    "battery":       dict(kind="stub",
-                          msg="battery axis needs Bcap plumbed through "
-                              "generate_instance_file -> instance_realistic "
-                              "-> make_data (mirror the charger_power_kw "
-                              "path) before it can run"),
+    # I3.  Regen (not patch): the pack needs five coupled fields (E0, Ecap,
+    # Emin, Ebar, Tbar) and make_data already derives all of them from Bcap.
+    # Capacity touches neither the geometry nor the realisation — Q is drawn
+    # before Bcap is applied — so a regen at the same seed stays exactly paired
+    # with the base instance, as on the charger_power axis.
+    #
+    # READ THE RESULTS WITH CARE: two things move with the pack, not one.
+    # Emin = SOC_MIN_FRAC·Ecap, so +100 kWh of pack is only +80 kWh of usable
+    # energy; and the tail acceptance is TAIL_C_RATE·Ecap, so a bigger pack
+    # ALSO pushes back where the charge curve tapers (at 350 kW the taper only
+    # binds below 875 kWh).  A one-at-a-time sweep at fixed charger power
+    # therefore measures range and taper avoidance together; cross it with
+    # charger_power if the two need separating.
+    "battery":       dict(kind="regen", kw="battery_kwh",
+                          default_values=[400, 600, 800], tag="kwh",
+                          base=BATTERY_CAPACITY),
     # Art. 7 second subparagraph only PERMITS the 15'+30' split, so a carrier
     # may forbid it.  allow_split=False drops x_b15/x_b30 from MILP/2SP and
     # takes b15/b30 out of the greedy, LA and supervisor rules.  Patch (not
@@ -309,6 +333,55 @@ def _materialise_regen(axis: str, value, combos, tws, seeds,
     return os.path.join(out_dir, f"*__{tag}.json")
 
 
+def _axis_tag(spec: dict, value) -> str:
+    """'kwh' + 600 -> 'kwh600'.  ``:g`` keeps 600.0 as 600 and 0.1 as 0.1, so a
+    value that arrives as int or float tags identically — the tag is part of the
+    instance stem, and two spellings of one cell would split its dedup group."""
+    return f"{spec['tag']}{value:g}"
+
+
+def _materialise_grid(active: list, combos, tws, seeds,
+                      out_dir: str, dry: bool) -> str:
+    """Re-generate variant instances with N axes changed at once.
+
+    ``active`` is a list of (axis_spec, value) pairs — the axes that actually
+    DIFFER from the base case in this cell.  A cell sitting on a base row or
+    column therefore arrives here with a single pair and produces exactly the
+    stem and kwargs the one-at-a-time sweep would have produced, which is what
+    lets the grid reuse those runs instead of recomputing them under a second
+    name (see cmd_grid).
+
+    Same contract as _materialise_regen — one geometry seed per
+    (route,cust,tw,seed), so every cell stays paired with the base instance AND
+    with every other cell.  Only regen axes qualify: a patch axis overrides a
+    stored field, and two patches would have to be composed by hand, which is a
+    different (and so far unneeded) code path.
+    """
+    from src.instance_gen.instance_io import generate_instance_file
+    tag    = "_".join(_axis_tag(s, v) for s, v in active)
+    kwargs = {s["kw"]: v for s, v in active}
+    os.makedirs(out_dir, exist_ok=True)
+    for combo in combos:
+        route, cust = _split_combo(combo)
+        for tw in tws:
+            for seed in seeds:
+                stem   = os.path.splitext(os.path.basename(
+                             _base_instance_path(route, cust, tw, seed)))[0]
+                target = os.path.join(out_dir, _tagged(stem, tag) + ".json")
+                if os.path.isfile(target):
+                    continue
+                if dry:
+                    print(f"DRY-RUN  generate {target}")
+                    continue
+                path = generate_instance_file(
+                    route, cust, tw, seed,
+                    output_dir=out_dir, verbose=False, **kwargs)
+                os.replace(path, target)
+                _retitle(target, _tagged(stem, tag))
+                print(f"generated {target}")
+    return os.path.join(out_dir, f"*__{tag}.json")
+
+
 def _patch_tag(spec: dict, value) -> str:
     """Variant tag for one patched value.  Boolean axes are a single regime
     rather than a sweep, so they carry the bare tag (…__nosplit, not
@@ -418,6 +491,92 @@ def cmd_sensitivity(args) -> None:
                   n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
+def _grid_values(spec: dict, raw: str | None) -> list:
+    """Parse --x-values / --y-values, keeping integral values as ints so the
+    tag reads kwh600, not kwh600.0."""
+    vals = ([float(v) for v in raw.split(",")] if raw else
+            [float(v) for v in spec["default_values"]])
+    return [int(v) if float(v).is_integer() else v for v in vals]
+
+
+def cmd_grid(args) -> None:
+    """Section 8.3 — a 2-D grid over two regen axes (default: battery capacity
+    x charger power).
+
+    Why this exists separately from `sensitivity`: one-at-a-time cannot
+    separate range from charge speed, because the two are coupled in the model.
+    Emin = SOC_MIN_FRAC.Ecap and the tail acceptance is TAIL_C_RATE.Ecap, so
+    resizing the pack ALSO moves where the charge curve tapers; sweeping the
+    pack at a fixed charge point therefore measures range and taper avoidance
+    together.  Only the grid separates them.
+    """
+    axes = tuple(a.strip() for a in args.axes.split(","))
+    if len(axes) != 2:
+        raise SystemExit(f"--axes needs exactly two axis names, got '{args.axes}'")
+    if axes[0] == axes[1]:
+        raise SystemExit(f"--axes needs two DIFFERENT axes, got '{axes[0]}' twice")
+    for a in axes:
+        spec = _AXES.get(a)
+        if spec is None:
+            raise SystemExit(f"unknown axis '{a}' (choose from {', '.join(_AXES)})")
+        if spec["kind"] != "regen":
+            raise SystemExit(
+                f"axis '{a}' is kind='{spec['kind']}'; the grid only crosses "
+                f"regen axes (a patch axis overrides a stored field and would "
+                f"have to be composed by hand)")
+
+    sx, sy = (_AXES[a] for a in axes)
+    xs = _grid_values(sx, args.x_values)
+    ys = _grid_values(sy, args.y_values)
+    seeds  = _expand_seeds(args.seeds)
+    combos = args.combos.split(",")
+    tws    = args.tw.split(",")
+
+    # A grid CONTAINS the one-at-a-time sweeps: the row at the base charger
+    # power is the battery sweep, the column at the base pack is the charger
+    # sweep, and the crossing cell is the base case itself.  Those cells must
+    # therefore carry the SAME identity as the single-axis runs — same stem,
+    # same directory — or the grid would recompute already-finished work under
+    # a second name and split its dedup group.  Giving them a one-element
+    # `active` list does exactly that: the tag and the kwargs collapse to what
+    # `sensitivity --axis <that axis>` produces, so the existing instance files
+    # are found on disk and runner_dispatch's --skip-existing finds the runs.
+    def _active(vx, vy) -> list:
+        return [(s, v) for s, v in ((sx, vx), (sy, vy))
+                if s.get("base") is None or float(v) != float(s["base"])]
+
+    per_cell = len(combos) * len(tws) * len(seeds)
+    cells    = [(vx, vy) for vx in xs for vy in ys]
+    n_base   = sum(1 for c in cells if not _active(*c))
+    n_edge   = sum(1 for c in cells if len(_active(*c)) == 1)
+    print(f"GRID  {axes[0]} x {axes[1]}  =  {len(xs)} x {len(ys)} = {len(cells)} cells"
+          f"  x {per_cell} instances/cell  ({args.algorithms} each)")
+    if n_base:
+        print(f"      {n_base} base cell skipped (its unlabelled runs already exist)")
+    if n_edge:
+        print(f"      {n_edge} cells lie on a base row/column = the one-at-a-time "
+              f"sweeps; they reuse those stems, so anything already run is skipped")
+    print(f"      {len(cells) - n_base - n_edge} interaction cells are new to "
+          f"this grid ({(len(cells) - n_base - n_edge) * per_cell} instances)")
+
+    for vx, vy in cells:
+        active = _active(vx, vy)
+        if not active:                      # the base case itself
+            continue
+        if len(active) == 1:                # on a base row/column: one-at-a-time
+            spec, val = active[0]
+            axis = axes[0] if spec is sx else axes[1]
+            out_dir = os.path.join(SENS_DIR, f"{axis}_{val}")
+        else:
+            out_dir = os.path.join(
+                SENS_DIR, "grid_" + "_".join(_axis_tag(s, v) for s, v in active))
+        pattern = _materialise_grid(active, combos, tws, seeds,
+                                    out_dir, args.dry_run)
+        _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
+                  guard=args.prune_quantile,
+                  n_scenarios=args.n_scenarios, horizon=args.horizon)
+
+
 def cmd_diesel(args) -> None:
     """Section 8.4 — diesel counterpart (HoS only, no charging) on the same
     instances; tagged copies keep diesel runs/caches apart from EV runs."""
@@ -432,18 +591,10 @@ def cmd_diesel(args) -> None:
               n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
-def cmd_gamma(args) -> None:
-    """Section 8.5 — ROBU price-of-robustness frontier (budget sweep)."""
-    seeds  = _expand_seeds(args.seeds)
-    combos = args.combos.split(",")
-    tws    = args.tw.split(",")
-    for g in [int(x) for x in args.gammas.split(",")]:
-        out_dir = os.path.join(SENS_DIR, f"gamma_{g}")
-        pattern = _materialise_copy(f"g{g}", combos, tws, seeds,
-                                    out_dir, args.dry_run)
-        _dispatch(pattern, "ROBU", args.jobs, args.dry_run,
-                  extra=["--robu_gamma", str(g)],   # ROBU: no greedy guard
-                  n_scenarios=args.n_scenarios, horizon=args.horizon)
+# The ROBU price-of-robustness (Gamma) frontier was removed in August 2026 —
+# it is not part of the paper (see the header comment in
+# tex/sections/results_section.tex).  ROBU itself remains available as a method
+# through runner_dispatch; only the budget sweep and its figure are gone.
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -834,16 +985,23 @@ def main() -> None:
     _add_common(p, DEFAULT_ALGOS)
     p.set_defaults(func=cmd_sensitivity)
 
+    p = sub.add_parser("grid",
+                       help="8.3 two-axis grid (default: battery x charger power)")
+    p.add_argument("--axes", default="battery,charger_power",
+                   help="Two comma-separated regen axes to cross "
+                        "(default: battery,charger_power)")
+    p.add_argument("--x-values", dest="x_values", default=None,
+                   help="Comma-separated values for the FIRST axis "
+                        "(default: that axis's default_values)")
+    p.add_argument("--y-values", dest="y_values", default=None,
+                   help="Comma-separated values for the SECOND axis")
+    _add_common(p, DEFAULT_ALGOS)
+    p.set_defaults(func=cmd_grid)
+
     p = sub.add_parser("diesel", help="8.4 diesel counterpart runs")
     _add_common(p, DIESEL_ALGOS)
     p.set_defaults(func=cmd_diesel)
 
-    p = sub.add_parser("gamma", help="8.5 ROBU budget (Gamma) frontier")
-    p.add_argument("--gammas", default="0,1,2,4,8",
-                   help="Comma-separated integer budgets (default: 0,1,2,4,8; "
-                        "base case already covers Gamma = sqrt(N))")
-    _add_common(p, "ROBU")
-    p.set_defaults(func=cmd_gamma)
 
     p = sub.add_parser("guard", help="8.2 guarded-greedy quantile sweep")
     p.add_argument("--quantiles", default="0.9,0.95,1.0",

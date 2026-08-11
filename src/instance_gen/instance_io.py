@@ -319,6 +319,7 @@ def generate_instance_file(route_class: str,
                            ar1_rho: float   = TRAVEL_TIME_AR1_RHO,
                            cs_spacing_km: float | None = None,
                            charger_power_kw: float | None = None,
+                           battery_kwh: float | None = None,
                            add_laybys: bool = True,
                            max_attempts: int = 5) -> str:
     """
@@ -348,6 +349,11 @@ def generate_instance_file(route_class: str,
     seed             : integer seed — uniquely identifies this instance file
     output_dir       : directory where the JSON file is written
     cv               : CV of the travel-time multiplier (e.g. 0.15)
+    battery_kwh      : pack capacity (kWh); None keeps the base capacity.
+                       Sensitivity axis "battery" — the pack does not touch
+                       geometry, D_real, E_real or the queue draws, so a regen
+                       at the same seed stays exactly paired with the base
+                       instance.
     verbose          : print progress
 
     Returns
@@ -377,6 +383,7 @@ def generate_instance_file(route_class: str,
                 rng              = rng,
                 cs_spacing_km    = cs_spacing_km,
                 charger_power_kw = charger_power_kw,
+                battery_kwh      = battery_kwh,
                 add_laybys       = add_laybys,
             )
             break
@@ -444,6 +451,7 @@ def generate_instance_file(route_class: str,
             ar1_rho            = ar1_rho,
             cs_spacing_km      = cs_spacing_km,
             charger_power_kw   = charger_power_kw,
+            battery_kwh        = battery_kwh,
             add_laybys         = add_laybys,
             created_at         = datetime.now().isoformat(timespec="seconds"),
             window_half_widths = _to_json_safe(half_widths),
