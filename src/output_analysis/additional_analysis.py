@@ -208,7 +208,9 @@ def _run(cmd: list[str], dry: bool) -> None:
 
 def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
               extra: list[str] | None = None,
-              guard: float | None = None) -> None:
+              guard: float | None = None,
+              n_scenarios: int | None = None,
+              horizon: float | None = None) -> None:
     """Launch runner_dispatch for one instance pattern.
 
     ``guard`` is the greedy departure quantile (--prune_quantile).  Because
@@ -216,12 +218,23 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
     supervisor — it must not leak onto the other algorithms, whose base runs
     were made without it.  So when greedy is requested alongside others, the
     batch is split: greedy runs guarded, the rest run untouched.
+
+    ``n_scenarios`` / ``horizon`` must match the BASE case whenever LA or 2SP
+    is in the sweep.  Left unset they fall back to runner_dispatch's own
+    defaults (10 scenarios, 12 h), which silently differ from a base case run
+    with other values — the sweep delta would then blend the axis change with
+    a scenario-count/horizon change.  Both are forwarded unconditionally:
+    greedy, RO and ORACLE accept and ignore them.
     """
     def _go(alg_spec: str, guarded: bool) -> None:
         cmd = [sys.executable, "-m", "src.simulation.runner_dispatch", pattern, alg_spec,
                "--jobs", str(jobs), "--skip-existing"]
         if guarded and guard is not None:
             cmd += ["--prune_quantile", str(guard)]
+        if n_scenarios is not None:
+            cmd += ["--n_scenarios", str(int(n_scenarios))]
+        if horizon is not None:
+            cmd += ["--horizon", str(float(horizon))]
         if extra:
             cmd += extra
         _run(cmd, dry)
@@ -401,7 +414,8 @@ def cmd_sensitivity(args) -> None:
             pattern = _materialise_patch(args.axis, v, combos, tws, seeds,
                                          out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  guard=args.prune_quantile)
+                  guard=args.prune_quantile,
+                  n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
 def cmd_diesel(args) -> None:
@@ -414,7 +428,8 @@ def cmd_diesel(args) -> None:
     pattern = _materialise_copy("diesel", combos, tws, seeds,
                                 out_dir, args.dry_run)
     _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-              extra=["--diesel"], guard=args.prune_quantile)
+              extra=["--diesel"], guard=args.prune_quantile,
+              n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
 def cmd_gamma(args) -> None:
@@ -427,7 +442,8 @@ def cmd_gamma(args) -> None:
         pattern = _materialise_copy(f"g{g}", combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, "ROBU", args.jobs, args.dry_run,
-                  extra=["--robu_gamma", str(g)])   # ROBU: no greedy guard
+                  extra=["--robu_gamma", str(g)],   # ROBU: no greedy guard
+                  n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -716,7 +732,8 @@ def cmd_guard(args) -> None:
         pattern = _materialise_copy(tag, combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  guard=q)
+                  guard=q,
+                  n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
 def cmd_vss(args) -> None:
@@ -787,6 +804,15 @@ def _add_common(p: argparse.ArgumentParser, algos_default: str) -> None:
                         "the flag is shared with LA pruning, so other "
                         "algorithms are dispatched without it. Pass an empty "
                         "value via --prune_quantile nan to disable.")
+    p.add_argument("--n_scenarios", type=int, default=None,
+                   help="Scenario count forwarded to LA / 2SP.  MUST match the "
+                        "base case, otherwise the sweep delta mixes the axis "
+                        "change with a scenario-count change.  Unset = "
+                        "runner_dispatch's default (10).")
+    p.add_argument("--horizon", type=float, default=None,
+                   help="LA look-ahead horizon (h) forwarded to runner_dispatch. "
+                        "Match the base case for the same reason as "
+                        "--n_scenarios.  Unset = runner_dispatch's default (12).")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands / files without executing anything")
 
