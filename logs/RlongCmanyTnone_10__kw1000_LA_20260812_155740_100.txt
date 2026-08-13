@@ -1,0 +1,38 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-13 11:28:26)
+  Instance : RlongCmanyTnone_10__kw1000   run_id=RlongCmanyTnone_10__kw1000_LA_20260812_155740_100
+  Route    : 153 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+
+[LA] stop 1 (LAYBY)  t=8.242h  soc=475kWh  cd=0.24h  sd=0.24h  sw=0.24h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [1->43]  travel=11.69h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1
+  y=0  brk=0    rst=0   26.872h (0.217h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (7.0s)
+  y=0  brk=0    rst=r2  31.878h (0.333h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (7.2s)
+  y=0  brk=b45  rst=0   27.775h (0.213h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (7.5s)
+  y=0  brk=b15  rst=0   27.280h (0.214h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (7.1s)
+     [DIAG] max per-scenario delta spread across actions: 27.30 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=8.242h  td=8.242h  (mean=26.872h)  28.9s
+
+[LA] stop 2 (LAYBY)  t=8.482h  soc=449kWh  cd=0.48h  sd=0.48h  sw=0.48h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [2->44]  travel=11.71h +1rest  4 actions × 25 scen  8w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=27.182h  1.7s  ws=no  1274v/2331c
+  y=0  brk=0    rst=0   27.167h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (7.5s)
+  y=0  brk=0    rst=r2  32.201h (0.307h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (6.3s)
+  y=0  brk=b45  rst=0   28.065h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (5.4s)
+  y=0  brk=b15  rst=0   27.573h (0.202h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (5.6s)
+     [DIAG] max per-scenario delta spread across actions: 23.53 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=8.482h  td=8.482h  (mean=27.167h)  26.6s
+
+[LA] stop 3 (CS)  t=8.720h  soc=424kWh  cd=0.72h  sd=0.72h  sw=0.72h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [3->45]  travel=11.73h +1rest  8 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=27.439h  1.9s  ws=no  1274v/2330c
+  y=0  brk=0    rst=0   27.552h (0.208h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (7.8s)
+  y=1  brk=0    rst=0   27.992h (0.219h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (7.7s)
+  y=0  brk=0    rst=r2  32.653h (0.316h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (7.7s)
+  y=1  brk=0    rst=r2  32.999h (0.332h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (7.8s)
+  y=0  brk=b45  rst=0   28.449h (0.206h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (6.6s)
