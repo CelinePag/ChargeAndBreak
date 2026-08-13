@@ -77,7 +77,10 @@ _TW_ORDER    = ps.TW_ORDER
 
 _ROUTE_LBL = ps.ROUTE_LBL
 _CUST_LBL  = ps.CUST_LBL
-_TW_LBL    = ps.TW_LBL
+# Copy, not an alias: the pooled-TW level below adds a key, and mutating
+# paper_style's dict would leak that synthetic level into every other module
+# that imports it.
+_TW_LBL    = dict(ps.TW_LBL)
 
 # ── fixed method -> colour assignment (Okabe–Ito colourblind-safe palette) ───
 # Colour follows the method identity, never the number of methods present in a
@@ -243,6 +246,155 @@ _CUST_SHORT = {"few": "Few", "medium": "Medium", "many": "Many"}
 # tighter window = darker box
 _TW_TINT = {"tight": 0.10, "medium": 0.40, "large": 0.62, "none": 0.84}
 
+# Synthetic window level used when the four TW classes are pooled into one box
+# per method.  It is a real key in the (route, cust, tw, method) dicts rather
+# than a special case threaded through the layout, so every downstream consumer
+# — panel drawing, heat strip, n annotations, stats CSV — works unchanged with
+# a one-element TW axis.  Full colour (no tint): with a single level there is
+# no shade ladder left to read.
+POOLED_TW = "all"
+_TW_TINT[POOLED_TW]  = 0.0
+_TW_LBL[POOLED_TW]   = "All windows"
+_TW_SHORT[POOLED_TW] = "A"
+
+
+def pool_tw(*dicts):
+    """Collapse the TW axis of (route, cust, tw, method)-keyed dicts.
+
+    Lists are concatenated and counters summed, so a pooled box holds every
+    instance of that (route, cust, method) cell regardless of window class.
+    Returns one new dict per input, in the same order.
+    """
+    out = []
+    for d in dicts:
+        pooled: dict = {}
+        for (route, cust, _tw, meth), v in d.items():
+            key = (route, cust, POOLED_TW, meth)
+            if isinstance(v, list):
+                pooled.setdefault(key, []).extend(v)
+            else:
+                pooled[key] = pooled.get(key, 0) + v
+        out.append(pooled)
+    return out
+
+
+def pool_cust(*dicts):
+    """Collapse the CUSTOMER axis of (route, cust, tw, method)-keyed dicts.
+
+    Used by the window-response figure, where the question is about the window
+    class and the customer count is a nuisance dimension: pooling it triples
+    the n behind each window mark and drops the figure from nine panels to
+    three, so the tight-vs-loose contrast is read directly.
+    """
+    out = []
+    for d in dicts:
+        pooled: dict = {}
+        for (route, _cust, tw, meth), v in d.items():
+            key = (route, "all", tw, meth)
+            if isinstance(v, list):
+                pooled.setdefault(key, []).extend(v)
+            else:
+                pooled[key] = pooled.get(key, 0) + v
+        out.append(pooled)
+    return out
+
+
+def plot_tw_response(gaps, metric: str = "gap_pen",
+                     out_dir: str = _paths.figures()) -> list:
+    """How each method responds to window tightness — one panel per route.
+
+    A dumbbell per method: the median gap under the LOOSEST window class
+    present, the median under the TIGHTEST, joined by a line, with the shift
+    annotated.  Thin bars carry the IQR of each end so the reader can see
+    whether a shift in the median is large against the spread.
+
+    Why not a paired per-instance delta, which would be stronger: the window
+    class is folded into the geometry seed (see instance_io._geometry_seed), so
+    RshortCfewTnone_1 and RshortCfewTtight_1 are DIFFERENT routes with
+    different customers and different realisations — not one route under two
+    window regimes.  Nothing is paired across the window axis, so the honest
+    comparison is distributional, and the shift is a difference of medians
+    between two independent samples rather than a mean of per-instance deltas.
+
+    Note the metric matters here more than anywhere else: gap_pen carries the
+    out-of-window penalty on both sides, so a tight-window cell is scored on
+    the objective the model actually optimises; --metric gap_nopen isolates
+    the pure duration effect.
+    """
+    (gaps,) = pool_cust(gaps)
+    routes = _present((k[0] for k in gaps), _ROUTE_ORDER)
+    tws    = _present((k[2] for k in gaps), _TW_ORDER)   # tight -> ... -> none
+    methods = _present((k[3] for k in gaps), _METHOD_ORDER)
+    if not (routes and tws and methods):
+        raise SystemExit("no plottable runs found")
+    if len(tws) < 2:
+        raise SystemExit(f"window-response needs >=2 window classes with runs, "
+                         f"found only {tws}")
+    tightest, loosest = tws[0], tws[-1]
+
+    fig, axes = plt.subplots(1, len(routes), figsize=(7.2, 2.6),
+                             sharey=True, squeeze=False)
+    axes = axes[0]
+    x = np.arange(len(methods), dtype=float)
+
+    for ax, route in zip(axes, routes):
+        _style_axes(ax)
+        for xi, m in zip(x, methods):
+            col = _METHOD_COLOR[m]
+            ends = {}
+            for tw in (loosest, tightest):
+                vals = gaps.get((route, "all", tw, m), [])
+                if len(vals):
+                    a = np.asarray(vals)
+                    ends[tw] = (np.median(a), np.percentile(a, 25),
+                                np.percentile(a, 75), len(a))
+            if len(ends) < 2:
+                continue
+            (lo_med, lo_q1, lo_q3, _), (ti_med, ti_q1, ti_q3, _) = \
+                ends[loosest], ends[tightest]
+            # IQR bars first, so the medians and the connector sit on top
+            for xoff, (q1, q3) in ((-0.16, (lo_q1, lo_q3)),
+                                   (0.16, (ti_q1, ti_q3))):
+                ax.plot([xi + xoff] * 2, [q1, q3], color=_tint(col, 0.55),
+                        lw=3.0, solid_capstyle="butt", zorder=2)
+            ax.plot([xi - 0.16, xi + 0.16], [lo_med, ti_med],
+                    color=col, lw=1.2, zorder=3)
+            # Hollow = loose, filled = tight: the fill follows the constraint,
+            # matching "tighter window = darker" everywhere else in the paper.
+            ax.plot(xi - 0.16, lo_med, "o", mfc="white", mec=col, mew=1.2,
+                    ms=5, zorder=4)
+            ax.plot(xi + 0.16, ti_med, "o", mfc=col, mec=col, ms=5, zorder=4)
+            d = ti_med - lo_med
+            ax.annotate(f"{d:+.1f}", xy=(xi, max(lo_med, ti_med)),
+                        xytext=(0, 4), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=5.8,
+                        color=_shade(col, 0.25))
+        ax.set_xticks(x, [_METHOD_LBL[m] for m in methods],
+                      rotation=30, ha="right")
+        ax.set_title(_ROUTE_LBL[route], fontsize=8, color=_INK_PRIMARY)
+        ax.set_xlim(-0.6, len(methods) - 0.4)
+
+    axes[0].set_ylabel(f"Gap to oracle (%)  [{metric}]", fontsize=7.5)
+    handles = [Line2D([], [], marker="o", mfc="white", mec=_INK_MUTED,
+                      mew=1.2, ls="none", ms=5,
+                      label=f"{_TW_LBL[loosest]} (loosest)"),
+               Line2D([], [], marker="o", mfc=_INK_MUTED, mec=_INK_MUTED,
+                      ls="none", ms=5, label=f"{_TW_LBL[tightest]} (tightest)"),
+               Line2D([], [], color=_tint(_INK_MUTED, 0.55), lw=3,
+                      label="IQR")]
+    fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False,
+               fontsize=6.5, bbox_to_anchor=(0.5, 1.02))
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
+
+    metric_sfx = "" if metric == "gap_pen" else f"_{metric}"
+    out = []
+    for ext in ("pdf", "png"):
+        p = os.path.join(out_dir, f"paper_tw_response{metric_sfx}.{ext}")
+        fig.savefig(p, dpi=300, bbox_inches="tight")
+        out.append(p)
+    plt.close(fig)
+    return out
+
 
 def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
     """Draw one method's marks (box / bar / violin) at the given positions."""
@@ -319,13 +471,22 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
     """
     if n_unsl is None:
         n_unsl = {}
+    if n_feas is None:
+        n_feas = {}
+    pooled_tw = (inner == "pooled")
+    if pooled_tw:
+        # Collapse first, then let the whole layout run on a one-element TW
+        # axis.  Doing it here rather than at the call site keeps the stats CSV
+        # and the heat strip consistent with the boxes by construction.
+        gaps, n_infe, n_unsl, n_feas = pool_tw(gaps, n_infe, n_unsl, n_feas)
     if full_grid:
-        routes, custs, tws, methods = (_ROUTE_ORDER, _CUST_ORDER,
-                                       _TW_ORDER, _METHOD_ORDER)
+        routes, custs, methods = _ROUTE_ORDER, _CUST_ORDER, _METHOD_ORDER
+        tws = [POOLED_TW] if pooled_tw else _TW_ORDER
     else:
         routes  = _present((k[0] for k in gaps), _ROUTE_ORDER)
         custs   = _present((k[1] for k in gaps), _CUST_ORDER)
-        tws     = _present((k[2] for k in gaps), _TW_ORDER)
+        tws     = ([POOLED_TW] if pooled_tw
+                   else _present((k[2] for k in gaps), _TW_ORDER))
         methods = _present((k[3] for k in gaps), _METHOD_ORDER)
     if not (routes and custs and tws and methods):
         raise SystemExit("no plottable runs found")
@@ -504,11 +665,22 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         # inner grouping is switchable:
         #   inner="tw"     — method blocks, TW boxes inside (shade = TW)
         #   inner="method" — TW blocks, methods side by side (plain colours)
-        inner_is_tw = (inner == "tw")
+        #   inner="pooled" — the TW axis was collapsed above, so this is the
+        #                    inner="tw" layout with a single-element inner
+        #                    list: one box per method, holding every window
+        #                    class.  It takes the tw branch deliberately —
+        #                    method must stay the OUTER key, or the one box
+        #                    would sit in a TW block instead of a method one.
+        inner_is_tw = (inner in ("tw", "pooled"))
         outer_list  = methods if inner_is_tw else tws
         inner_list  = tws if inner_is_tw else methods
         n_i, n_o    = len(inner_list), len(outer_list)
-        gap_b, gap_c = 1.0, 2.2
+        # Block gap is sized for a block that HOLDS several marks.  Pooled to
+        # one box per method, the same gap leaves each method floating in a
+        # 2-unit block around a 0.85-wide box, so the customer groups stop
+        # reading as groups.  Tighten it so the methods sit as a compact row
+        # while gap_c still separates the customer groups.
+        gap_b, gap_c = (0.35, 1.6) if pooled_tw else (1.0, 2.2)
         blk = n_i + gap_b                     # stride between blocks
         grp = n_o * blk - gap_b + gap_c       # stride between cust groups
 
@@ -745,7 +917,10 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                                 color=_INK_PRIMARY)
         # inner="tw": TW is read from the shade key in the legend; inner=
         # "method": TW is the on-axis block, so no shade key needed.
-        _legend(fig, tw_shades=inner_is_tw and kind != "line")
+        # A pooled figure has one shade per method, so the TW swatch key
+        # would advertise a distinction the boxes no longer carry.
+        _legend(fig, tw_shades=inner_is_tw and kind != "line"
+                and not pooled_tw)
         fig.tight_layout(rect=(0, 0.0, 1, 0.90))
 
         # compact colour key, tucked to the right of the strip row
@@ -763,7 +938,8 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
         _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
 
-        paths += _save(fig, "" if inner_is_tw else "_methods")
+        paths += _save(fig, "_pooledtw" if pooled_tw
+                       else ("" if inner_is_tw else "_methods"))
     return paths
 
 
@@ -790,6 +966,13 @@ if __name__ == "__main__":
                         choices=["gap_pen", "gap_nopen"],
                         help="gap definition (default: gap_pen, window "
                              "penalties included on both sides)")
+    parser.add_argument("--tw-response", dest="tw_response",
+                        action="store_true", default=False,
+                        help="window-response figure: one dumbbell per method "
+                             "from the loosest to the tightest window class, "
+                             "customers pooled, one panel per route "
+                             "(-> paper_tw_response.pdf/.png).  Ignores "
+                             "--kind/--inner/--layout.")
     parser.add_argument("--present-only", action="store_true", default=False,
                         help="draw only route/customer/TW classes and "
                              "methods that have runs, instead of the full "
@@ -799,11 +982,16 @@ if __name__ == "__main__":
                              "box + bar, each in both inner orderings "
                              "(tw and method), plus the stats CSV; "
                              "--kind/--inner are ignored")
-    parser.add_argument("--inner", default="tw", choices=["tw", "method"],
+    parser.add_argument("--inner", default="tw",
+                        choices=["tw", "method", "pooled"],
                         help="row layout inner grouping: 'tw' = method "
                              "blocks holding their four TW boxes (default); "
                              "'method' = TW blocks holding the four methods "
-                             "side by side (files get a '_methods' suffix)")
+                             "side by side (files get a '_methods' suffix); "
+                             "'pooled' = the four TW classes merged into ONE "
+                             "box per method, so a box holds every instance of "
+                             "its (route, customers, method) cell "
+                             "(files get a '_pooledtw' suffix)")
     parser.add_argument("--line-no-band", dest="line_band",
                         action="store_false", default=True,
                         help="--kind line: drop the IQR bands and draw only "
@@ -837,6 +1025,15 @@ if __name__ == "__main__":
     # tabular exports live in data_output/, not alongside the .pdf/.png figures
     write_stats_csv(gaps, n_infe, n_unsl, n_feas,
                     _paths.data_output("paper_gap_stats.csv"))
+
+    if args.tw_response:
+        # Its own layout (methods on x, customers pooled), so it does not go
+        # through the kind/inner combo loop below.  SystemExit(0), not return:
+        # this block is module level under __main__, not a function.
+        for p in plot_tw_response(gaps, metric=args.metric,
+                                  out_dir=args.out_dir):
+            print(f"  Figure    : {p}")
+        raise SystemExit(0)
 
     if args.all:
         combos = [(k, i) for k in ("box", "bar") for i in ("tw", "method")]

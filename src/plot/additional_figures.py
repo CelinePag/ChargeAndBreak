@@ -276,11 +276,23 @@ def _write_tex(name, text):
 
 def section_diesel():
     print("== Sec 8.4 diesel ==")
+    # Scope from the diesel runs on disk, not from DIESEL_COMBOS/TWS/SEEDS:
+    # the batch is routinely launched wider than the planning constants, and
+    # every consumer below (including the coverage denominator) has to agree
+    # with what was actually paired or "have/want" becomes fiction.
+    scope    = _discover_scope(["diesel"])
+    combos_d = scope["combos"] or DIESEL_COMBOS
+    tws_d    = scope["tws"]    or TWS
+    seeds_d  = scope["seeds"]  or list(SEEDS)
+    print(f"  scope     : combos {','.join(f'R{r}C{c}' for r, c in combos_d)}")
+    print(f"              tw {','.join(tws_d)}  "
+          f"seeds {min(seeds_d)}-{max(seeds_d)} (n={len(seeds_d)})")
+
     per_class: dict[str, dict[str, list]] = {}
     detail = []
-    for route, cust in DIESEL_COMBOS:
-        for tw in TWS:
-            for seed in SEEDS:
+    for route, cust in combos_d:
+        for tw in tws_d:
+            for seed in seeds_d:
                 st       = _stem(route, cust, tw, seed)
                 ev_o     = _oracle(st)
                 di_o     = _oracle(st, "diesel")
@@ -347,8 +359,8 @@ def section_diesel():
     coverage = {}
     for r, d in per_class.items():
         have = sum(1 for v in d["pen_o"] if v is not None)
-        want = len(TWS) * len(SEEDS) * sum(1 for rr, _ in DIESEL_COMBOS
-                                           if rr == r)
+        want = len(tws_d) * len(seeds_d) * sum(1 for rr, _ in combos_d
+                                               if rr == r)
         coverage[r] = (have, want)
         if have < want:
             print(f"  Oracle coverage {r}: {have}/{want} — partial average, "
@@ -484,9 +496,9 @@ def section_diesel():
 
     # Both are oracle-derived, so they follow the coverage guard above.
     ok = [r for r in routes if r in oracle_ok]
-    _diesel_decomposition(ok)
-    _refuel_sensitivity(ok)
-    _diesel_by_tw(routes, ok)
+    _diesel_decomposition(ok, scope)
+    _refuel_sensitivity(ok, scope)
+    _diesel_by_tw(routes, ok, scope)
 
 
 # Window classes ordered tight -> none, i.e. loosening the constraint, so the
@@ -494,7 +506,7 @@ def section_diesel():
 _TW_ORDER = ["tight", "medium", "large", "none"]
 
 
-def _diesel_by_tw(routes, oracle_ok) -> None:
+def _diesel_by_tw(routes, oracle_ok, scope) -> None:
     """Split the penalty by time-window class.
 
     Answers whether the EV/diesel gap is a real makespan difference or an
@@ -504,9 +516,12 @@ def _diesel_by_tw(routes, oracle_ok) -> None:
     are reported, along with the delta counts that separate them.
     """
     per: dict[tuple, dict] = {}
-    for route, cust in DIESEL_COMBOS:
-        for tw in _TW_ORDER:
-            for seed in SEEDS:
+    # Canonical tight -> none order, restricted to the classes actually run, so
+    # an unswept window class does not draw an empty column.
+    tw_order = [t for t in _TW_ORDER if t in set(scope["tws"] or TWS)]
+    for route, cust in (scope["combos"] or DIESEL_COMBOS):
+        for tw in tw_order:
+            for seed in (scope["seeds"] or SEEDS):
                 st  = _stem(route, cust, tw, seed)
                 key = (route, tw)
                 d   = per.setdefault(key, dict(pen_o=[], pen_g=[], obj_o=[],
@@ -535,7 +550,7 @@ def _diesel_by_tw(routes, oracle_ok) -> None:
                 if dw_di:
                     d["brk_di"].append(dw_di["break"])
 
-    routes = [r for r in routes if any((r, tw) in per for tw in _TW_ORDER)]
+    routes = [r for r in routes if any((r, tw) in per for tw in tw_order)]
     if not routes:
         return
 
@@ -543,19 +558,19 @@ def _diesel_by_tw(routes, oracle_ok) -> None:
     fig, axes = plt.subplots(1, len(routes), figsize=(2.3 * len(routes) + 0.9,
                                                       2.9), sharey=True)
     axes = np.atleast_1d(axes)
-    x, w = np.arange(len(_TW_ORDER)), 0.34
+    x, w = np.arange(len(tw_order)), 0.34
     series = [("Greedy", "pen_g", BLUE), ("Oracle", "pen_o", INK)]
     top = 0.0
     for ax, route in zip(axes, routes):
         for k, (lbl, key, col) in enumerate(series):
             vals = [_mean(per[(route, tw)][key]) if (route, tw) in per else None
-                    for tw in _TW_ORDER]
+                    for tw in tw_order]
             top  = max([top] + [v for v in vals if v is not None])
             ax.bar(x + (k - 0.5) * w,
                    [np.nan if v is None else v for v in vals], w,
                    color=col, edgecolor="white", linewidth=0.8,
                    label=lbl if ax is axes[0] else None)
-        ax.set_xticks(x, [t.capitalize() for t in _TW_ORDER], fontsize=7)
+        ax.set_xticks(x, [t.capitalize() for t in tw_order], fontsize=7)
         ax.set_title(f"{route.capitalize()} route", loc="left", fontsize=8)
         ax.yaxis.grid(True, color=GRID, lw=0.6)
         ax.set_axisbelow(True)
@@ -571,7 +586,7 @@ def _diesel_by_tw(routes, oracle_ok) -> None:
     # ── table: duration vs objective, and the delta counts behind it ─────────
     rows = []
     for route in routes:
-        for tw in _TW_ORDER:
+        for tw in tw_order:
             d = per.get((route, tw))
             if not d:
                 continue
@@ -652,7 +667,7 @@ def _refuel_h(route: str) -> float:
     return _REFUEL_STOPS.get(route, 0) * _REFUEL_EVENT_H
 
 
-def _refuel_sensitivity(routes) -> None:
+def _refuel_sensitivity(routes, scope) -> None:
     """Check the assumed fuel-stop count against what tank specs imply.
 
     The headline tables credit _REFUEL_STOPS per route class.  This reports
@@ -662,11 +677,11 @@ def _refuel_sensitivity(routes) -> None:
     rows, note = [], {}
     for route in routes:
         km, pen = [], []
-        for r, cust in DIESEL_COMBOS:
+        for r, cust in (scope["combos"] or DIESEL_COMBOS):
             if r != route:
                 continue
-            for tw in TWS:
-                for seed in SEEDS:
+            for tw in (scope["tws"] or TWS):
+                for seed in (scope["seeds"] or SEEDS):
                     st = _stem(route, cust, tw, seed)
                     inst = _instance(st)
                     ev, di = _oracle(st), _oracle(st, "diesel")
@@ -747,7 +762,7 @@ _DECOMP_LABEL = [
 ]
 
 
-def _diesel_decomposition(routes) -> None:
+def _diesel_decomposition(routes, scope) -> None:
     """Where the EV-vs-diesel makespan gap actually goes, per route class.
 
     Both worlds are decomposed into the terms of the model's own departure
@@ -757,9 +772,9 @@ def _diesel_decomposition(routes) -> None:
     """
     per: dict[str, dict[str, list]] = {}
     resid_max = 0.0
-    for route, cust in DIESEL_COMBOS:
-        for tw in TWS:
-            for seed in SEEDS:
+    for route, cust in (scope["combos"] or DIESEL_COMBOS):
+        for tw in (scope["tws"] or TWS):
+            for seed in (scope["seeds"] or SEEDS):
                 st = _stem(route, cust, tw, seed)
                 ev, di = _oracle_dwell(st), _oracle_dwell(st, "diesel")
                 if not (ev and di):
@@ -849,43 +864,127 @@ def _diesel_decomposition(routes) -> None:
 # row therefore requires the whole variant set re-solved to proven optimality,
 # not just a rerun of this script.
 #
-# The BASE CASE is the zero line, not a row: settings.CS_SPACING_KM = 60 km and
-# settings.CHARGER_POWER_BASE_KW = 350 kW.  Every tag below must correspond to a
-# directory actually produced by additional_analysis.py sensitivity --values,
-# because a tag with no runs renders as a blank "pending" row rather than an
-# error — and a value that was RUN but is not listed here is dropped silently.
-# Keep this list in step with the --values you sweep.
+# The BASE CASE is the zero line, not a row: settings.CS_SPACING_KM = 60 km,
+# settings.CHARGER_POWER_BASE_KW = 350 kW and settings.BATTERY_CAPACITY = 500
+# kWh.  Every tag below must correspond to a directory actually produced by
+# additional_analysis.py sensitivity --values, because a tag with no runs
+# renders as a blank "pending" row rather than an error — and a value that was
+# RUN but is not listed here is dropped silently.  Keep this list in step with
+# the --values you sweep.
+#
+# The battery rows are NOT a pure range axis, and the table/figure must not be
+# read as one.  Emin = SOC_MIN_FRAC.Ecap, so a bigger pack raises the floor too
+# (+100 kWh of pack is +80 kWh of usable energy); and the tail acceptance is
+# TAIL_C_RATE.Ecap, so the pack also moves where the charge curve tapers — at
+# the base 350 kW the taper only binds below 875 kWh.  A capacity row therefore
+# mixes range with taper avoidance, and the response is not monotone: past the
+# point where charge stops fall below the HoS break count, the driver starts
+# paying standalone break time that charging used to mask.  Use the `grid`
+# subcommand (battery x charger_power) to separate the two effects.
 _SENS_ROWS = [
     ("CS spacing 30 km",        "cs30",   True),
     ("CS spacing 100 km",       "cs100",  True),
     ("Charger power 150 kW",    "kw150",  True),
     ("Charger power 700 kW",    "kw700",  True),
     ("Charger power 1000 kW",   "kw1000", True),
+    ("Battery 300 kWh",         "kwh300", True),
+    ("Battery 700 kWh",         "kwh700", True),
+    ("Battery 900 kWh",         "kwh900", True),
 ]
 
 
-_ROUTE_SPLIT = ["short", "medium"]
-# route class is ORDERED (short -> medium), so it gets two steps of one hue
-# rather than two categorical hues; method colours stay reserved for the
-# base-case figures.
-_ROUTE_COLOR = {"short": "#9ecae1", "medium": "#2171b5"}
+# Tag prefix -> experiment name, longest prefix FIRST.  The order is load-
+# bearing: "kwh300" also starts with "kw", so capacity must be tested before
+# power or every battery level is filed under "Charger power" and the group
+# label silently spans both experiments.  Add a pair here when you add a row.
+_SENS_GROUPS = [("cs",  "CS spacing"),
+                ("kwh", "Battery capacity"),
+                ("kw",  "Charger power")]
+
+
+def _sens_group(tag: str) -> str:
+    for prefix, name in sorted(_SENS_GROUPS, key=lambda p: -len(p[0])):
+        if tag.startswith(prefix):
+            return name
+    return "Other"
+
+
+_ROUTE_SPLIT = ["short", "medium"]     # fallback only; see _discover_sens_scope
+# Route class is ORDERED, so it is drawn as steps of ONE hue (per method colour)
+# rather than categorical hues; method colours stay reserved for the base-case
+# figures.  The step is a tint of the method colour: the longer the route, the
+# more saturated.  Keyed by class rather than by "is it short?" so a third class
+# does not silently collapse into the darkest step.
+_ROUTE_TINT = {"short": 0.55, "medium": 0.28, "long": 0.0}
+
+
+def _route_face(col: str, route: str):
+    """Method colour stepped by route class (lighter = shorter)."""
+    frac = _ROUTE_TINT.get(route, 0.0)
+    return ps.tint(col, frac) if frac else col
+
+
+def _discover_scope(tags) -> dict:
+    """Footprint of a tagged batch as ACTUALLY RUN, read off solutions/.
+
+    The module constants (COMBOS / TWS / SEEDS) describe the experiments as
+    first planned — short+medium only, seeds 1-10 — and a batch launched over
+    anything wider was silently cropped to them.  Two sections were losing runs
+    that way: §8.3 kept 80 of 300 greedy runs per tag and dropped every LA pair
+    (rendering as "LA pending" when the LA runs existed all along), and §8.4
+    used 120 of 300 diesel pairs.  Deriving the scope from the runs on disk
+    means a wider batch reports wider instead of being quietly truncated, and
+    the base leg is paired against exactly the discovered set.
+
+    Returns combos as (route, cust) pairs plus the TW classes, seeds, and route
+    classes in canonical short -> medium -> long order.
+    """
+    route_of = {v: k for k, v in _RTAG.items()}      # "Rshort" -> "short"
+    cust_of  = {v: k for k, v in _CTAG.items()}      # "Cfew"   -> "few"
+    combos, tws, seeds = set(), set(), set()
+    for tag in tags:
+        for path in glob.glob(_paths.solutions(f"*__{tag}_*.json")):
+            m = re.match(r"^(R[a-z]+)(C[a-z]+)T([a-z]+)_(\d+)__",
+                         os.path.basename(path))
+            if not m:
+                continue
+            route, cust = route_of.get(m.group(1)), cust_of.get(m.group(2))
+            if route is None or cust is None:
+                continue
+            combos.add((route, cust))
+            tws.add(m.group(3))
+            seeds.add(int(m.group(4)))
+    # Route classes in the canonical short -> medium -> long order, not set order
+    routes = [r for r in ps.ROUTE_ORDER if any(c[0] == r for c in combos)]
+    return dict(combos=sorted(combos), tws=sorted(tws), seeds=sorted(seeds),
+                routes=routes)
 
 
 def section_sensitivity():
     print("== Sec 8.3 sensitivity ==")
+    found = _discover_scope([t for _l, t, _p in _SENS_ROWS])
+    combos_s = found["combos"] or COMBOS
+    tws_s    = found["tws"]    or TWS
+    seeds_s  = found["seeds"]  or list(SEEDS)
+    route_split = found["routes"] or _ROUTE_SPLIT
+    print(f"  scope     : combos {','.join(f'R{r}C{c}' for r, c in combos_s)}")
+    print(f"              tw {','.join(tws_s)}  "
+          f"seeds {min(seeds_s)}-{max(seeds_s)} (n={len(seeds_s)})  "
+          f"routes {','.join(route_split)}")
+
     rows_out, fig_rows = [], []
     for label, tag, planned in _SENS_ROWS:
         # per-route-class deltas (the figure) and pooled (the table).  One dict
         # per method; the LA leg stays empty until the LA variant runs land, and
         # every consumer below treats an empty list as "pending" rather than 0.
-        dg = {r: [] for r in _ROUTE_SPLIT}
-        do = {r: [] for r in _ROUTE_SPLIT}
-        dl = {r: [] for r in _ROUTE_SPLIT}
-        for route, cust in COMBOS:
+        dg = {r: [] for r in route_split}
+        do = {r: [] for r in route_split}
+        dl = {r: [] for r in route_split}
+        for route, cust in combos_s:
             if route not in dg:
                 continue
-            for tw in TWS:
-                for seed in SEEDS:
+            for tw in tws_s:
+                for seed in seeds_s:
                     st = _stem(route, cust, tw, seed)
                     bg, vg = _greedy(st), _greedy(st, tag)
                     if (bg and vg and not bg["infeasible"]
@@ -905,34 +1004,39 @@ def section_sensitivity():
                         do[route].append(
                             100 * (vo["duration"] / bo["duration"] - 1))
 
-        all_g = [v for r in _ROUTE_SPLIT for v in dg[r]]
-        all_o = [v for r in _ROUTE_SPLIT for v in do[r]]
-        all_l = [v for r in _ROUTE_SPLIT for v in dl[r]]
+        all_g = [v for r in route_split for v in dg[r]]
+        all_o = [v for r in route_split for v in do[r]]
+        all_l = [v for r in route_split for v in dl[r]]
         n_g, n_o, n_l = len(all_g), len(all_o), len(all_l)
         status = ("pending (needs code)" if not planned and n_g == 0 else
                   "pending" if n_g == 0 else
                   f"greedy n={n_g}"
                   + (f", LA n={n_l}" if n_l else ", LA pending")
                   + (f", oracle n={n_o}" if n_o else ", oracle pending"))
+        # Per-route columns follow the DISCOVERED split, so a sweep that covers
+        # long routes reports them instead of dropping them off the right edge
+        # of a fixed short/medium header.
+        per_route = []
+        for r in route_split:
+            per_route += [_fmt(_mean(do[r]), ".2f", ""), len(do[r])]
         rows_out.append([label, tag,
                          _fmt(_mean(all_g), ".2f", ""), n_g,
                          _fmt(_mean(all_l), ".2f", ""), n_l,
                          _fmt(_mean(all_o), ".2f", ""), n_o,
-                         _fmt(_mean(do["short"]), ".2f", ""), len(do["short"]),
-                         _fmt(_mean(do["medium"]), ".2f", ""),
-                         len(do["medium"]), status])
+                         *per_route, status])
         fig_rows.append((label, planned,
                          {r: {"oracle": (_mean(do[r]), len(do[r])),
                               "LA":     (_mean(dl[r]), len(dl[r])),
                               "greedy": (_mean(dg[r]), len(dg[r]))}
-                          for r in _ROUTE_SPLIT}))
+                          for r in route_split}))
 
     _write_csv("additional_sens_stats.csv",
                ["axis", "tag", "greedy_delta_%", "n_greedy",
                 "la_delta_%", "n_la",
                 "oracle_delta_%", "n_oracle",
-                "oracle_delta_short_%", "n_short",
-                "oracle_delta_medium_%", "n_medium", "status"], rows_out)
+                *[c for r in route_split
+                  for c in (f"oracle_delta_{r}_%", f"n_{r}")], "status"],
+               rows_out)
 
     # ── figure ───────────────────────────────────────────────────────────────
     # Facet by route class, colour by METHOD — the same grammar as the
@@ -951,8 +1055,7 @@ def section_sensitivity():
     # and the levels are only comparable within one.  That grouping is carried
     # by SPACING alone — levels of the same experiment sit close together, the
     # two experiments are pushed apart — so no separator rule is needed.
-    _grp = ["CS spacing" if t.startswith("cs") else "Charger power"
-            for _l, t, _p in _SENS_ROWS]
+    _grp = [_sens_group(t) for _l, t, _p in _SENS_ROWS]
     bounds = [i for i in range(1, len(_grp)) if _grp[i] != _grp[i - 1]]
     _BLOCK_GAP = 0.85
     x = np.array([i + _BLOCK_GAP * sum(1 for b in bounds if b <= i)
@@ -960,7 +1063,7 @@ def section_sensitivity():
     # Method order = benchmark first, then the policies in increasing
     # sophistication (oracle -> LA -> greedy), matching the base-case figures.
     _SENS_METHODS = ["oracle", "LA", "greedy"]
-    series = [(m, r) for m in _SENS_METHODS for r in _ROUTE_SPLIT]
+    series = [(m, r) for m in _SENS_METHODS for r in route_split]
     # Bar width is derived from the series count so adding a method re-packs
     # the group instead of overflowing into the neighbouring column.  Near-unit
     # width leaves only a hairline between levels of the same experiment.
@@ -982,7 +1085,7 @@ def section_sensitivity():
             drawn_m.add(meth)
             drawn_r.add(route)
             col = ps.METHOD_COLOR[meth]
-            face = ps.tint(col, 0.45) if route == "short" else col
+            face = _route_face(col, route)
             off = (k - (len(series) - 1) / 2) * w
             ax.bar(xi + off, mean_v, width=w, color=face,
                    edgecolor=col, linewidth=0.5)
@@ -1034,8 +1137,7 @@ def section_sensitivity():
             continue
         col = ps.METHOD_COLOR[meth]
         handles.append(plt.Rectangle(
-            (0, 0), 1, 1,
-            facecolor=ps.tint(col, 0.45) if route == "short" else col,
+            (0, 0), 1, 1, facecolor=_route_face(col, route),
             edgecolor=col, linewidth=0.5))
         labels.append(f"{ps.METHOD_LBL[meth]} · {route}")
     # No title of any kind — the LaTeX \caption carries it (see
@@ -1055,19 +1157,22 @@ def section_sensitivity():
         r"\begin{table}[ht]\centering",
         r"\caption{One-at-a-time sensitivity: mean change in route duration "
         r"vs the base case (\%), paired per instance.  Greedy and LA are the "
-        r"online policies; Oracle is the hindsight optimum.  The last two "
+        r"online policies; Oracle is the hindsight optimum.  The trailing "
         r"columns split the Oracle column by route class.  Cells shown as "
         r"``--'' have no paired runs yet.}",
         r"\label{tab:sensitivity}",
-        r"\begin{tabular}{lrrrrr}", r"\hline",
-        r"Axis & Greedy $\Delta$ (\%) & LA $\Delta$ (\%) "
-        r"& Oracle $\Delta$ (\%) & Short & Medium \\",
+        # Column count follows the discovered route split, so a sweep that
+        # covers long routes gets a column instead of overflowing the header.
+        r"\begin{tabular}{lrrr" + "r" * len(route_split) + "}", r"\hline",
+        r"Axis & Greedy $\Delta$ (\%) & LA $\Delta$ (\%) & Oracle $\Delta$ (\%) & "
+        + " & ".join(r.capitalize() for r in route_split) + r" \\",
         r"\hline",
     ]
-    for (label, _tag, g, _ng, l, _nl, o, _no, o_s, _ns, o_m, _nm,
-         _status) in rows_out:
+    for row in rows_out:
+        label, g, l, o = row[0], row[2], row[4], row[6]
+        per_route = row[8:8 + 2 * len(route_split):2]      # skip the n columns
         lines.append(f"{label} & {g or '--'} & {l or '--'} & {o or '--'} & "
-                     f"{o_s or '--'} & {o_m or '--'} \\\\")
+                     + " & ".join(str(v or '--') for v in per_route) + r" \\")
     lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_sensitivity.tex", "\n".join(lines))
 
@@ -1541,8 +1646,14 @@ def section_vss():
         r"Class & WS (h) & RP (h) & EEV (h) & VSS (h) & EVPI (h) & n \\",
         r"\hline",
     ]
-    for route, cust in COMBOS:
-        cls = f"{_RTAG[route]}{_CTAG[cust]}"
+    # Report every class the harness actually produced, in canonical order.
+    # Iterating COMBOS instead would aggregate a long-route result above and
+    # then never print it, the same silent drop §8.3/§8.4 used to have.
+    ordered = [f"{_RTAG[r]}{_CTAG[c]}"
+               for r in ps.ROUTE_ORDER for c in ("few", "medium", "many")]
+    classes = ([c for c in ordered if c in agg]
+               + [c for c in sorted(agg) if c not in ordered])
+    for cls in classes:
         a = agg.get(cls)
         n = len(a["ws"]) if a else 0
         vals = [(_mean(a[k]) if a else None)

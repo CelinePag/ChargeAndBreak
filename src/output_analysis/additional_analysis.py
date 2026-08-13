@@ -234,8 +234,20 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
               extra: list[str] | None = None,
               guard: float | None = None,
               n_scenarios: int | None = None,
-              horizon: float | None = None) -> None:
+              horizon: float | None = None,
+              resume: bool = True) -> None:
     """Launch runner_dispatch for one instance pattern.
+
+    ``resume`` is ON by default.  An LA cell is the most expensive thing these
+    sweeps launch, and without a checkpoint a crash at stop 140 of 150 throws
+    away the whole instance; with one it resumes from the last completed stop.
+    It is safe to leave on: the checkpoint key covers every LA parameter, a
+    corrupt or unreadable checkpoint is caught and the run starts fresh, and a
+    clean finish deletes it — so a normal rerun never resumes stale state.
+    It composes with --skip-existing rather than fighting it: a FINISHED run is
+    skipped outright (its checkpoint is already gone), while a CRASHED one has
+    no finished solution to skip, so it is relaunched and picks the checkpoint
+    up.
 
     ``guard`` is the greedy departure quantile (--prune_quantile).  Because
     that flag is SHARED — it also drives LA's action pruning and the opt-in
@@ -253,6 +265,13 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
     def _go(alg_spec: str, guarded: bool) -> None:
         cmd = [sys.executable, "-m", "src.simulation.runner_dispatch", pattern, alg_spec,
                "--jobs", str(jobs), "--skip-existing"]
+        # --resume is LA-only downstream (it reaches run_simulation_precomputed
+        # and nothing else), so it is forwarded only to a batch that contains
+        # LA rather than sprayed onto greedy/2SP/ORACLE where it would be dead
+        # weight in the command line and in the logs.
+        if resume and any(a.strip().upper() == "LA"
+                          for a in alg_spec.split(",")):
+            cmd += ["--resume"]
         if guarded and guard is not None:
             cmd += ["--prune_quantile", str(guard)]
         if n_scenarios is not None:
@@ -310,7 +329,11 @@ def _materialise_regen(axis: str, value, combos, tws, seeds,
     spec = _AXES[axis]
     tag  = f"{spec['tag']}{value:g}" if isinstance(value, float) \
            else f"{spec['tag']}{value}"
-    os.makedirs(out_dir, exist_ok=True)
+    # Not under --dry-run: a dry run must not touch the filesystem, and
+    # creating the dir up front left empty instances_sens/<axis>_<v>/ trees
+    # behind that read as "this sweep was started" when it never was.
+    if not dry:
+        os.makedirs(out_dir, exist_ok=True)
     for combo in combos:
         route, cust = _split_combo(combo)
         for tw in tws:
@@ -360,7 +383,11 @@ def _materialise_grid(active: list, combos, tws, seeds,
     from src.instance_gen.instance_io import generate_instance_file
     tag    = "_".join(_axis_tag(s, v) for s, v in active)
     kwargs = {s["kw"]: v for s, v in active}
-    os.makedirs(out_dir, exist_ok=True)
+    # Not under --dry-run: a dry run must not touch the filesystem, and
+    # creating the dir up front left empty instances_sens/<axis>_<v>/ trees
+    # behind that read as "this sweep was started" when it never was.
+    if not dry:
+        os.makedirs(out_dir, exist_ok=True)
     for combo in combos:
         route, cust = _split_combo(combo)
         for tw in tws:
@@ -400,7 +427,11 @@ def _materialise_patch(axis: str, value, combos, tws, seeds,
     cast = spec.get("cast", float)
     val  = cast(value)
     tag  = _patch_tag(spec, value)
-    os.makedirs(out_dir, exist_ok=True)
+    # Not under --dry-run: a dry run must not touch the filesystem, and
+    # creating the dir up front left empty instances_sens/<axis>_<v>/ trees
+    # behind that read as "this sweep was started" when it never was.
+    if not dry:
+        os.makedirs(out_dir, exist_ok=True)
     for combo in combos:
         route, cust = _split_combo(combo)
         for tw in tws:
@@ -430,7 +461,11 @@ def _materialise_copy(tag: str, combos, tws, seeds,
     """Verbatim copies of base instances under a tagged stem — used when the
     variant differs only by SOLVER flags (diesel mode, ROBU gamma), so the
     tagged stem is what keeps runs/caches separate."""
-    os.makedirs(out_dir, exist_ok=True)
+    # Not under --dry-run: a dry run must not touch the filesystem, and
+    # creating the dir up front left empty instances_sens/<axis>_<v>/ trees
+    # behind that read as "this sweep was started" when it never was.
+    if not dry:
+        os.makedirs(out_dir, exist_ok=True)
     for combo in combos:
         route, cust = _split_combo(combo)
         for tw in tws:
@@ -487,7 +522,7 @@ def cmd_sensitivity(args) -> None:
             pattern = _materialise_patch(args.axis, v, combos, tws, seeds,
                                          out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  guard=args.prune_quantile,
+                  guard=args.prune_quantile, resume=args.resume,
                   n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
@@ -573,7 +608,7 @@ def cmd_grid(args) -> None:
         pattern = _materialise_grid(active, combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  guard=args.prune_quantile,
+                  guard=args.prune_quantile, resume=args.resume,
                   n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
@@ -588,6 +623,7 @@ def cmd_diesel(args) -> None:
                                 out_dir, args.dry_run)
     _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
               extra=["--diesel"], guard=args.prune_quantile,
+              resume=args.resume,
               n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
@@ -710,12 +746,60 @@ def cmd_la(args) -> None:
                   extra=["--variant", cfg,
                          "--n_scenarios", str(n_scen),
                          "--horizon", f"{horizon:g}"],
-                  guard=None)
+                  guard=None, resume=args.resume)
+
+
+def _fmt_seeds(seeds: list) -> str:
+    """[1,2,3,7] -> '1-3,7' — the same spec _expand_seeds accepts back."""
+    if not seeds:
+        return "-"
+    parts, run_start, prev = [], seeds[0], seeds[0]
+    for s in seeds[1:] + [None]:
+        if s == prev + 1:
+            prev = s
+            continue
+        parts.append(f"{run_start}-{prev}" if prev > run_start else f"{run_start}")
+        run_start = prev = s
+    return ",".join(parts)
+
+
+def _la_discover(rows, cs) -> dict:
+    """Footprint of the LA sweep as ACTUALLY RUN: configs, combos, TW classes
+    and seeds read off the stored variant runs.
+
+    Derived from the VARIANT rows only, never the base ones.  The base cell is
+    the pre-existing unlabelled runs and covers every seed and combo ever run,
+    so discovering from it would widen the scope to instances no variant cell
+    has, and the level column would then compare a wide base average against
+    narrow variant averages — exactly the distortion the --seeds filter exists
+    to prevent.
+    """
+    cfgs, combos, tws, seeds = set(), set(), set(), set()
+    for r in rows:
+        if r.get("method") != "LA" or r.get("status") != "OK":
+            continue
+        if not r.get("variant"):            # base cell — not evidence of scope
+            continue
+        route, cust = r.get("route_class"), r.get("customers_class")
+        seed = _instance_seed(r.get("instance"))
+        if not route or not cust or seed is None:
+            continue
+        cfgs.add(_norm_la_tag(r["variant"]))
+        combos.add(f"R{route}C{cust}")
+        tws.add(r.get("window_class"))
+        seeds.add(seed)
+    return dict(configs=cfgs, combos=combos, tws=tws - {None}, seeds=seeds)
 
 
 def cmd_la_report(args) -> None:
     """Write data_output/additional_la_stats.csv: one row per (config, route
     class, window class), with the unlabelled base runs as the reference row.
+
+    With no --configs/--combos/--tw/--seeds, the scope is DISCOVERED from the
+    runs on disk rather than assumed from the launcher's defaults: a sweep is
+    routinely launched over a different footprint than LA_DEFAULT_*, and a
+    report that filtered on the defaults would silently write an empty CSV and
+    an empty figure.  Any flag that IS passed overrides the discovered value.
 
     Two effect measures are reported side by side, and they answer different
     questions:
@@ -744,17 +828,29 @@ def cmd_la_report(args) -> None:
     cs._annotate_outcome(rows)
     rows, _ = cs._dedup_latest(rows)
 
-    wanted_cfg = {_norm_la_tag(c.strip())
-                  for c in args.configs.split(",") if c.strip()}
+    found = _la_discover(rows, cs)
+    if not any((args.configs, args.combos, args.tw, args.seeds)) and not found["configs"]:
+        print("  no LA variant runs found in solutions/ — nothing to report")
+        return
+
+    wanted_cfg = ({_norm_la_tag(c.strip()) for c in args.configs.split(",") if c.strip()}
+                  if args.configs else set(found["configs"]))
     wanted_cfg.add("base")
-    combos = set(args.combos.split(","))
-    tws    = set(args.tw.split(","))
-    # The base cell is the pre-existing unlabelled runs, and those cover all 50
-    # seeds while the sweep cells cover only --seeds.  Without this filter the
-    # base gap would be a 50-instance average compared against 10-instance
-    # averages, so the LEVEL column would move between cells for a reason that
-    # has nothing to do with the configuration.
-    seeds = set(_expand_seeds(args.seeds))
+    combos = set(args.combos.split(",")) if args.combos else found["combos"]
+    tws    = set(args.tw.split(","))     if args.tw     else found["tws"]
+    # The base cell is the pre-existing unlabelled runs, and those cover every
+    # seed ever run while the sweep cells cover only --seeds.  Without this
+    # filter the base gap would be a 50-instance average compared against
+    # 10-instance averages, so the LEVEL column would move between cells for a
+    # reason that has nothing to do with the configuration.
+    seeds = set(_expand_seeds(args.seeds)) if args.seeds else found["seeds"]
+
+    src = lambda given: "given" if given else "found"
+    print(f"  scope   : configs {','.join(sorted(wanted_cfg - {'base'})) or '-'} "
+          f"({src(args.configs)})")
+    print(f"            combos  {','.join(sorted(combos))} ({src(args.combos)})")
+    print(f"            tw      {','.join(sorted(tws))} ({src(args.tw)})")
+    print(f"            seeds   {_fmt_seeds(sorted(seeds))} ({src(args.seeds)})")
 
     groups: dict = {}
     for r in rows:
@@ -883,7 +979,7 @@ def cmd_guard(args) -> None:
         pattern = _materialise_copy(tag, combos, tws, seeds,
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
-                  guard=q,
+                  guard=q, resume=args.resume,
                   n_scenarios=args.n_scenarios, horizon=args.horizon)
 
 
@@ -964,6 +1060,14 @@ def _add_common(p: argparse.ArgumentParser, algos_default: str) -> None:
                    help="LA look-ahead horizon (h) forwarded to runner_dispatch. "
                         "Match the base case for the same reason as "
                         "--n_scenarios.  Unset = runner_dispatch's default (12).")
+    p.add_argument("--no-resume", dest="resume", action="store_false",
+                   default=True,
+                   help="Disable LA checkpoint/resume (on by default): every "
+                        "LA batch launched here checkpoints after each stop "
+                        "and continues a crashed run from where it stopped. "
+                        "Pass this only if the per-stop checkpoint write is "
+                        "unwanted — it is the flag that saves a half-finished "
+                        "long-route LA run.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands / files without executing anything")
 
@@ -1034,13 +1138,37 @@ def main() -> None:
                    help="Concurrent runs (default: 8, matching the base LA "
                         "batch).  Keep it identical across every cell or the "
                         "wall-clock column is contention, not compute.")
+    # The LA sweep is exactly the batch resume exists for, so it carries the
+    # flag even though it does not take _add_common's block.
+    p.add_argument("--no-resume", dest="resume", action="store_false",
+                   default=True,
+                   help="Disable LA checkpoint/resume (on by default): each "
+                        "cell checkpoints after every stop and a crashed run "
+                        "continues from where it stopped instead of "
+                        "restarting.")
     p.add_argument("--dry-run", action="store_true",
                    help="Print commands without executing anything")
     p.set_defaults(func=cmd_la)
 
+    # la-report deliberately does NOT take _add_la_common's defaults.  The
+    # launcher must state what to run; the reporter should describe what WAS
+    # run, and a sweep is routinely launched over a different footprint than
+    # LA_DEFAULT_*.  Unset here means "discover from solutions/".
     p = sub.add_parser("la-report",
-                       help="8.3 LA sweep -> data_output/additional_la_stats.csv")
-    _add_la_common(p)
+                       help="8.3 LA sweep -> data_output/additional_la_stats.csv "
+                            "(scope auto-discovered from the runs on disk)")
+    p.add_argument("--configs", default=None,
+                   help="Comma-separated S<scenarios>H<horizon> cells "
+                        "(default: every LA variant found in solutions/)")
+    p.add_argument("--combos", default=None,
+                   help="Route+customer combos (default: those the found "
+                        "variant runs actually cover)")
+    p.add_argument("--tw", default=None,
+                   help="TW classes (default: those the found runs cover)")
+    p.add_argument("--seeds", default=None,
+                   help="Seed spec, e.g. '1-25' (default: the seeds the found "
+                        "runs cover; the base cell is held to the same set so "
+                        "the level column stays comparable)")
     p.set_defaults(func=cmd_la_report)
 
     p = sub.add_parser("vss", help="8.5 VSS / EVPI decomposition")
