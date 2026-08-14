@@ -208,3 +208,26 @@
   y=0  brk=0    rst=0   32.313h (0.195h)  ok=50/50  ws=50/50  tauc=0m  taub=0m  (9.4s)
   y=0  brk=0    rst=r2  37.318h (0.308h)  ok=50/50  ws=50/50  tauc=0m  taub=0m  (8.7s)
   y=0  brk=b45  rst=0   33.229h (0.195h)  ok=50/50  ws=50/50  tauc=0m  taub=45m  (8.6s)
+  y=0  brk=b15  rst=0   32.729h (0.195h)  ok=50/50  ws=50/50  tauc=0m  taub=15m  (8.5s)
+     [DIAG] max per-scenario delta spread across actions: 29.66 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=13.356h  td=13.356h  (mean=32.313h)  36.5s
+
+[LA] stop 18 (CS)  t=13.672h  soc=255kWh  cd=0.92h  sd=4.46h  sw=4.85h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [18->63]  travel=11.63h +1rest  8 actions × 50 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=32.527h  1.0s  ws=no  1345v/2457c
+  y=0  brk=0    rst=0   32.748h (0.156h)  ok=50/50  ws=50/50  tauc=0m  taub=0m  (8.8s)
+  y=1  brk=0    rst=0   32.743h (0.157h)  ok=50/50  ws=50/50  tauc=16m  taub=0m  (8.7s)
+  y=0  brk=0    rst=r2  37.781h (0.248h)  ok=50/50  ws=50/50  tauc=0m  taub=0m  (8.3s)
+  y=1  brk=0    rst=r2  37.692h (0.249h)  ok=50/50  ws=50/50  tauc=16m  taub=0m  (8.3s)
+  y=0  brk=b45  rst=0   33.665h (0.156h)  ok=50/50  ws=50/50  tauc=0m  taub=45m  (8.5s)
+  y=1  brk=b45  rst=0   33.031h (0.161h)  ok=50/50  ws=50/50  tauc=45m  taub=0m  (8.4s)
+  y=0  brk=b15  rst=0   33.165h (0.156h)  ok=50/50  ws=50/50  tauc=0m  taub=15m  (7.7s)
+  y=1  brk=b15  rst=0   32.743h (0.157h)  ok=50/50  ws=50/50  tauc=16m  taub=0m  (8.5s)
+     [DIAG] max per-scenario delta spread across actions: 24.27 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=0 rst=1 chg=4 c+b=0 c+r=0  3.2s
+  -> CHOSEN y=1  brk=b15  rst=0  tauc=15m (+87kWh)  taub=0m  [CONC]  ta=13.672h  td=14.148h  (mean=32.743h)  [tiebreak]  71.5s
+
+[LA] stop 19 (LAYBY)  t=14.422h  soc=312kWh  cd=1.19h  sd=4.73h  sw=5.35h  phi=1  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [19->64]  travel=11.63h +1rest  4 actions × 50 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=33.298h  1.1s  ws=yes  1330v/2429c
