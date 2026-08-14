@@ -1,0 +1,60 @@
+
+Gurobi 9.5.2 (linux64) logging started Fri Aug 14 20:33:11 2026
+
+Set parameter LogFile to value "/mnt/beegfs/users/celinep/ChargeAndBreak/logs/oracle_RshortCmanyTtight_11__kwh700_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 3174 rows, 1663 columns and 24913 nonzeros
+Model fingerprint: 0x28d7d4be
+Variable types: 1049 continuous, 614 integer (614 binary)
+Coefficient statistics:
+  Matrix range     [5e-02, 7e+02]
+  Objective range  [5e-01, 1e+00]
+  Bounds range     [1e+00, 3e+01]
+  RHS range        [3e-02, 7e+02]
+
+User MIP start did not produce a new incumbent solution
+
+Presolve removed 1175 rows and 394 columns
+Presolve time: 0.22s
+Presolved: 1999 rows, 1269 columns, 14467 nonzeros
+Variable types: 766 continuous, 503 integer (503 binary)
+Found heuristic solution: objective 661.6357051
+Found heuristic solution: objective 572.6564419
+Found heuristic solution: objective 459.2260282
+Root relaxation presolve removed 36 rows and 33 columns
+Root relaxation presolved: 1963 rows, 1236 columns, 14025 nonzeros
+
+
+Root relaxation: objective 4.067684e+01, 1719 iterations, 0.19 seconds (0.09 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      41.5202457   40.67684  2.03%     -    0s
+     0     0   40.67684    0  131   41.52025   40.67684  2.03%     -    0s
+H    0     0                      41.2959679   40.67684  1.50%     -    1s
+     0     0   40.93481    0   46   41.29597   40.93481  0.87%     -    1s
+     0     0   41.16601    0   56   41.29597   41.16601  0.31%     -    1s
+
+Cutting planes:
+  Learned: 2
+  Gomory: 48
+  Lift-and-project: 27
+  Cover: 74
+  Implied bound: 118
+  Clique: 58
+  MIR: 118
+  Flow cover: 169
+  Network: 7
+  RLT: 25
+  Relax-and-lift: 12
+
+Explored 1 nodes (2281 simplex iterations) in 1.37 seconds (0.47 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 5: 41.296 41.5202 459.226 ... 661.636
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 4.129596789970e+01, best bound 4.116600825818e+01, gap 0.3147%
