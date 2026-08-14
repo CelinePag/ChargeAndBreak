@@ -1,0 +1,18 @@
+\begin{table}[htbp]
+\centering
+\caption{Feasibility and robustness statistics by method: HoS-violation rate, SOC-violation (stranding) rate, repair frequency (offline plans), and window hit rate, computed over runs whose plan the solver certified.  ``Not opt.'' is the share of runs returned at the time limit without a proven optimum and ``Opt.\ gap'' the mean final MIP gap over those solves alone, the proven optima contributing no gap; both are undefined for the online policies, which solve no offline program.  It averages the solver logs retained for RO 170 of 170, ROBU 0 of 6, SP 244 of 244 such solves.}
+\label{tab:feasibility}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{SOC viol. (\%)} & \textbf{Repairs (\%)} & \textbf{TW hit (\%)} & \textbf{Not opt. (\%)} & \textbf{Opt. gap (\%)}\\
+\midrule
+Greedy & 3.9 & 0.0 & -- & 64.6 & -- & -- \\
+RO & 0.0 & 0.0 & -- & 53.8 & 33.7 & 4.1 \\
+ROBU & 0.0 & 1.4 & -- & 62.9 & 4.0 & -- \\
+LA & 1.9 & 5.7 & -- & 75.7 & -- & -- \\
+SP & 0.2 & 12.2 & 96.6 & 83.8 & 48.1 & 12.3 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

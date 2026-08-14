@@ -110,7 +110,8 @@ def save_oracle_cache(instance: str, result: dict,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_simulation_feasibility(results: dict, full_data: dict,
-                                  tol: float = 1e-3):
+                                  tol: float = 1e-3,
+                                  strict_spread: bool | None = None):
     """
     Verify that the simulated trajectory satisfies all HoS and energy
     constraints.
@@ -129,6 +130,7 @@ def check_simulation_feasibility(results: dict, full_data: dict,
     states  = results["states"]
     actions = results["actions"]
     durs    = results.get("durations_list", [])
+    td_list = results.get("td_list", [])
     K_set   = set(full_data["K"])
     C_set   = set(full_data["C"])
     L_set   = set(full_data.get("L", []))
@@ -136,10 +138,16 @@ def check_simulation_feasibility(results: dict, full_data: dict,
     Tdrv_cons = full_data["Tdrv_cons"]
     Tdrv_sh1  = full_data["Tdrv_sh1"]
     Tdrv_sh2  = full_data.get("Tdrv_sh2", Tdrv_sh1)   # extended exception limit
+    Tspr1     = full_data.get("Tspr1", 13.0)          # M5: regular-rest cap
     Tspr2     = full_data.get("Tspr2", 15.0)          # M5: global spread ceiling
     Emin      = full_data["Emin"]
     hard_tw   = bool(full_data.get("hard_tw", False))
     issues    = []
+    # The two Art. 8 spread rules (pre-rest cap R24, terminal cap) are opt-in so
+    # that policies validated before they existed keep their previous labels.
+    # None = infer from the run's own method meta (greedy opts in via BEHDV).
+    if strict_spread is None:
+        strict_spread = bool(results.get("strict_spread", False))
 
     for i, state in enumerate(states):
         s   = state.stop
@@ -190,6 +198,17 @@ def check_simulation_feasibility(results: dict, full_data: dict,
             issues.append(
                 f"stop {s:>2}: spread h={_h_state:.3f}h > {Tspr2}h "
                 f"(daily rest not completed within 24h window)")
+        # (R24) MILP.spread_prerest — a daily rest must BEGIN within 13 h of the
+        # shift start (15 h if reduced).  This is a check on h + o, the spread at
+        # the instant the rest starts; the h test above uses the ARRIVAL value
+        # and so misses every dwell taken at the rest stop itself.
+        if strict_spread and rst in ("r1", "r2") and i < len(td_list):
+            _o   = max(0.0, float(td_list[i]) - state.t_arr - dur.get("taur", 0.0))
+            _cap = Tspr2 if rst == "r2" else Tspr1
+            if _h_state + _o > _cap + tol:
+                issues.append(
+                    f"stop {s:>2}: spread h+o={_h_state + _o:.3f}h > {_cap}h "
+                    f"when the {rst} rest began (pre-rest cap)")
         if state.e_arr < Emin - tol:
             issues.append(
                 f"stop {s:>2}: soc={state.e_arr:.1f}kWh < Emin={Emin}kWh")
@@ -229,6 +248,16 @@ def check_simulation_feasibility(results: dict, full_data: dict,
                     f"stop {s:>2}: energy violation — "
                     f"ed={e_dep_c:.1f} − E_act[{s}]={E_leg_actual:.1f} = "
                     f"{e_dep_c-E_leg_actual:.1f} < Emin={Emin}kWh")
+
+    # (h_term) MILP.spread_term — the off-model final rest after arrival is
+    # assumed regular, so the unfinished last shift is bounded by the 13 h
+    # regular-rest spread.  Full-route condition, checked once at the end.
+    if strict_spread and states:
+        _h_end = getattr(states[-1], "h", 0.0)
+        if _h_end > Tspr1 + tol:
+            issues.append(
+                f"route end: terminal spread h={_h_end:.3f}h > {Tspr1}h "
+                f"(final shift cannot close with a regular rest)")
 
     return len(issues) == 0, issues
 

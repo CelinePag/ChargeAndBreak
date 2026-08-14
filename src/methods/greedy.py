@@ -40,6 +40,16 @@ Priority order (evaluated once per stop)
                    → charge to full at non-busy CS (free break if tauc large)
                    → otherwise no activity
 
+Spread escalation (SP2b/SP2c)
+-----------------------------
+Art. 8 caps the SPREAD — elapsed time since the shift began — at 13 h before a
+regular daily rest and 15 h before a reduced one, measured at the instant the
+rest BEGINS (MILP eq. R24, spread_prerest).  The driver therefore rests at the
+current stop whenever continuing would make a legal rest impossible at the next
+one, counting the dwell that stop obliges first (service / manoeuvring / a
+charge the energy state forces).  A discretionary charge that would push the
+rest past its cap is deferred to a later stop.
+
 Charge synchronisation rule
 ----------------------------
 When a mandatory break or rest coincides with a CS stop, y=1 is always set
@@ -90,7 +100,8 @@ from typing import Optional
 
 from src.simulation.BEHDV      import BEHDV, _energy_after_charging, _charging_time_needed
 from src.simulation.scenarios  import ScenarioTracker
-from src.simulation.supervisor import compute_flags, supervise_action
+from src.simulation.supervisor import (compute_flags, supervise_action,
+                                       worst_case_energy_to_next_cs)
 from src.settings   import TRAVEL_TIME_CV_TARGET, GUARD_QUANTILE
 from src.simulation.runner     import finalize_run
 from src.plot.plots      import plot_simulation_results   # re-exported for callers
@@ -189,7 +200,12 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
       (iii) if the spread or shift-driving budget does not cover the next
             leg, take a daily rest (reduced if the budget allows, regular
             otherwise);
-      (iv)  otherwise, continue.
+      (iv)  otherwise, continue;
+      (v)   escalate to a daily rest whenever a legal rest would no longer be
+            possible at the next stop — the pre-rest spread cap is 13 h before
+            a regular rest and 15 h before a reduced one, and it applies to
+            h + o (spread at the instant the rest starts), not to the
+            post-reset value.
 
     The greedy policy solves no optimization problem and uses the SAME
     information as every other method: the vehicle state, the distribution
@@ -312,23 +328,89 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     # being triggered.  A daily rest is the only reset, so when the action we are
     # about to execute would bust the ceiling, escalate it to a rest here (any
     # planned charge still runs for free in parallel with the rest).
-    if rst is None:
-        _tent   = {"y": y, "break_type": brk, "rest_type": None}
-        _d      = _greedy_durations(full_data, stop_global, _tent, state)
-        o_dwell = _d["tauq"] + _d["tauc"] + _d["taub"]
-        if is_CS and (y or brk):
-            o_dwell += full_data.get("M_stop", {}).get(stop_global, 0.0)
+    # SP2b: the cap depends on WHICH rest is taken.  Art. 8 gives 13 h of spread
+    # before a regular daily rest and 15 h before a reduced one (MILP eq. R24,
+    # spread_prerest) — and the cap applies to h + o, the spread at the instant
+    # the rest BEGINS, not to the post-reset value.  The old rule compared
+    # against a hardcoded 15 h and so under-rested by up to 2 h on every route
+    # whose reduced-rest budget was spent: 68% of greedy's r1 rests started
+    # after the 13 h deadline, and the simulator could not see it (BEHDV zeroes
+    # the spread at the rest, so its h > 15 test never fires at a rest stop).
+    Tspr1_v  = full_data.get("Tspr1", 13.0)
+    Tspr2_v  = flags.get("Tspr2", full_data.get("Tspr2", 15.0))
+    rho_bar  = int(full_data.get("rho_bar", 3))
+    next_rst = "r2" if state.rho2_used < rho_bar else "r1"
+    D_wc     = flags.get("D_next_wc", 0.0)
+
+    def _pre_rest_dwell(_y, _brk):
+        """On-duty dwell o at this stop, i.e. everything preceding the rest."""
+        _d = _greedy_durations(
+            full_data, stop_global,
+            {"y": _y, "break_type": _brk, "rest_type": None}, state)
+        o = _d["tauq"] + _d["tauc"] + _d["taub"]
+        if is_CS and (_y or _brk):
+            o += full_data.get("M_stop", {}).get(stop_global, 0.0)
         if stop_global in set(full_data.get("C", [])):
-            o_dwell += full_data["S"].get(stop_global, 0.0)
-        Tspr2 = flags.get("Tspr2", full_data.get("Tspr2", 15.0))
-        D_wc  = flags.get("D_next_wc", 0.0)
-        if state.h + o_dwell + D_wc > Tspr2 + 1e-9:
-            rst = ("r2" if state.rho2_used < int(full_data.get("rho_bar", 3))
-                   else "r1")
+            o += full_data["S"].get(stop_global, 0.0)
+        return o
+
+    def _forced_dwell(_stop: int) -> float:
+        """Unavoidable on-duty dwell BEFORE a rest could start at ``_stop``.
+
+        A rest is the last activity at a stop (rest-last convention), so
+        whatever the stop type obliges — customer service, CS manoeuvring,
+        layby parking, and a charge the energy state leaves no choice about —
+        is already spent when the rest begins.  Ignoring it is what made the
+        old rule rest one stop too late: it assumed a rest at the next stop
+        could start the instant the truck arrived, when in practice the truck
+        often arrives at a CS it MUST plug into for two hours first.
+        """
+        if _stop >= full_data["N"]:
+            return 0.0
+        if _stop in set(full_data.get("C", [])):
+            return full_data["S"].get(_stop, 0.0)
+        if _stop in set(full_data.get("L", [])):
+            return full_data.get("M_lay", {}).get(_stop, 0.0)
+        if _stop not in K_set:
+            return 0.0
+        o = full_data.get("M_stop", {}).get(_stop, 0.0)
+        # Worst-case SOC on arrival at _stop.  flags["e_needed"] is the
+        # worst-case energy from HERE to the next charging opportunity, so when
+        # _stop is that opportunity it is exactly this leg's demand.
+        soc_next = state.e_arr - flags["e_needed"]
+        need_on  = worst_case_energy_to_next_cs(full_data, _stop, cv,
+                                                guard_quantile)
+        if soc_next - need_on < Emin + safety_buffer_frac * usable:
+            o += (full_data.get("Q", {}).get(_stop, 0.0)
+                  + _charging_time_needed(soc_next, full_data))
+        return o
+
+    if rst is None:
+        cap    = Tspr2_v if next_rst == "r2" else Tspr1_v
+        o_plan = _pre_rest_dwell(y, brk)
+        # Continuing is only safe if a rest at the NEXT stop would still START
+        # inside the cap — i.e. after this dwell, the leg, AND the dwell that
+        # stop obliges before any rest can begin there.
+        h_at_next_rest = (state.h + o_plan + D_wc
+                          + _forced_dwell(stop_global + 1))
+        if h_at_next_rest > cap + 1e-9:
+            rst    = next_rst
             brk    = None    # a rest supersedes the break and resets cd + spread
             reason = (f"MUST-REST ({rst.upper()}) "
-                      f"[spread {state.h + o_dwell + D_wc:.2f}h > {Tspr2:.0f}h"
+                      f"[spread {h_at_next_rest:.2f}h > {cap:.0f}h"
                       + (", +charge" if y else "") + "]")
+
+    # SP2c: a full charge is 1.5-3.3 h of pre-rest dwell.  When that dwell is
+    # what pushes the rest past its cap, a driver charges LATER rather than
+    # starting the daily rest illegally — so drop a discretionary charge here.
+    # An energy-forced charge (must_charge) is never dropped: stranding is worse
+    # than an overrun, and the overrun is then recorded honestly.
+    if rst is not None and y and not must_charge:
+        cap = Tspr2_v if rst == "r2" else Tspr1_v
+        if state.h + _pre_rest_dwell(y, None) > cap + 1e-9 \
+                and state.h + _pre_rest_dwell(0, None) <= cap + 1e-9:
+            y       = 0
+            reason += "  [charge deferred: would breach pre-rest spread cap]"
 
 
     # ── Safety guards ──────────────────────────────────────────────────────────
@@ -499,7 +581,10 @@ def run_greedy(full_data: dict,
        f"safety={safety_buffer:.0%}  supervised={supervised}")
     _p("=" * 65)
 
-    vehicle    = BEHDV(full_data)
+    # strict_spread: greedy is the one policy re-validated against the Art. 8
+    # pre-rest / terminal spread caps, so it is the only one that records them
+    # as violations.  LA and the rest keep their previous feasibility semantics.
+    vehicle    = BEHDV(full_data, strict_spread=True)
     tracker    = ScenarioTracker(full_data)   # records realisations only
     scores_log = []                           # empty -- greedy has no look-ahead
     events     = dict(interventions=[], decision_times=[], cmp_log=[],

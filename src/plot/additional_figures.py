@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import bisect
+import fnmatch
 import glob
 import json
 import os
@@ -82,9 +84,62 @@ def _stem(route, cust, tw, seed) -> str:
     return f"{_RTAG[route]}{_CTAG[cust]}T{tw}_{seed}"
 
 
+_DIR_INDEX: dict[str, list[str]] = {}
+
+
+def _dir_index(directory: str) -> list[str]:
+    """Sorted entry names of ``directory``, scanned once per process.
+
+    These are read-only reporting runs, so the listing cannot change underneath
+    us; call ``_DIR_INDEX.clear()`` if that ever stops holding.
+    """
+    names = _DIR_INDEX.get(directory)
+    if names is None:
+        try:
+            names = sorted(os.listdir(directory or "."))
+        except OSError:
+            names = []
+        _DIR_INDEX[directory] = names
+    return names
+
+
 def _latest(pattern: str) -> str | None:
-    hits = sorted(glob.glob(pattern))
-    return hits[-1] if hits else None
+    """Newest file matching ``pattern`` (lexicographic, i.e. by run timestamp).
+
+    NOT glob.glob: every call re-scanned the whole directory, and solutions/ now
+    holds >10k files at ~54 ms a scan.  §8.3 alone makes ~14 400 of these calls
+    (8 tags x 300 instances x greedy/LA x base/variant x two tag spellings), so
+    the section spent ~13 minutes listing the same directory over and over while
+    the JSON parsing it fed cost 7 seconds.
+
+    The patterns all look like ``<stem>[__<tag>]_<ALG>_*.json`` — a literal
+    prefix, then wildcards — so the sorted listing is bisected down to the
+    matching prefix block and only that block is fnmatched.  Sorting names
+    within one directory ranks them exactly as sorting full paths did, so the
+    chosen file is unchanged.
+    """
+    directory, pat = os.path.split(pattern)
+    names = _dir_index(directory)
+    star = min((i for i in (pat.find("*"), pat.find("?"), pat.find("["))
+                if i != -1), default=-1)
+    if star == -1:                       # no wildcard: an exact name
+        block = [pat] if pat in _DIR_INDEX_SET(directory) else []
+    else:
+        prefix = pat[:star]
+        lo = bisect.bisect_left(names, prefix)
+        hi = bisect.bisect_left(names, prefix + "￿")
+        block = [n for n in names[lo:hi] if fnmatch.fnmatchcase(n, pat)]
+    return os.path.join(directory, block[-1]) if block else None
+
+
+_DIR_SETS: dict[str, set[str]] = {}
+
+
+def _DIR_INDEX_SET(directory: str) -> set[str]:
+    s = _DIR_SETS.get(directory)
+    if s is None:
+        s = _DIR_SETS[directory] = set(_dir_index(directory))
+    return s
 
 
 def _load(path: str) -> dict | None:

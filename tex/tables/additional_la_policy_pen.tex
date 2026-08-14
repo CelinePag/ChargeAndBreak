@@ -1,0 +1,18 @@
+\begin{table}[htbp]\centering
+\caption{Look-ahead POLICY variants, against the base cell ($|\Xi| = 25$, $L = 24$\,h).  TB0 removes the 5-minute tie-break that buys opportunistic charging; MIPTAIL solves the look-ahead tail as a MIP instead of an LP relaxation.  Gap is the median gap to the hindsight optimum, $\Delta$ the median paired change in penalised objective (arrival $+\ \beta\times$ misses) (positive = worse), $t_{\text{dec}}$ the median decision time per stop.}
+\label{tab:la_policy_pen}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrrrrrrr}
+\toprule
+Config & Windows & \multicolumn{3}{c}{Short route} & \multicolumn{3}{c}{Medium route} & \multicolumn{3}{c}{Long route} \\
+\midrule
+ &  & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) \\
+\midrule
+base & None & 4.3 & -- & 4 & 4.6 & -- & 18 & 3.9 & -- & 20 \\
+base & Tight & 7.6 & -- & 4 & 6.8 & -- & 18 & 5.3 & -- & 21 \\
+MIPTAIL & None & 2.1 & -2.44 & 48 & 2.3 & -1.98 & 86 & -- & -- & -- \\
+MIPTAIL & Tight & 2.9 & -3.52 & 61 & 3.0 & -1.66 & 97 & -- & -- & -- \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

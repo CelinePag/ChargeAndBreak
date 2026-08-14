@@ -955,13 +955,18 @@ if __name__ == "__main__":
                         help="solutions directory (default: solutions)")
     parser.add_argument("--out-dir", default=_paths.figures(),
                         help="output directory (default: figures)")
-    parser.add_argument("--kind", default="box",
+    parser.add_argument("--kind", default=None,
                         choices=["box", "bar", "violin", "line", "all"],
-                        help="figure variant (default: box — median + IQR, "
-                             "the variant reported in the paper; 'bar' gives "
+                        help="figure variant ('box' — median + IQR, the "
+                             "variant reported in the paper; 'bar' gives "
                              "means with ±1 std whiskers; 'line' puts the TW "
                              "class on the x axis and draws median/mean lines "
-                             "with an IQR band per method; 'all' every variant)")
+                             "with an IQR band per method; 'all' every "
+                             "variant).  With neither --kind nor --inner nor "
+                             "--tw-response nor --all given, the full paper "
+                             "box set is regenerated in one go: "
+                             "paper_gap_box + paper_gap_box_pooledtw + "
+                             "paper_tw_response")
     parser.add_argument("--metric", default="gap_pen",
                         choices=["gap_pen", "gap_nopen"],
                         help="gap definition (default: gap_pen, window "
@@ -982,7 +987,7 @@ if __name__ == "__main__":
                              "box + bar, each in both inner orderings "
                              "(tw and method), plus the stats CSV; "
                              "--kind/--inner are ignored")
-    parser.add_argument("--inner", default="tw",
+    parser.add_argument("--inner", default=None,
                         choices=["tw", "method", "pooled"],
                         help="row layout inner grouping: 'tw' = method "
                              "blocks holding their four TW boxes (default); "
@@ -1035,12 +1040,20 @@ if __name__ == "__main__":
             print(f"  Figure    : {p}")
         raise SystemExit(0)
 
+    # Bare invocation (no --kind/--inner/--all): every box figure the paper
+    # uses, plus the window-response figure, in one command.
+    paper_set = (args.kind is None and args.inner is None and not args.all)
+
     if args.all:
         combos = [(k, i) for k in ("box", "bar") for i in ("tw", "method")]
+    elif paper_set:
+        combos = [("box", "tw"), ("box", "pooled")]
     else:
-        kinds  = (["box", "bar", "violin", "line"] if args.kind == "all"
-                  else [args.kind])
-        combos = [(k, args.inner) for k in kinds]
+        kind  = args.kind  or "box"
+        inner = args.inner or "tw"
+        kinds = (["box", "bar", "violin", "line"] if kind == "all"
+                 else [kind])
+        combos = [(k, inner) for k in kinds]
     # The line mark connects the four TW slots inside a method block, so it
     # only means anything with inner="tw": methods are categorical and a line
     # across them would imply an order that does not exist.
@@ -1051,4 +1064,9 @@ if __name__ == "__main__":
                                  full_grid=not args.present_only,
                                  layout=args.layout, inner=inner,
                                  line_band=args.line_band):
+            print(f"  Figure    : {p}")
+
+    if paper_set:
+        for p in plot_tw_response(gaps, metric=args.metric,
+                                  out_dir=args.out_dir):
             print(f"  Figure    : {p}")

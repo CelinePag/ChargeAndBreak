@@ -191,10 +191,20 @@ class BEHDV:
     ----------
     full_data : dict
         Route and physics data dict produced by instances.make_data().
+    strict_spread : bool, default False
+        Record the two Art. 8 spread rules the MILP enforces but the original
+        violation semantics never tested: the PRE-REST cap (a daily rest must
+        BEGIN within 13 h of the shift start, 15 h if reduced — MILP R24
+        spread_prerest) and the TERMINAL cap (h[N] <= 13 — MILP spread_term).
+
+        OFF by default so the feasibility labels of every policy that predates
+        this check are unchanged.  greedy.run_greedy opts in; LA and the rest
+        keep their previous semantics until they are re-validated separately.
     """
 
-    def __init__(self, full_data: dict):
+    def __init__(self, full_data: dict, strict_spread: bool = False):
         self._fd = full_data
+        self.strict_spread = bool(strict_spread)
 
         T_START = full_data.get("T_START", 8.0)
         E0      = full_data["E0"]
@@ -591,7 +601,11 @@ class BEHDV:
         # so the rest is always the last activity; a rest resets the spread,
         # which then accumulates the drive to the next stop.
         o_dwell = max(0.0, td - self.t_arr - taur_exec)
-        h_new = (0.0 if rho else self.h + o_dwell) + D_act
+        # h_pre = the spread AT THE INSTANT the rest begins.  It is the quantity
+        # the pre-rest cap (R24) applies to, and it is NOT recoverable from
+        # h_new: a rest zeroes the spread, so h_new is only the outgoing leg.
+        h_pre = self.h + o_dwell
+        h_new = (0.0 if rho else h_pre) + D_act
 
         # ── 6.6. S2 violation semantics: retroactive mid-leg violations ────────
         _Tspr2   = full_data.get("Tspr2", 15.0)
@@ -610,6 +624,30 @@ class BEHDV:
             self.violations.append(dict(
                 type="hos_spread", stop=stop + 1, amount=h_new - _Tspr2,
                 detail=f"spread h={h_new:.3f}h > {_Tspr2}h after leg {stop}"))
+        # (R24) pre-rest spread cap — MILP.spread_prerest.  A daily rest must
+        # BEGIN within 13 h of the shift start (15 h when it is a reduced rest);
+        # starting it later does not make the shift legal retroactively.  The
+        # h_new test above can never catch this, because at a rest stop rho=1
+        # zeroes the spread and h_new is just D_act — which is why 26-54% of
+        # stored runs carry an undetected overrun.  Test h_pre instead.
+        _Tspr1 = full_data.get("Tspr1", 13.0)
+        if self.strict_spread and rho:
+            _cap = _Tspr2 if rst == "r2" else _Tspr1
+            if h_pre > _cap + 1e-3:
+                self.violations.append(dict(
+                    type="hos_spread_prerest", stop=stop, amount=h_pre - _cap,
+                    detail=(f"spread h+o={h_pre:.3f}h > {_cap}h when the {rst} "
+                            f"rest began at stop {stop}")))
+        # (h_term) terminal spread — MILP.spread_term.  The off-model final rest
+        # after arrival is assumed regular, so the unfinished last shift is
+        # bounded by the 13 h regular-rest spread.
+        _N_route = full_data.get("N")
+        if (self.strict_spread and _N_route is not None
+                and stop + 1 >= _N_route and h_new > _Tspr1 + 1e-3):
+            self.violations.append(dict(
+                type="hos_spread_term", stop=stop + 1, amount=h_new - _Tspr1,
+                detail=(f"terminal spread h={h_new:.3f}h > {_Tspr1}h on arrival "
+                        f"(final shift cannot close with a regular rest)")))
         # M9 — weekly working-time cap: OUT OF SCOPE (daily provisions only).
         # A breach is recorded once as a diagnostic note, NOT a violation —
         # it never marks the run infeasible (see class comment).
