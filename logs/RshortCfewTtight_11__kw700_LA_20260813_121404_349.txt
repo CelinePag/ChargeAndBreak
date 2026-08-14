@@ -455,3 +455,60 @@
      [FREE-LP]  obj=32.726h  0.3s  ws=no  150v/269c
   y=0  brk=0    rst=0   33.079h (0.284h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.2s)
   y=1  brk=0    rst=0   33.317h (0.083h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+  y=0  brk=0    rst=r2  42.246h (0.284h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=0    rst=r2  42.400h (0.083h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.3s)
+  y=0  brk=b45  rst=0   33.996h (0.284h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.1s)
+  y=1  brk=b45  rst=0   33.817h (0.083h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.0s)
+  y=0  brk=b15  rst=0   33.496h (0.284h)  ok=25/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+  y=1  brk=b15  rst=0   33.317h (0.083h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.1s)
+     [DIAG] max per-scenario delta spread across actions: 41.96 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=31.601h  td=31.601h  (mean=33.079h)  9.2s
+
+[LA] stop 38 (CS)  t=31.917h  soc=180kWh  cd=0.95h  sd=0.95h  sw=0.95h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [38->41]  travel=0.80h  8 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=32.717h  0.3s  ws=no  111v/200c
+  y=0  brk=0    rst=0   600000013.101h (0.048h)  ok=10/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=1  brk=0    rst=0   33.411h (0.046h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.8s)
+  y=0  brk=0    rst=r2  600000016.768h (0.048h)  ok=10/25  ws=25/25  tauc=0m  taub=0m  (0.8s)
+  y=1  brk=0    rst=r2  42.494h (0.046h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.9s)
+  y=0  brk=b45  rst=0   600000013.468h (0.048h)  ok=10/25  ws=25/25  tauc=0m  taub=45m  (1.1s)
+  y=1  brk=b45  rst=0   33.911h (0.046h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.0s)
+  y=0  brk=b15  rst=0   600000013.268h (0.048h)  ok=10/25  ws=25/25  tauc=0m  taub=15m  (0.9s)
+  y=1  brk=b15  rst=0   33.411h (0.046h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (0.8s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=0 rst=0 chg=0 c+b=0 c+r=0  0.2s
+  -> CHOSEN y=1  brk=b15  rst=0  tauc=19m (+220kWh)  taub=0m  [CONC]  ta=31.917h  td=32.680h  (mean=33.411h)  [tiebreak]  8.0s
+
+[LA] stop 39 (LAYBY)  t=32.921h  soc=372kWh  cd=1.19h  sd=1.19h  sw=1.64h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [39->41]  travel=0.53h  4 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=33.454h  0.4s  ws=yes  72v/131c
+  y=0  brk=0    rst=0   33.455h (0.039h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.1s)
+  y=0  brk=0    rst=r2  42.622h (0.039h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.6s)
+  y=0  brk=b45  rst=0   34.372h (0.039h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.7s)
+  y=0  brk=b30  rst=0   34.122h (0.039h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.0s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=32.921h  td=32.921h  (mean=33.455h)  3.7s
+
+[LA] stop 40 (LAYBY)  t=33.161h  soc=343kWh  cd=1.43h  sd=1.43h  sw=1.88h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [40->41]  travel=0.27h  4 actions × 25 scen  8w  [mean,lp]  pruned=2  ws=prev
+     [FREE-LP]  obj=33.428h  0.3s  ws=no  48v/89c
+  y=0  brk=0    rst=0   33.413h (0.011h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.9s)
+  y=0  brk=0    rst=r2  42.580h (0.011h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (0.7s)
+  y=0  brk=b45  rst=0   34.330h (0.011h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (0.8s)
+  y=0  brk=b30  rst=0   34.080h (0.011h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (0.8s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=33.161h  td=33.161h  (mean=33.413h)  3.6s
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 33.405 h  (33:24)
+  Duration : 25.405 h
+  Wall     : 484.8 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RshortCfewTtight_11__kw700_LA_20260813_121404_349_scenarios.json  (coverage=95.0%)
+  Metrics  : violations=0 (none)  tw_hit=50% (early=1, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RshortCfewTtight_11__kw700_LA_20260813_121404_349.json

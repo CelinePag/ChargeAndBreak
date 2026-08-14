@@ -1,0 +1,132 @@
+=================================================================
+  ROBU SOLVE START   (2026-08-14 16:02:54)
+  Instance : RmediumCfewTnone_19 — medium route, few customers, none windows, seed=19   run_id=RmediumCfewTnone_19_ROBU_20260814_120245_010
+  Route    : 95 stops  departure=8:00
+  Model    : budgeted RO (Bertsimas-Sim, Gamma=24 of 95 legs, eps=0.01), C&CG cutting-plane, no recourse
+=================================================================
+  Primed scenario set: 4 vertices (nominal + 3 worst-case).
+  Budget wall-clock limit: 14400s (<= 7200s per master solve).
+  [it 1] master: |scen|=4  theta=74.348h  status=optimal  (246.1s)
+  [it 1] adversary: 3 feasibility cut(s) [cd[0-10], cd[11-22], cd[51-60]]  (5.4s)
+  [it 2] master: |scen|=7  theta=74.605h  status=optimal  (1409.9s)
+  [it 2] adversary: 3 feasibility cut(s) [cd[61-72], cd[73-83], cd[84-94]]  (6.3s)
+  [it 3] master: |scen|=10  theta=74.779h  status=optimal  (2123.5s)
+  [it 3] adversary: 3 feasibility cut(s) [cd[44-54], cd[76-86], shift[10-37]]  (4.1s)
+  [it 4] master: |scen|=13  theta=75.228h  status=optimal  (3480.8s)
+  [it 4] adversary: 3 feasibility cut(s) [cd[8-18], cd[32-43], cd[64-76]]  (7.5s)
+  [it 5] master: |scen|=16  theta=75.764h  status=maxTimeLimit  (7125.0s)
+  [it 5] adversary: 3 feasibility cut(s) [cd[37-49], cd[66-78], cd[79-88]]  (4.3s)
+  [it 6] wall-clock budget spent (14413s / 14400s) — stopping with the iteration-5 plan (robu_converged=False).
+  [!] Loop ended without adversary certification (max_iter=12 exhausted or master aborted); executing the last available plan (robu_converged=False).
+
+  ROBU objective (worst-case arrival over U_Gamma) : 75.764 h   Gamma=24  scenarios=19  cuts: 15 feas / 0 opt   solve 14413.0s
+  plan: 11 chg / 9 brk / 3 rst
+
+  Executing ROBU plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.249h soc=475kWh  cd=0.25 sd=0.25 h=0.25  -> y=0 brk=--- rst=---
+  stop   2  t=8.480h soc=449kWh  cd=0.48 sd=0.48 h=0.48  -> y=0 brk=--- rst=---
+  stop   3  t=8.734h soc=425kWh  cd=0.73 sd=0.73 h=0.73  -> y=0 brk=--- rst=---
+  stop   4  t=9.060h soc=398kWh  cd=1.06 sd=1.06 h=1.06  -> y=0 brk=--- rst=---
+  stop   5  t=9.391h soc=371kWh  cd=1.39 sd=1.39 h=1.39  -> y=1 brk=b15 rst=---
+  stop   6  t=10.164h soc=405kWh  cd=1.66 sd=1.66 h=2.16  -> y=0 brk=--- rst=---
+  stop   7  t=10.428h soc=376kWh  cd=1.92 sd=1.92 h=2.43  -> y=0 brk=--- rst=---
+  stop   8  t=10.682h soc=347kWh  cd=2.17 sd=2.17 h=2.68  -> y=1 brk=b30 rst=---
+  stop   9  t=11.782h soc=442kWh  cd=0.25 sd=2.42 h=3.78  -> y=0 brk=--- rst=---
+  stop  10  t=12.039h soc=415kWh  cd=0.50 sd=2.68 h=4.04  -> y=0 brk=--- rst=---
+  stop  11  t=12.290h soc=387kWh  cd=0.75 sd=2.93 h=4.29  -> y=0 brk=--- rst=---
+  stop  12  t=12.548h soc=359kWh  cd=1.01 sd=3.19 h=4.55  -> y=0 brk=--- rst=---
+  stop  13  t=12.806h soc=332kWh  cd=1.27 sd=3.44 h=4.81  -> y=0 brk=--- rst=---
+  stop  14  t=13.068h soc=304kWh  cd=1.53 sd=3.71 h=5.07  -> y=0 brk=--- rst=---
+  stop  15  t=13.333h soc=273kWh  cd=1.80 sd=3.97 h=5.33  -> y=0 brk=--- rst=---
+  stop  16  t=13.609h soc=243kWh  cd=2.07 sd=4.25 h=5.61  -> y=0 brk=--- rst=r2
+  stop  17  t=22.994h soc=217kWh  cd=0.22 sd=0.22 h=0.22  -> y=0 brk=--- rst=---
+  stop  18  t=23.268h soc=195kWh  cd=0.49 sd=0.49 h=0.49  -> y=0 brk=--- rst=---
+  stop  19  t=23.492h soc=170kWh  cd=0.72 sd=0.72 h=0.72  -> y=1 brk=b15 rst=---
+  stop  20  t=24.323h soc=264kWh  cd=0.98 sd=0.98 h=1.55  -> y=0 brk=--- rst=---
+  stop  21  t=24.573h soc=234kWh  cd=1.23 sd=1.23 h=1.80  -> y=0 brk=--- rst=---
+  stop  22  t=24.845h soc=207kWh  cd=1.50 sd=1.50 h=2.07  -> y=0 brk=--- rst=---
+  stop  23  t=25.092h soc=178kWh  cd=1.75 sd=1.75 h=2.32  -> y=1 brk=b30 rst=---
+  stop  24  t=26.300h soc=309kWh  cd=0.46 sd=2.21 h=3.52  -> y=0 brk=--- rst=---
+  stop  25  t=26.532h soc=289kWh  cd=0.69 sd=2.44 h=3.76  -> y=0 brk=--- rst=---
+  stop  26  t=26.751h soc=269kWh  cd=0.91 sd=2.66 h=3.97  -> y=0 brk=--- rst=---
+  stop  27  t=26.948h soc=247kWh  cd=1.11 sd=2.86 h=4.17  -> y=0 brk=--- rst=---
+  stop  28  t=27.177h soc=221kWh  cd=1.34 sd=3.09 h=4.40  -> y=0 brk=--- rst=---
+  stop  29  t=27.430h soc=197kWh  cd=1.59 sd=3.34 h=4.65  -> y=0 brk=--- rst=---
+  stop  30  t=27.659h soc=171kWh  cd=1.82 sd=3.57 h=4.88  -> y=0 brk=--- rst=---
+  stop  31  t=27.894h soc=146kWh  cd=2.05 sd=3.80 h=5.12  -> y=0 brk=--- rst=---
+  stop  32  t=28.360h soc=100kWh  cd=2.52 sd=4.27 h=5.58  -> y=1 brk=b45 rst=---
+  stop  33  t=29.747h soc=352kWh  cd=0.30 sd=4.57 h=6.97  -> y=0 brk=--- rst=---
+  stop  34  t=30.052h soc=322kWh  cd=0.61 sd=4.88 h=7.28  -> y=0 brk=--- rst=---
+  stop  35  t=30.338h soc=291kWh  cd=0.90 sd=5.16 h=7.56  -> y=0 brk=--- rst=---
+  stop  36  t=30.619h soc=259kWh  cd=1.18 sd=5.45 h=7.84  -> y=0 brk=--- rst=---
+  stop  37  t=30.894h soc=230kWh  cd=1.45 sd=5.72 h=8.12  -> y=1 brk=--- rst=r2
+  stop  38  t=41.139h soc=394kWh  cd=0.40 sd=0.40 h=0.40  -> y=0 brk=--- rst=---
+  stop  39  t=41.376h soc=366kWh  cd=0.64 sd=0.64 h=0.64  -> y=0 brk=--- rst=---
+  stop  40  t=41.620h soc=338kWh  cd=0.88 sd=0.88 h=0.88  -> y=0 brk=--- rst=---
+  stop  41  t=41.862h soc=311kWh  cd=1.12 sd=1.12 h=1.12  -> y=0 brk=--- rst=---
+  stop  42  t=42.083h soc=288kWh  cd=1.34 sd=1.34 h=1.34  -> y=0 brk=--- rst=---
+  stop  43  t=42.294h soc=263kWh  cd=1.55 sd=1.55 h=1.55  -> y=0 brk=--- rst=---
+  stop  44  t=42.533h soc=242kWh  cd=1.79 sd=1.79 h=1.79  -> y=0 brk=--- rst=---
+  stop  45  t=42.776h soc=220kWh  cd=2.04 sd=2.04 h=2.04  -> y=0 brk=--- rst=---
+  stop  46  t=43.100h soc=202kWh  cd=2.36 sd=2.36 h=2.36  -> y=0 brk=--- rst=---
+  stop  47  t=43.328h soc=179kWh  cd=2.59 sd=2.59 h=2.59  -> y=0 brk=--- rst=---
+  stop  48  t=44.058h soc=155kWh  cd=2.82 sd=2.82 h=3.32  -> y=0 brk=--- rst=---
+  stop  49  t=44.272h soc=130kWh  cd=3.03 sd=3.03 h=3.53  -> y=0 brk=--- rst=---
+  stop  50  t=44.500h soc=107kWh  cd=3.26 sd=3.26 h=3.76  -> y=1 brk=b45 rst=---
+  stop  51  t=45.835h soc=349kWh  cd=0.21 sd=3.47 h=5.10  -> y=0 brk=--- rst=---
+  stop  52  t=46.259h soc=311kWh  cd=0.64 sd=3.90 h=5.52  -> y=0 brk=--- rst=---
+  stop  53  t=46.524h soc=279kWh  cd=0.90 sd=4.16 h=5.78  -> y=0 brk=--- rst=---
+  stop  54  t=46.798h soc=248kWh  cd=1.18 sd=4.44 h=6.06  -> y=0 brk=--- rst=---
+  stop  55  t=47.089h soc=219kWh  cd=1.47 sd=4.73 h=6.35  -> y=0 brk=--- rst=---
+  stop  56  t=47.379h soc=186kWh  cd=1.76 sd=5.02 h=6.64  -> y=0 brk=--- rst=---
+  stop  57  t=47.690h soc=155kWh  cd=2.07 sd=5.33 h=6.95  -> y=1 brk=b45 rst=---
+  stop  58  t=48.937h soc=383kWh  cd=0.26 sd=5.59 h=8.20  -> y=0 brk=--- rst=---
+  stop  59  t=49.187h soc=353kWh  cd=0.51 sd=5.84 h=8.45  -> y=0 brk=--- rst=---
+  stop  60  t=49.481h soc=326kWh  cd=0.80 sd=6.13 h=8.74  -> y=0 brk=--- rst=---
+  stop  61  t=49.738h soc=297kWh  cd=1.06 sd=6.39 h=9.00  -> y=0 brk=--- rst=---
+  stop  62  t=49.989h soc=268kWh  cd=1.31 sd=6.64 h=9.25  -> y=0 brk=--- rst=---
+  stop  63  t=50.251h soc=240kWh  cd=1.57 sd=6.90 h=9.51  -> y=0 brk=--- rst=---
+  stop  64  t=50.505h soc=211kWh  cd=1.83 sd=7.16 h=9.77  -> y=1 brk=--- rst=---
+  stop  65  t=51.714h soc=419kWh  cd=2.05 sd=7.38 h=10.97  -> y=0 brk=--- rst=---
+  stop  66  t=51.950h soc=395kWh  cd=2.29 sd=7.62 h=11.21  -> y=0 brk=--- rst=r2
+  stop  67  t=61.337h soc=370kWh  cd=0.22 sd=0.22 h=0.22  -> y=0 brk=--- rst=---
+  stop  68  t=61.545h soc=347kWh  cd=0.43 sd=0.43 h=0.43  -> y=0 brk=--- rst=---
+  stop  69  t=61.748h soc=323kWh  cd=0.63 sd=0.63 h=0.63  -> y=0 brk=--- rst=---
+  stop  70  t=61.956h soc=299kWh  cd=0.84 sd=0.84 h=0.84  -> y=0 brk=--- rst=---
+  stop  71  t=62.303h soc=283kWh  cd=1.19 sd=1.19 h=1.19  -> y=0 brk=--- rst=---
+  stop  72  t=62.536h soc=262kWh  cd=1.42 sd=1.42 h=1.42  -> y=0 brk=--- rst=---
+  stop  73  t=62.747h soc=241kWh  cd=1.63 sd=1.63 h=1.63  -> y=0 brk=--- rst=---
+  stop  74  t=62.948h soc=216kWh  cd=1.83 sd=1.83 h=1.83  -> y=0 brk=--- rst=---
+  stop  75  t=63.221h soc=197kWh  cd=2.11 sd=2.11 h=2.11  -> y=0 brk=--- rst=---
+  stop  76  t=63.500h soc=178kWh  cd=2.38 sd=2.38 h=2.38  -> y=0 brk=--- rst=---
+  stop  77  t=63.749h soc=152kWh  cd=2.63 sd=2.63 h=2.63  -> y=0 brk=--- rst=---
+  stop  78  t=63.987h soc=126kWh  cd=2.87 sd=2.87 h=2.87  -> y=0 brk=--- rst=---
+  stop  79  t=64.236h soc=100kWh  cd=3.12 sd=3.12 h=3.12  -> y=1 brk=b45 rst=---
+  stop  80  t=65.691h soc=369kWh  cd=0.27 sd=3.39 h=4.57  -> y=0 brk=--- rst=---
+  stop  81  t=65.919h soc=344kWh  cd=0.50 sd=3.62 h=4.80  -> y=0 brk=--- rst=---
+  stop  82  t=66.155h soc=319kWh  cd=0.73 sd=3.85 h=5.04  -> y=0 brk=--- rst=---
+  stop  83  t=66.392h soc=295kWh  cd=0.97 sd=4.09 h=5.28  -> y=0 brk=--- rst=---
+  stop  84  t=66.845h soc=244kWh  cd=1.42 sd=4.54 h=5.73  -> y=0 brk=--- rst=---
+  stop  85  t=67.114h soc=217kWh  cd=1.69 sd=4.81 h=6.00  -> y=0 brk=--- rst=---
+  stop  86  t=67.373h soc=189kWh  cd=1.95 sd=5.07 h=6.26  -> y=0 brk=--- rst=---
+  stop  87  t=67.668h soc=164kWh  cd=2.24 sd=5.36 h=6.55  -> y=0 brk=--- rst=---
+  stop  88  t=67.955h soc=136kWh  cd=2.53 sd=5.65 h=6.84  -> y=0 brk=--- rst=---
+  stop  89  t=68.283h soc=110kWh  cd=2.86 sd=5.98 h=7.17  -> y=1 brk=b45 rst=---
+  stop  90  t=69.529h soc=342kWh  cd=0.26 sd=6.24 h=8.41  -> y=0 brk=--- rst=---
+  stop  91  t=69.839h soc=315kWh  cd=0.57 sd=6.55 h=8.72  -> y=0 brk=--- rst=---
+  stop  92  t=70.105h soc=285kWh  cd=0.83 sd=6.81 h=8.99  -> y=0 brk=--- rst=---
+  stop  93  t=70.339h soc=259kWh  cd=1.07 sd=7.05 h=9.22  -> y=0 brk=--- rst=---
+  stop  94  t=70.621h soc=236kWh  cd=1.35 sd=7.33 h=9.50  -> y=0 brk=--- rst=---
+  Robust-plan failures (raw): 1 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  ROBU SIMULATION COMPLETE
+  Arrival (absolute) : 70.922 h  (70:55)
+  Travel duration    : 62.922 h
+  Solve time         : 14413.0 s
+  Wall-clock         : 14413.1 s
+=================================================================
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RmediumCfewTnone_19_ROBU_20260814_120245_010_scenarios.json
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RmediumCfewTnone_19_ROBU_20260814_120245_010.json
