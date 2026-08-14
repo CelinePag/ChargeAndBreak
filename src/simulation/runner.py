@@ -312,6 +312,10 @@ def finalize_run(
         vehicle          = vehicle,
         states           = vehicle.states,
         actions          = vehicle.actions,
+        # Art. 8 spread caps are opt-in per policy (BEHDV.strict_spread); pass
+        # it through so check_simulation_feasibility audits on the same basis
+        # the run itself was recorded on.
+        strict_spread    = getattr(vehicle, "strict_spread", False),
         scores_log       = scores_log or [],
         td_list          = vehicle.td_list,
         D_actual_list    = vehicle.D_actual_list,
