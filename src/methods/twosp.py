@@ -604,7 +604,43 @@ def build_2sp_model(data: dict, scenarios: list[dict],
         m.na_taur = pyo.Constraint(m.I, rest, rule=lambda m, i, s:
             m.taur[i, s] == m.taur[i, s0])
 
+    _fix_ferry_nodes_2sp(m, data, S_list)
     return m
+
+
+def _fix_ferry_nodes_2sp(m, data: dict, S_list) -> None:
+    """Force the mandatory break at sea-crossing (ferry) nodes.
+
+    The extensive-form twin of MILP._fix_ferry_nodes.  The stage split puts
+    the two fixings in different places:
+
+        x_b45[F]     = 1          FIRST stage — the break is taken, not chosen
+        taub[F, s]   = T_cross    SECOND stage — same duration in every
+                                  scenario, because the crossing is a
+                                  timetable fact and not an outcome of the
+                                  travel-time realisation
+
+    Without this the extensive form plans the route as if the ferry stops were
+    ordinary laybys, and the crossing time BEHDV imposes at execution has to
+    be patched in by the repair MILP — after the first-stage structure is
+    already committed.
+    """
+    ferry = {int(k): float(v) for k, v in (data.get("ferry") or {}).items()}
+    if not ferry:
+        return
+    N = data["N"]
+    L_set = set(data.get("L", []))
+    for f, t_cross in ferry.items():
+        if f not in m.I:
+            continue
+        if f in (0, N):
+            raise ValueError(f"ferry node {f} cannot be the origin or the "
+                             f"destination (taub is fixed to 0 there)")
+        if f not in L_set:
+            raise ValueError(f"ferry node {f} must be a layby (in data['L'])")
+        m.x_b45[f].fix(1)
+        for s in S_list:
+            m.taub[f, s].fix(t_cross)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
