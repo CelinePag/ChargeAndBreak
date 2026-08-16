@@ -1595,6 +1595,9 @@ def run_simulation_precomputed(
             supervised    = supervised,
             prune_quantile= prune_quantile,
             tiebreak_min  = tiebreak_min,
+            # Travels on full_data (it is consumed in MILP._build_sub_data);
+            # surfaced here so a guarded run is self-describing.
+            la_energy_quantile = full_data.get("la_energy_quantile"),
         ),
     )
     return results

@@ -408,6 +408,38 @@ def xi_quantile(q: float, cv: float = TRAVEL_TIME_CV_TARGET) -> float:
     return min(XI_MIN + exp(mu + sigma * _probit(q)), XI_MAX)
 
 
+# LA energy guard (default None = off).  See energy_at_quantile below and
+# MILP._build_sub_data: when the LA look-ahead commits an action it re-solves
+# the NOMINAL sub-problem, which sizes the charge for nominal energy and
+# therefore plans to arrive at the next CS at exactly Emin.  On corridors
+# where consecutive charging stations are far apart there is no station at
+# which to repair the shortfall, so the committed charge must instead cover
+# the legs to the next CS at an ADVERSE energy quantile.
+LA_ENERGY_QUANTILE: float | None = None
+
+
+def energy_at_quantile(km_leg: float, d_nom: float, q: float,
+                       cv: float = TRAVEL_TIME_CV_TARGET) -> float:
+    """Leg energy (kWh) at the q-quantile of CONSUMPTION.
+
+    Consumption rises with speed (the C·v² term), and speed rises as the
+    travel-time multiplier xi FALLS, so the q-quantile of energy is driven by
+    the (1−q)-quantile of xi — a "lucky" fast leg is an expensive one.
+
+        q = 0.95  guard against the 95th percentile of consumption
+        q = 1.0   worst case: xi = XI_MIN, i.e. the 90 km/h speed limiter
+
+    Returns 0.0 for degenerate legs (zero distance or zero nominal time), so
+    ferry legs and the destination sentinel are unaffected.
+    """
+    if km_leg <= 0.0 or d_nom <= 0.0 or not q:
+        return 0.0
+    xi_lo = xi_quantile(1.0 - float(q), cv)
+    if xi_lo <= 0.0:
+        return 0.0
+    return km_leg * ecr(km_leg / (d_nom * xi_lo))
+
+
 def sample_multipliers(
     n_legs: int,
     rng,

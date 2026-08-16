@@ -774,6 +774,21 @@ def _fmt_seeds(seeds: list) -> str:
 # instance is physically the base case and only the legal action set moves.
 _LA_REGIMES = {"nosplit"}
 
+# Variant tags that are NOT cells of the sweep.  A --variant label is also the
+# handiest way to keep an ad-hoc run from colliding with a stored one, so tags
+# turn up that were never meant as configurations: LOCAL marks a single-machine
+# timing probe, run on a handful of instances to measure what the policy costs
+# on cab-grade hardware.
+#
+# Excluding them is not cosmetic.  Scope is DISCOVERED from the sweep rows, so
+# an off-footprint variant does not merely add a spurious cell — it widens the
+# combos, window classes and seeds every OTHER cell is then filtered on.  Three
+# LOCAL runs, one of them on a window class the sweep does not use, pulled the
+# whole Tmedium population into the pooled rows and moved the base cell from 150
+# runs at 5.24 % to 224 at 5.47 %.  A cell must be evidence of its own scope
+# only.
+_LA_NON_CELL_VARIANTS = {"LOCAL", "TB0"}
+
 
 def _split_instance_tag(instance: str | None) -> tuple[str | None, str | None]:
     """'RmediumCfewTnone_10__nosplit' -> ('RmediumCfewTnone_10', 'nosplit').
@@ -861,6 +876,19 @@ def _regap_regimes_to_base_oracle(rows, cs) -> int:
     return len(tagged)
 
 
+def _la_local_tag(rec, regime: str | None) -> str:
+    """Cell label inside the LOCAL family: LP or MILP, split break or not.
+
+    The sweep separates its arms by --variant, but a LOCAL batch varies the
+    SOLVER instead and keeps one variant label, so the tag is read off
+    solve_mode.  Matching on the LOCAL prefix rather than the exact string
+    keeps LOCAL_MIP and friends in the family instead of stranding them as
+    cells of their own.
+    """
+    tag = "LOCAL" + ("+MIP" if rec.get("solve_mode") == "mip" else "")
+    return tag + ("+NOSPLIT" if regime == "nosplit" else "")
+
+
 def _la_discover(rows, cs) -> dict:
     """Footprint of the LA sweep as ACTUALLY RUN: configs, combos, TW classes
     and seeds read off the stored variant runs.
@@ -882,6 +910,8 @@ def _la_discover(rows, cs) -> dict:
         if r.get("method") != "LA" or r.get("status") != "OK":
             continue
         route, cust, tw, seed, regime = _la_coords(r, cs)
+        if (r.get("variant") or "").upper() in _LA_NON_CELL_VARIANTS:
+            continue                              # ad-hoc run, not a cell
         if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue
         if not r.get("variant") and not regime:   # base cell — not evidence
@@ -1032,6 +1062,8 @@ def cmd_la_report(args) -> None:
         if r.get("method") not in ("LA", "greedy") or r.get("status") != "OK":
             continue
         route, cust, tw, seed, regime = _la_coords(r, cs)
+        if (r.get("variant") or "").upper() in _LA_NON_CELL_VARIANTS:
+            continue                              # ad-hoc run, not a cell
         if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue
         if not route or not cust:
@@ -1050,6 +1082,26 @@ def cmd_la_report(args) -> None:
         # write the stripped-stem value back before it is used.
         r["window_class"] = tw
         groups.setdefault((cfg, route, tw), []).append(r)
+
+    # ── the LOCAL family ─────────────────────────────────────────────────────
+    # Same measurements, separate corpus and separate CSV.  These runs answer a
+    # different question — what the policy costs on cab-grade hardware, not how
+    # it should be configured — and they are launched on whatever handful of
+    # instances is convenient, off the sweep's footprint.  Pooling them into the
+    # sweep is what pulled the Tmedium population into every cell once already
+    # (see _LA_NON_CELL_VARIANTS), so they are deliberately NOT scope-filtered
+    # and NOT written to the same file; nothing here can move a sweep number.
+    local: dict = {}
+    for r in rows:
+        if r.get("method") != "LA" or r.get("status") != "OK":
+            continue
+        if not (r.get("variant") or "").upper().startswith("LOCAL"):
+            continue
+        route, cust, tw, seed, regime = _la_coords(r, cs)
+        if not route or tw is None:
+            continue
+        r["window_class"] = tw
+        local.setdefault((_la_local_tag(r, regime), route, tw), []).append(r)
 
     if not groups:
         print("  no LA runs matched — nothing written")
@@ -1085,81 +1137,91 @@ def cmd_la_report(args) -> None:
                 for recs in groups.values() for r in recs if _ref(r)}
 
     _paths.ensure_dirs()
-    out = _paths.data_output("additional_la_stats.csv")
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["config", "n_scenarios", "horizon_h", "route_class",
-                    "window_class", "n_runs", "n_infeasible",
-                    "gap_pen_median_pct", "gap_nopen_median_pct",
-                    "duration_median_h", "delta_vs_base_pct", "n_paired",
-                    "duration_pen_median_h", "delta_pen_vs_base_pct",
-                    "n_paired_pen",
-                    "decision_mean_s_median", "decision_cs_mean_s_median",
-                    "decision_max_s_median",
-                    "wall_clock_s_median"])
-        # Window classes are also POOLED into a synthetic 'all' row per
-        # (config, route).  A figure that wants one row per configuration must
-        # not average the two per-window medians: the classes carry different
-        # run counts (and the base cell carries more than the sweep cells), so
-        # the average of medians is weighted by nothing meaningful.  Pooling the
-        # raw runs and re-taking the median is the honest version, and the
-        # per-instance pairing behind delta_vs_base_pct is unaffected because it
-        # keys on (instance, window_class) either way.
-        pooled = {}
-        for (cfg, route, _tw), recs in groups.items():
-            pooled.setdefault((cfg, route, "all"), []).extend(recs)
-        for (cfg, route, tw), recs in sorted(list(groups.items())
-                                             + list(pooled.items())):
-            gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
-                             if cs._gap_usable(r) and r.get("gap_pen") is not None])
-            gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
-                             if cs._gap_usable(r) and r.get("gap_nopen") is not None])
-            dur, _   = _agg([r.get("duration_h") for r in recs])
-            dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
-                             for r in recs])
-            dcs, _   = _agg([_dec_cs(r, cs) for r in recs])
-            decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
-                             for r in recs])
-            wall, _  = _agg([r.get("wall_clock_s") for r in recs])
-            n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
+    def _write(out_name, grp):
+        """One CSV from one group dict.  The sweep and the LOCAL family share
+        the column set and the aggregation exactly; only the corpus differs, so
+        they share the writer rather than drifting apart in two copies."""
+        out = _paths.data_output(out_name)
+        with open(out, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["config", "n_scenarios", "horizon_h", "route_class",
+                        "window_class", "n_runs", "n_infeasible",
+                        "gap_pen_median_pct", "gap_nopen_median_pct",
+                        "duration_median_h", "delta_vs_base_pct", "n_paired",
+                        "duration_pen_median_h", "delta_pen_vs_base_pct",
+                        "n_paired_pen",
+                        "decision_mean_s_median", "decision_cs_mean_s_median",
+                        "decision_max_s_median",
+                        "wall_clock_s_median"])
+            # Window classes are also POOLED into a synthetic 'all' row per
+            # (config, route).  A figure that wants one row per configuration must
+            # not average the two per-window medians: the classes carry different
+            # run counts (and the base cell carries more than the sweep cells), so
+            # the average of medians is weighted by nothing meaningful.  Pooling the
+            # raw runs and re-taking the median is the honest version, and the
+            # per-instance pairing behind delta_vs_base_pct is unaffected because it
+            # keys on (instance, window_class) either way.
+            pooled = {}
+            for (cfg, route, _tw), recs in grp.items():
+                pooled.setdefault((cfg, route, "all"), []).extend(recs)
+            for (cfg, route, tw), recs in sorted(list(grp.items())
+                                                 + list(pooled.items())):
+                gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
+                                 if cs._gap_usable(r) and r.get("gap_pen") is not None])
+                gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
+                                 if cs._gap_usable(r) and r.get("gap_nopen") is not None])
+                dur, _   = _agg([r.get("duration_h") for r in recs])
+                dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
+                                 for r in recs])
+                dcs, _   = _agg([_dec_cs(r, cs) for r in recs])
+                decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
+                                 for r in recs])
+                wall, _  = _agg([r.get("wall_clock_s") for r in recs])
+                n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
 
-            durp, _  = _agg([r.get("duration_pen_h") for r in recs])
+                durp, _  = _agg([r.get("duration_pen_h") for r in recs])
 
-            deltas, deltas_pen = [], []
-            for r in recs:
-                if cs._is_truly_infeasible(r):
-                    continue
-                key = (r.get("instance"), r.get("window_class"))
-                b, d = base_dur.get(key), r.get("duration_h")
-                if b and d:
-                    deltas.append(100.0 * (d / b - 1.0))
-                bp, dp = base_pen.get(key), r.get("duration_pen_h")
-                if bp and dp:
-                    deltas_pen.append(100.0 * (dp / bp - 1.0))
-            dl, n_pair = _agg(deltas)
-            dlp, n_pair_pen = _agg(deltas_pen)
+                deltas, deltas_pen = [], []
+                for r in recs:
+                    if cs._is_truly_infeasible(r):
+                        continue
+                    key = (r.get("instance"), r.get("window_class"))
+                    b, d = base_dur.get(key), r.get("duration_h")
+                    if b and d:
+                        deltas.append(100.0 * (d / b - 1.0))
+                    bp, dp = base_pen.get(key), r.get("duration_pen_h")
+                    if bp and dp:
+                        deltas_pen.append(100.0 * (dp / bp - 1.0))
+                dl, n_pair = _agg(deltas)
+                dlp, n_pair_pen = _agg(deltas_pen)
 
-            ns = recs[0].get("n_scenarios")
-            hh = recs[0].get("horizon_hours")
-            w.writerow([cfg, ns, hh, route, tw, len(recs), n_inf,
-                        None if gp is None else round(gp, 3),
-                        None if gn is None else round(gn, 3),
-                        None if dur is None else round(dur, 3),
-                        None if dl is None else round(dl, 3), n_pair,
-                        None if durp is None else round(durp, 3),
-                        None if dlp is None else round(dlp, 3), n_pair_pen,
-                        None if dec is None else round(dec, 4),
-                        None if dcs is None else round(dcs, 4),
-                        None if decx is None else round(decx, 4),
-                        None if wall is None else round(wall, 1)])
-            print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
-                  f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
-                  f"(from {n_gp} run(s) with an oracle bound)  "
-                  f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
-                  f"(n={n_pair})  "
-                  f"dec={'—' if dec is None else f'{dec:.1f}s'}"
-                  f" (CS {'—' if dcs is None else f'{dcs:.1f}s'})")
-    print(f"  CSV saved   : {out}")
+                ns = recs[0].get("n_scenarios")
+                hh = recs[0].get("horizon_hours")
+                w.writerow([cfg, ns, hh, route, tw, len(recs), n_inf,
+                            None if gp is None else round(gp, 3),
+                            None if gn is None else round(gn, 3),
+                            None if dur is None else round(dur, 3),
+                            None if dl is None else round(dl, 3), n_pair,
+                            None if durp is None else round(durp, 3),
+                            None if dlp is None else round(dlp, 3), n_pair_pen,
+                            None if dec is None else round(dec, 4),
+                            None if dcs is None else round(dcs, 4),
+                            None if decx is None else round(decx, 4),
+                            None if wall is None else round(wall, 1)])
+                print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
+                      f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
+                      f"(from {n_gp} run(s) with an oracle bound)  "
+                      f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
+                      f"(n={n_pair})  "
+                      f"dec={'—' if dec is None else f'{dec:.1f}s'}"
+                      f" (CS {'—' if dcs is None else f'{dcs:.1f}s'})")
+        print(f"  CSV saved   : {out}")
+
+    _write("additional_la_stats.csv", groups)
+    if local:
+        print(f"  LOCAL family: {sum(len(v) for v in local.values())} run(s) in "
+              f"{len(local)} cell(s) — separate corpus, separate file")
+        _write("additional_la_local_stats.csv", local)
 
 
 def _latest_2sp_solution(stem: str) -> str | None:

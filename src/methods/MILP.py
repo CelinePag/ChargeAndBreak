@@ -54,7 +54,7 @@ import math as _mi
 import pyomo.environ as pyo
 
 from src.instance_gen.instances import compute_time_bounds
-from src.settings import BETA_TW
+from src.settings import BETA_TW, TRAVEL_TIME_CV_TARGET
 from src import paths as _paths
 
 FIGURES_DIR        = _paths.figures()
@@ -1406,6 +1406,35 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
     E_src = E_override if E_override is not None else full_data["E"]
     D_loc = {j: D_src.get(start_stop + j, 0.0) for j in range(H)}
     E_loc = {j: E_src.get(start_stop + j, 0.0) for j in range(H)}
+
+    # ── LA energy guard (settings.LA_ENERGY_QUANTILE) ────────────────────────
+    # Applies ONLY to the nominal sub-problem (E_override is None) — the one
+    # whose re-solve produces the COMMITTED charge quantity.  Per-scenario
+    # evaluations already carry their own energy and are left untouched.
+    #
+    # Scope: the legs from here up to arrival at the next CS.  That is the
+    # stretch over which a shortfall cannot be repaired, because there is no
+    # station on it; beyond the next CS the rolling horizon re-decides anyway,
+    # and only the first action is ever committed.
+    _eq = full_data.get("la_energy_quantile")
+    if E_override is None and _eq:
+        from src.settings import energy_at_quantile as _e_at_q
+        _K_glob = set(full_data["K"])
+        _km_g   = full_data.get("km", {}) or {}
+        _D_g    = full_data["D"]
+        _cv_g   = float(full_data.get("la_energy_cv", TRAVEL_TIME_CV_TARGET))
+        _limit  = full_data["N"]
+        for _g in range(start_stop + 1, full_data["N"] + 1):
+            if _g in _K_glob:
+                _limit = _g
+                break
+        for j in range(H):
+            _g = start_stop + j
+            if _g >= _limit:
+                break
+            _L, _d = _km_g.get(_g), _D_g.get(_g)
+            if _L and _d:
+                E_loc[j] = max(E_loc[j], _e_at_q(_L, _d, _eq, _cv_g))
 
     S_loc      = {j: full_data["S"].get(start_stop + j, 0.0) for j in C_loc}
     Q_loc      = {j: full_data["Q"].get(start_stop + j, 0.0) for j in K_loc}

@@ -110,7 +110,7 @@ import re
 import sys
 from typing import Optional
 
-from src.settings import GUARD_QUANTILE
+from src.settings import GUARD_QUANTILE, LA_ENERGY_QUANTILE
 from src import paths as _paths
 
 
@@ -224,6 +224,9 @@ def run_algorithm(
     diesel_mode: bool      = False,    # treat vehicle as diesel (HoS only, no charging)
     supervised: bool       = False,    # S1: safety supervisor off by default (raw mode)
     prune_quantile: Optional[float] = GUARD_QUANTILE,  # RH2 guard level; None = disabled
+    # LA only: size the COMMITTED charge for the legs up to the next CS at this
+    # quantile of energy consumption instead of at nominal.  None = off.
+    la_energy_quantile: Optional[float] = LA_ENERGY_QUANTILE,
     resume: bool           = False,    # LA only: resume a crashed run from its checkpoint
 ) -> dict:
     """
@@ -298,6 +301,13 @@ def run_algorithm(
     from src.instance_gen.instance_io import load_instance_json
 
     full_data, D_real, E_real, cv = load_instance_json(json_file)
+
+    # LA energy guard travels on full_data because that is what reaches the
+    # sub-problem builder (MILP._build_sub_data).  Recorded in the solution
+    # via method_meta below so a guarded run is never confused with a plain one.
+    if la_energy_quantile:
+        full_data["la_energy_quantile"] = float(la_energy_quantile)
+        full_data["la_energy_cv"] = cv
 
     # ── IDENTITY: the title IS the file stem ─────────────────────────────────
     # Every downstream identifier derives from full_data["title"]: the run's
@@ -638,7 +648,7 @@ _SIG_FIELDS = {
     "2SP":    ["variant", "n_scenarios", "supervised", "prune_quantile"],
     "LA":     ["variant", "n_scenarios", "horizon_hours", "criterion",
                "solve_mode", "charge_only", "supervised", "prune_quantile",
-               "tiebreak_min"],
+               "tiebreak_min", "la_energy_quantile"],
 }
 
 
@@ -676,7 +686,9 @@ def _requested_sig(alg: str, kw: dict) -> Optional[dict]:
                     # Runs made before the flag existed carry no tiebreak_min
                     # and were all made at 5.0, so that is what a missing field
                     # must compare equal to.
-                    tiebreak_min=float(kw.get("tiebreak_min", 5.0)))
+                    tiebreak_min=float(kw.get("tiebreak_min", 5.0)),
+                    # Pre-guard runs carry no field; None == off.
+                    la_energy_quantile=kw.get("la_energy_quantile"))
     return None
 
 
@@ -919,6 +931,16 @@ if __name__ == "__main__":
                              "checks at nominal, LA does no flag-based "
                              "pruning.  0.95 = guard at the xi 95%% "
                              "quantile; 1.0 = full support corners.")
+    parser.add_argument("--la_energy_quantile", type=float,
+                        default=LA_ENERGY_QUANTILE,
+                        help="LA only: size the COMMITTED charge so the legs "
+                             "up to the next CS are covered at this quantile "
+                             "of energy CONSUMPTION instead of at nominal. "
+                             "Default off, which plans to reach the next CS "
+                             "at exactly Emin — safe only when a missed "
+                             "kWh can be recovered at a nearby station. "
+                             "0.95 = 95th percentile of consumption; "
+                             "1.0 = worst case (90 km/h speed limiter).")
 
     # RO
     parser.add_argument("--ro_time_limit",type=int,   default=7200)
@@ -1054,6 +1076,7 @@ if __name__ == "__main__":
         diesel_mode      = args.diesel,
         supervised       = args.supervised,
         prune_quantile   = args.prune_quantile,
+        la_energy_quantile = args.la_energy_quantile,
         resume           = args.resume,
         variant          = args.variant,
     )

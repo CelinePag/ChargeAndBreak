@@ -462,9 +462,14 @@ def section_diesel():
     # Two units on one mark: the percentage sits above the bar (it is what the
     # axis measures) and its absolute-hours counterpart sits inside the bar in
     # reversed-out type, so the two never read as a single stacked number.
+    #
+    # Chrome follows the same grammar as §8.3 (additional_sens_effects) and the
+    # base-case box plots: default frame, entity colour with a darker hairline
+    # edge, major+minor grid on the response axis, one in-axes legend, and NO
+    # title of any kind — the LaTeX \caption carries it (see results_section).
     routes = [r for r in DIESEL_ROUTES if r in per_class]
-    fig, ax = plt.subplots(figsize=(5.0, 2.9))
-    w, x = 0.30, np.arange(len(routes), dtype=float)
+    fig, ax = plt.subplots(figsize=(5.2, 2.9))
+    w, x = 0.32, np.arange(len(routes), dtype=float)
     # Colour follows the entity (paper_style): the same blue as Greedy and the
     # same neutral grey as the oracle everywhere else in the paper.
     series = [("Greedy policy", "pen_g", "dt_g", BLUE),
@@ -476,52 +481,57 @@ def section_diesel():
         # nan, not 0: a suppressed class must leave a gap, not draw a bar at
         # zero that reads as "no penalty".
         ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
-               edgecolor="white", linewidth=0.5, zorder=3, label=lbl)
+               edgecolor=ps.shade(col, 0.35), linewidth=0.4, zorder=3,
+               label=lbl)
         for p, v, h in zip(pos, vals, hrs):
             if v is None:
                 continue
             ax.annotate(f"{v:.1f}%", (p, v), textcoords="offset points",
                         xytext=(0, 3), ha="center", va="bottom",
-                        fontsize=7.5, color=INK)
+                        fontsize=7.5, color=INK, zorder=4)
             if h is not None:
                 ax.annotate(f"{h:+.1f} h", (p, v), textcoords="offset points",
-                            xytext=(0, -4), ha="center", va="top",
-                            fontsize=6.5, color="white")
+                            xytext=(0, -6), ha="center", va="top",
+                            fontsize=6.5, color="white", zorder=4)
+    # Coupling share only.  The sample size is not annotated here: it is the
+    # same n for every bar in the base sweep, and where a class IS a partial
+    # average the table caption names it (coverage is printed above and kept
+    # per instance in the CSV), so the figure does not repeat it.
+    span = ax.get_xaxis_transform()   # x in data coords, y in axes fraction
     for xi, r in enumerate(routes):
         c = _mean(per_class[r]["coup"])
-        n = sum(1 for v in per_class[r]["pen_o"] if v is not None)
-        want = coverage[r][1]
-        if n:
-            # "n = 75/80" wherever the class is a partial average, so the bar
-            # is never read as resting on the full sample.
-            shown = f"{n}" if n >= want else f"{n}/{want}"
-            note = f"{_fmt(c, '.0f')}% coupled  ·  n = {shown}"
-        else:   # no oracle at all for this class — label the Greedy sample
-            n = sum(1 for v in per_class[r]["pen_g"] if v is not None)
-            note = f"greedy only  ·  n = {n}"
-        ax.text(xi, -0.115, note, ha="center", va="top", fontsize=6.5,
-                color=MUT, transform=ax.get_xaxis_transform())
+        have = sum(1 for v in per_class[r]["pen_o"] if v is not None)
+        note = f"{_fmt(c, '.0f')}% coupled" if have else "greedy only"
+        # Fixed point offset, not an axes fraction, so the note clears the tick
+        # labels by the same margin whatever the figure height ends up being.
+        ax.annotate(note, xy=(float(xi), 0), xycoords=span,
+                    xytext=(0, -18), textcoords="offset points",
+                    ha="center", va="top", fontsize=7, color=MUT)
     ax.set_xticks(x, [ps.ROUTE_LBL[r] for r in routes])
     ax.set_xlim(-0.6, len(routes) - 0.4)
     ax.set_ylabel("Route duration vs. diesel (%)")
-    ax.yaxis.grid(True, color=GRID, lw=0.6)
+    # Major + minor grid on the response axis only, as in §8.3: the reader
+    # compares bar heights across groups, and the minor lines make the ~1 pp
+    # differences between the two series legible.
+    ax.yaxis.set_major_locator(
+        mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+    ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+    ax.yaxis.grid(True, which="major", color=GRID, lw=0.6)
+    ax.yaxis.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
+    ax.tick_params(axis="y", which="minor", length=2)
     ax.set_axisbelow(True)
     ax.tick_params(axis="x", length=0, colors=INK)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color(ps.BASELINE)
-        ax.spines[side].set_linewidth(0.7)
     # Headroom so the legend row clears the tallest bar's value label.
     _top = max((v for s in series for v in
                 (_mean(per_class[r][s[1]]) for r in routes)
                 if v is not None), default=1.0)
-    ax.set_ylim(0, _top * 1.38)
-    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper left",
-              handlelength=1.0, handleheight=1.0, handletextpad=0.5,
-              columnspacing=1.4, borderpad=0.0, borderaxespad=0.2)
-    ax.set_title("Electrification penalty: myopic vs optimized schedules",
-                 loc="left", color=INK, pad=6)
+    ax.set_ylim(0, _top * 1.32)
+    ax.legend(frameon=True, framealpha=0.92, edgecolor="none",
+              facecolor="white", fontsize=7.5, ncol=2, loc="upper center",
+              handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
+    # Bottom reserve: the coupling notes hang below the axes and tight_layout
+    # does not measure annotations drawn outside them.
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
@@ -1349,14 +1359,14 @@ def _log_ticks_plain(axis) -> None:
     axis.set_minor_formatter(ticker.NullFormatter())
 
 
-def _la_stats() -> dict:
-    """data_output/additional_la_stats.csv -> {(cfg, route, tw): row}.
+def _la_stats(name: str = "additional_la_stats.csv") -> dict:
+    """data_output/<name> -> {(cfg, route, tw): row}.
 
     Written by `additional_analysis.py la-report`.  Absent or partial file is
     normal while the sweep is running: missing cells render as "pending".
     """
     out: dict = {}
-    path = _paths.data_output("additional_la_stats.csv")
+    path = _paths.data_output(name)
     try:
         with open(path, encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
@@ -2097,12 +2107,12 @@ _LA_POLICY_MARK = {"MIPTAIL": "D", "TB0": "v"}
 # split break as Art. 7 permits it, triangles for the regime that forbids it;
 # circle/triangle-up for the LP subproblem, diamond/triangle-down for the MILP.
 #
-# Greedy is the exception that keeps a COLOUR: it is a different method, not an
-# LA configuration, so it takes the method hue it wears everywhere else in the
-# paper.  That is also why it gets no leader — a leader means "displacement from
-# the base configuration", and greedy is not a configuration of anything.  It
-# sits on the cost axis at 0.0 s because it solves nothing, which is precisely
-# the reference the look-ahead has to earn its compute against.
+# Only LA configurations are plotted.  Other METHODS are deliberately absent:
+# this figure answers "how should the look-ahead be configured", and a method
+# that is not a configuration of it has no position on either ladder and no
+# leader to the base cell.  Greedy in particular was tried here and removed —
+# it lands at 0.0 s hard against the left spine, in the busiest corner of every
+# panel.  la-report still writes its row, so the section text can quote it.
 #
 # Every LA variant is drawn as a displacement from the BASE cell — one leader
 # each, all sharing a tail, so the panel reads as a fan out of the reference
@@ -2133,32 +2143,42 @@ _LA_ALL_CELLS = [
      "^", _LA_HUE_CELL, True,  True),
     ("MIPTAIL+NOSPLIT", "MILP no-split", r"MILP subpr., no split break",
      "v", _LA_HUE_CELL, False, True),
-    # Empty panel tag: greedy is the only coloured marker on the plane and the
-    # legend names it, while its position — hard against the left spine, in the
-    # busiest part of every panel — is exactly where an extra label collides
-    # with the base cell and the cheap ends of both ladders.
-    ("GREEDY",          "",              r"Greedy (no look-ahead)",
-     "P", BLUE,         False, False),
 ]
 _LA_ALL_BY_CFG = {c[0]: c for c in _LA_ALL_CELLS}
+# Configs the CSV may carry that must never become a cell here: other methods,
+# ad-hoc timing probes, and variants that were never launched.  Anything else
+# unrecognised still draws, so a genuinely new cell is not silently dropped.
+_LA_ALL_SKIP = {"GREEDY", "LOCAL", "TB0"}
 
 
-def section_la_all():
+def section_la_all(csv_name: str = "additional_la_stats.csv",
+                   cell_decl: list | None = None,
+                   ladders: bool = True,
+                   anchor: str = "base",
+                   outname: str = "additional_la_all",
+                   banner: str = "combined cost/quality plane",
+                   min_n: int = 5):
     """§8.3 — one figure for the entire LA study (horizon, scenarios, policy).
 
     Reads the same data_output/additional_la_stats.csv as section_la and
     section_la_policy; it replaces neither, it re-reads both onto shared axes.
     Needs the pooled window_class = 'all' rows, so re-run
     `additional_analysis.py la-report` if the CSV predates them.
+
+    Parameterised so a second experiment can reuse the whole plane rather than
+    fork it: section_la_local draws the cab-hardware runs with the same axes,
+    encoding and pending conventions, differing only in which CSV it reads, its
+    cell list, the absence of the two ladders, and which cell is the anchor.
     """
-    print("== Sec 8.3 look-ahead — combined cost/quality plane ==")
-    stats = _la_stats()
+    print(f"== Sec 8.3 look-ahead — {banner} ==")
+    cells_all = cell_decl or _LA_ALL_CELLS
+    stats = _la_stats(csv_name)
     if not stats:
         print("  additional_la_stats.csv missing — nothing drawn")
         return
     routes = ps.ROUTE_ORDER
     TW = "all"                       # pooled over window classes — see above
-    if not any(t == TW for (_c, _r, t) in stats):
+    if stats and not any(t == TW for (_c, _r, t) in stats):
         print("  additional_la_stats.csv has no pooled 'all' window rows — "
               "re-run: python -m src.output_analysis.additional_analysis "
               "la-report")
@@ -2170,18 +2190,22 @@ def section_la_all():
     # — it is the one variant whose runs were never launched, and a permanent
     # "pending" note is noise, not information.  section_la_policy still has it.
     have = {c for (c, _r, _t) in stats}
+    by_cfg = {c[0]: c for c in cells_all}
     extra = sorted(c for c in have
-                   if c not in _LA_ALL_BY_CFG and c != "TB0"
+                   if c not in by_cfg and c not in _LA_ALL_SKIP
                    and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
-    cells = ([c for c in _LA_ALL_CELLS if c[0] != "base"]
+    cells = ([c for c in cells_all if c[0] != anchor]
              + [(c, c, c, "*", _LA_HUE_CELL, True, True) for c in extra])
 
     # Below this a "median" is not an estimate of anything, and one such cell
     # can wreck the figure for every other: a 2-run long-route MILP no-split
     # cell landed at 13.8 % mid-sweep and stretched the shared y-axis to 15 %,
     # compressing the 2-6 % band where the entire study lives.  Such a cell is
-    # reported as still pending, with its count, rather than plotted.
-    _MIN_N = 5
+    # reported as still pending, with its count, rather than plotted.  The
+    # threshold is a parameter because it is a judgement about the experiment,
+    # not a constant: the cab-hardware runs are a handful of instances BY
+    # DESIGN, so there the same floor would hide the entire figure.
+    _MIN_N = min_n
 
     def cell(cfg, route, tw=TW):
         """(cost, quality, infeasibility rate) for one cell, or None."""
@@ -2210,7 +2234,7 @@ def section_la_all():
     _PARTIAL_AT = 0.60
 
     def partial(cfg, route, tw=TW):
-        base_n = n_runs("base", route, tw)
+        base_n = n_runs(anchor, route, tw)
         n = n_runs(cfg, route, tw)
         return bool(base_n and n and n < _PARTIAL_AT * base_n)
 
@@ -2220,12 +2244,12 @@ def section_la_all():
     # on top, together with the variants that fan out of it.
     def paths(route):
         out = []
-        for ladder, is_h, col, pfx in (
+        for ladder, is_h, col, pfx in ((
                 (_LA_HORIZONS, True,  _LA_HUE_HORIZON, "L"),
-                (_LA_SCENARIOS, False, _LA_HUE_SCEN, "S")):
+                (_LA_SCENARIOS, False, _LA_HUE_SCEN, "S")) if ladders else ()):
             pts = []
             for v in ladder:
-                cfg = ("base" if (v == _LA_BASE[1] if is_h else v == _LA_BASE[0])
+                cfg = (anchor if (v == _LA_BASE[1] if is_h else v == _LA_BASE[0])
                        else _la_cfg(_LA_BASE[0], float(v)) if is_h
                        else _la_cfg(int(v), _LA_BASE[1]))
                 got = cell(cfg, route)
@@ -2234,21 +2258,35 @@ def section_la_all():
                     # long routes the two ladders end within a marker's width of
                     # each other, and the vertical split is what stops those
                     # tags overprinting.
-                    pts.append((f"{pfx}{v:g}", cfg == "base", col,
+                    pts.append((f"{pfx}{v:g}", cfg == anchor, col,
                                 "o" if is_h else "s", not is_h, *got))
             if pts:
                 out.append(("ladder", None, pts))
         for cfg, tag, _lbl, mk, col, above, leader in cells:
             got = cell(cfg, route)
             if got:
-                if partial(cfg, route):
-                    tag = f"{tag} (n={n_runs(cfg, route):.0f})"
-                out.append(("cell", "base" if leader else None,
+                # No name on the point: the legend already binds marker to cell,
+                # and repeating it three times per panel is the label clutter
+                # the ladders genuinely need and these cells do not.  The rungs
+                # keep theirs because L12 / S50 carry a VALUE the legend cannot
+                # state — it names the ladder, not which rung is which.  The
+                # only thing left worth printing is a run count, and only while
+                # the cell is still filling up.
+                tag = (f"n={n_runs(cfg, route):.0f}"
+                       if partial(cfg, route) else "")
+                out.append(("cell", anchor if leader else None,
                             [(tag, False, col, mk, not above, *got)]))
         return out
 
     allpts = [p for r in routes for _k, _a, pts in paths(r) for p in pts]
-    fmax = max([p[7] for p in allpts if p[7]] or [1.0])
+    # The anchor sits in no series — it is drawn on its own — so it has to be
+    # added by hand here or it takes no part in the scaling.  In the sweep
+    # figure that was invisible because the base cell is also a rung on both
+    # ladders; strip the ladders and the anchor is the ONLY point, and the axes
+    # would be computed from an empty list and place it off-panel.
+    anch = [a for a in (cell(anchor, r) for r in routes) if a]
+    fmax = max([p[7] for p in allpts if p[7]]
+               + [a[2] for a in anch if a[2]] or [1.0])
     # Room for the tags, which are drawn OUTSIDE the data range: the costliest
     # cell (MIPTAIL on the medium routes, ~95 s) is a wide label anchored to the
     # right of its marker, and autoscale would clip it against the spine.
@@ -2260,14 +2298,18 @@ def section_la_all():
     # The left margin is negative on purpose: the cheapest rung of each ladder
     # labels to the LEFT of its marker, and on a linear axis that rung sits
     # within a few seconds of the origin, so a hard zero clips the tag.
-    costs = [p[5] for p in allpts] or [1.0, 10.0]
+    costs = [p[5] for p in allpts] + [a[0] for a in anch] or [1.0, 10.0]
     xlim  = (-0.055 * max(costs), max(costs) * 1.16)
     # Same reason on y: the tallest rung (L12 on the medium routes) carries its
     # tag ABOVE the marker, and matplotlib's autoscale margin is not deep enough
     # to hold it under the spine.
-    quals = [p[6] for p in allpts] or [0.0, 1.0]
-    span  = (max(quals) - min(quals)) or 1.0
-    ylim  = (min(quals) - 0.16 * span, max(quals) + 0.16 * span)
+    quals = [p[6] for p in allpts] + [a[1] for a in anch] or [0.0, 1.0]
+    # Floor on the span: early in an experiment one or two cells can sit within
+    # a tenth of a point of each other, and an axis autoscaled to that reports
+    # a rounding difference as if it were the finding.
+    span  = max(max(quals) - min(quals), 2.0)
+    mid   = 0.5 * (max(quals) + min(quals))
+    ylim  = (mid - 0.66 * span, mid + 0.66 * span)
 
     fig, axs = plt.subplots(1, len(routes), figsize=(7.2, 2.9),
                             sharex=True, sharey=True)
@@ -2282,7 +2324,7 @@ def section_la_all():
     for ri, route in enumerate(routes):
         ax = axs[ri]
         got = paths(route)
-        base = cell("base", route)
+        base = cell(anchor, route)
         # A cell that exists but is under _MIN_N is reported here WITH its count,
         # so "too few runs to plot" is visibly different from "not launched".
         missing = [f"{tag or lbl} (n={n_runs(cfg, route):.0f})"
@@ -2343,7 +2385,7 @@ def section_la_all():
         # point in the panel is where clutter starts.
         if base:
             c, q, f = base
-            ax.plot(c, q, "o", ms=5.6,
+            ax.plot(c, q, by_cfg.get(anchor, (None, None, None, "o"))[3], ms=5.6,
                     mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
                     mec=_LA_HUE_CELL, mew=1.4, zorder=6)
         if missing:
@@ -2353,7 +2395,7 @@ def section_la_all():
             ax.text(0.985, 0.965, "pending: " + ", ".join(missing),
                     transform=ax.transAxes, ha="right", va="top",
                     fontsize=5.8, color=MUT, style="italic")
-        if not got:
+        if not got and not base:
             ax.text(0.5, 0.5, "pending", ha="center", va="center",
                     fontsize=7.5, color=MUT, style="italic",
                     transform=ax.transAxes)
@@ -2379,10 +2421,12 @@ def section_la_all():
                           ms=5.0, mfc="white", mec=_LA_HUE_SCEN, mew=1.1)]
     labels  = [r"horizon ladder $L$ (h), $|\Xi| = 25$",
                r"scenario ladder $|\Xi|$, $L = 24$ h"]
+    if not ladders:
+        handles, labels = [], []
     # Every declared cell is listed whether or not it has runs yet, so the
     # legend states the intended design and the panels say how much of it has
     # landed.  The base cell shows as a bare marker, variants with their leader.
-    for _cfg, _tag, lbl, mk, col, _ab, leader in _LA_ALL_CELLS:
+    for _cfg, _tag, lbl, mk, col, _ab, leader in cells_all:
         handles.append(plt.Line2D(
             # Cells without a leader key as a bare marker.  ls must be "none"
             # and not ":" at lw=0 — matplotlib rejects a dash pattern whose
@@ -2416,7 +2460,53 @@ def section_la_all():
     _cb.outline.set_linewidth(0.3)
     _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
     _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
-    _save(fig, "additional_la_all")
+    _save(fig, outname)
+
+
+
+# ── the cab-hardware experiment (LOCAL) ──────────────────────────────────────
+# Same plane, same encoding, different question.  The sweep asks how the policy
+# should be CONFIGURED and is run on the cluster; this one asks what the chosen
+# configuration COSTS on the kind of machine a driver would actually have, and
+# is run on a handful of instances on one local machine.  The two must not share
+# an axis pair or a CSV — the numbers are not commensurable, because the whole
+# point is that the hardware differs — so this reads its own file and draws its
+# own figure, and the sweep can never be moved by a run landing here.
+#
+# No ladders: horizon and scenario count are settled by the sweep and held at
+# the base cell throughout.  What varies is the subproblem solver and the break
+# regime, which is the 2x2 the operational claim rests on.  The LP arm is the
+# anchor the other three are read against, exactly as the base cell is in the
+# sweep figure.
+_LA_LOCAL_CELLS = [
+    # cfg key             panel tag        legend label            mark colour   above leader
+    ("LOCAL",             "LP",            r"LP subpr.",
+     "o", _LA_HUE_CELL, True,  False),
+    ("LOCAL+MIP",         "MILP",          r"MILP subpr.",
+     "D", _LA_HUE_CELL, True,  True),
+    ("LOCAL+NOSPLIT",     "LP no-split",   r"LP subpr., no split break",
+     "^", _LA_HUE_CELL, True,  True),
+    ("LOCAL+MIP+NOSPLIT", "MILP no-split", r"MILP subpr., no split break",
+     "v", _LA_HUE_CELL, False, True),
+]
+
+
+def section_la_local():
+    """§8.3 — the same cost/quality plane for the cab-hardware (LOCAL) runs.
+
+    Mostly empty until those runs land; every declared cell still draws its
+    legend entry and reports itself as pending, which is the point — the figure
+    states the intended 2x2 before the evidence for it exists.
+    """
+    section_la_all(csv_name="additional_la_local_stats.csv",
+                   cell_decl=_LA_LOCAL_CELLS,
+                   ladders=False,
+                   anchor="LOCAL",
+                   outname="additional_la_local",
+                   banner="cab-hardware cost/quality plane (LOCAL)",
+                   # a timing probe is a few instances on purpose; one run is
+                   # already the measurement, not a sample of one
+                   min_n=1)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2624,6 +2714,7 @@ _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
                  grid=section_grid,
                  la=section_la,
                  la_all=section_la_all,
+                 la_local=section_la_local,
                  # both effect measures: route duration and the penalised
                  # objective the model actually minimises
                  la_policy=lambda: (section_la_policy("dur"),
