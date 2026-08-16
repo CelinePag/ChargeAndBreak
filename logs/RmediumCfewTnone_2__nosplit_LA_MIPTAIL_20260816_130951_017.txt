@@ -1,0 +1,31 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-16 15:49:50)
+  Instance : RmediumCfewTnone_2__nosplit   run_id=RmediumCfewTnone_2__nosplit_LA_MIPTAIL_20260816_130951_017
+  Route    : 92 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+
+[LA] stop 1 (LAYBY)  t=8.296h  soc=478kWh  cd=0.30h  sd=0.30h  sw=0.30h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [1->46]  travel=11.67h +1rest  3 actions × 25 scen  8w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   32.148h (0.193h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (14.6s)
+  y=0  brk=0    rst=r2  41.300h (0.192h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (24.2s)
+  y=0  brk=b45  rst=0   33.073h (0.165h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (16.4s)
+     [DIAG] max per-scenario delta spread across actions: 16.01 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=8.296h  td=8.296h  (mean=32.148h)  55.3s
+
+[LA] stop 2 (LAYBY)  t=8.537h  soc=453kWh  cd=0.54h  sd=0.54h  sw=0.54h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [2->47]  travel=11.68h +1rest  3 actions × 25 scen  8w  [mean,mip]  pruned=1  ws=prev
+     [FREE-MIP]  obj=32.371h  2.3s  ws=no  1344v/2458c
+  y=0  brk=0    rst=0   32.462h (0.171h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (15.7s)
+  y=0  brk=0    rst=r2  41.629h (0.187h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (23.7s)
+  y=0  brk=b45  rst=0   33.399h (0.177h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (17.1s)
+     [DIAG] max per-scenario delta spread across actions: 12.45 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=8.537h  td=8.537h  (mean=32.462h)  58.8s
+
+[LA] stop 3 (CS)  t=8.792h  soc=428kWh  cd=0.79h  sd=0.79h  sw=0.79h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [3->48]  travel=11.67h +1rest  6 actions × 25 scen  8w  [mean,mip]  pruned=2  ws=prev
+     [FREE-MIP]  obj=32.741h  5.4s  ws=no  1344v/2457c
