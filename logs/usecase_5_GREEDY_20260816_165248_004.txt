@@ -1,0 +1,477 @@
+=================================================================
+  GREEDY SIMULATION START   (2026-08-16 16:52:48)
+  Instance : usecase — real long-haul tour, 3339 km, 7 customers, 43 CS, 64 laybys (synthetic travel-time realisation)   run_id=usecase_5_GREEDY_20260816_165248_004
+  Route    : 115 stops  departure=8:00
+  Settings : cv=0.15  guard_q=0.95  safety=10%  supervised=False
+=================================================================
+
+  stop   0 (ORIG)  t=8.000h  soc=500kWh  cd=0.00  sd=0.00  sw=0.00  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.092h  E_act=10.5kWh  -> soc_dep=500kWh
+
+  stop   1 (CUST)  t=8.092h  soc=489kWh  cd=0.09  sd=0.09  sw=0.09  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈71min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.657h  E_act=77.2kWh  -> soc_dep=489kWh
+
+  stop   2 (CUST)  t=9.932h  soc=412kWh  cd=0.75  sd=0.75  sw=1.93  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈74min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.851h  E_act=93.1kWh  -> soc_dep=412kWh
+
+  stop   3 (LAYBY)  t=12.016h  soc=319kWh  cd=1.60  sd=1.60  sw=4.02  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.580h  E_act=57.7kWh  -> soc_dep=319kWh
+
+  stop   4 (LAYBY)  t=12.597h  soc=261kWh  cd=2.18  sd=2.18  sw=4.60  phi=0  r2=0
+     -> FERRY: forced 3.77 h crossing (counts as break)  y=0  brk=b45  rst=---
+     dwell≈236min  (tauc=0m  taub=45m  taur=0m  tauq=0m)  D_act=0.826h  E_act=68.3kWh  -> soc_dep=261kWh
+
+  stop   5 (CS)  t=17.359h  soc=193kWh  cd=0.83  sd=3.01  sw=5.59  phi=0  r2=0
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈85min  (tauc=65m  taub=0m  taur=0m  tauq=9m)  D_act=0.169h  E_act=17.7kWh  -> soc_dep=500kWh
+
+  stop   6 (LAYBY)  t=18.942h  soc=482kWh  cd=0.17  sd=3.18  sw=6.08  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.930h  E_act=104.6kWh  -> soc_dep=482kWh
+
+  stop   7 (CS)  t=19.871h  soc=378kWh  cd=1.10  sd=4.11  sw=7.01  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.525h  E_act=60.1kWh  -> soc_dep=378kWh
+
+  stop   8 (CS)  t=20.397h  soc=318kWh  cd=1.62  sd=4.63  sw=7.54  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.375h  E_act=34.7kWh  -> soc_dep=318kWh
+
+  stop   9 (CS)  t=20.771h  soc=283kWh  cd=2.00  sd=5.01  sw=7.91  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.077h  E_act=5.2kWh  -> soc_dep=283kWh
+
+  stop  10 (LAYBY)  t=20.848h  soc=278kWh  cd=2.08  sd=5.08  sw=7.99  phi=0  r2=0
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.394h  E_act=40.2kWh  -> soc_dep=278kWh
+
+  stop  11 (CS)  t=21.242h  soc=237kWh  cd=2.47  sd=5.48  sw=8.38  phi=0  r2=0
+     -> MUST-REST (R2) [spread 15.69h > 15h, +charge]  y=1  brk=---  rst=r2
+     dwell≈622min  (tauc=58m  taub=0m  taur=540m  tauq=6m)  D_act=0.666h  E_act=77.9kWh  -> soc_dep=500kWh
+
+  stop  12 (LAYBY)  t=32.271h  soc=422kWh  cd=0.67  sd=0.67  sw=0.67  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.799h  E_act=92.3kWh  -> soc_dep=422kWh
+
+  stop  13 (LAYBY)  t=33.071h  soc=330kWh  cd=1.47  sd=1.47  sw=1.47  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.882h  E_act=61.0kWh  -> soc_dep=330kWh
+
+  stop  14 (CS)  t=33.953h  soc=269kWh  cd=2.35  sd=2.35  sw=2.35  phi=0  r2=1
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈97min  (tauc=52m  taub=0m  taur=0m  tauq=11m)  D_act=0.060h  E_act=6.2kWh  -> soc_dep=500kWh
+
+  stop  15 (LAYBY)  t=35.632h  soc=494kWh  cd=0.06  sd=2.41  sw=3.15  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=1.066h  E_act=126.7kWh  -> soc_dep=494kWh
+
+  stop  16 (LAYBY)  t=36.698h  soc=367kWh  cd=1.13  sd=3.47  sw=4.22  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.112h  E_act=12.0kWh  -> soc_dep=367kWh
+
+  stop  17 (LAYBY)  t=36.810h  soc=355kWh  cd=1.24  sd=3.58  sw=4.33  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.521h  E_act=60.8kWh  -> soc_dep=355kWh
+
+  stop  18 (LAYBY)  t=37.331h  soc=294kWh  cd=1.76  sd=4.11  sw=4.85  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.158h  E_act=17.9kWh  -> soc_dep=294kWh
+
+  stop  19 (LAYBY)  t=37.489h  soc=276kWh  cd=1.92  sd=4.26  sw=5.01  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.162h  E_act=18.1kWh  -> soc_dep=276kWh
+
+  stop  20 (LAYBY)  t=37.651h  soc=258kWh  cd=2.08  sd=4.43  sw=5.17  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.105h  E_act=12.0kWh  -> soc_dep=258kWh
+
+  stop  21 (LAYBY)  t=37.756h  soc=246kWh  cd=2.18  sd=4.53  sw=5.28  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.170h  E_act=16.4kWh  -> soc_dep=246kWh
+
+  stop  22 (LAYBY)  t=37.926h  soc=230kWh  cd=2.35  sd=4.70  sw=5.45  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.260h  E_act=27.8kWh  -> soc_dep=230kWh
+
+  stop  23 (LAYBY)  t=38.185h  soc=202kWh  cd=2.61  sd=4.96  sw=5.70  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.264h  E_act=29.8kWh  -> soc_dep=202kWh
+
+  stop  24 (LAYBY)  t=38.449h  soc=172kWh  cd=2.88  sd=5.22  sw=5.97  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.275h  E_act=27.4kWh  -> soc_dep=172kWh
+
+  stop  25 (LAYBY)  t=38.724h  soc=145kWh  cd=3.15  sd=5.50  sw=6.24  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.226h  E_act=20.5kWh  -> soc_dep=145kWh
+
+  stop  26 (LAYBY)  t=38.950h  soc=124kWh  cd=3.38  sd=5.73  sw=6.47  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.050h  E_act=5.9kWh  -> soc_dep=124kWh
+
+  stop  27 (CS)  t=39.000h  soc=119kWh  cd=3.43  sd=5.77  sw=6.52  phi=0  r2=1
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈107min  (tauc=78m  taub=0m  taur=0m  tauq=4m)  D_act=0.064h  E_act=7.0kWh  -> soc_dep=500kWh
+
+  stop  28 (LAYBY)  t=40.840h  soc=493kWh  cd=0.06  sd=5.84  sw=7.06  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.100h  E_act=11.6kWh  -> soc_dep=493kWh
+
+  stop  29 (CS)  t=40.940h  soc=481kWh  cd=0.16  sd=5.94  sw=7.16  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.224h  E_act=24.3kWh  -> soc_dep=481kWh
+
+  stop  30 (CS)  t=41.164h  soc=457kWh  cd=0.39  sd=6.16  sw=7.38  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.046h  E_act=5.4kWh  -> soc_dep=457kWh
+
+  stop  31 (CS)  t=41.210h  soc=452kWh  cd=0.43  sd=6.21  sw=7.43  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.109h  E_act=11.6kWh  -> soc_dep=452kWh
+
+  stop  32 (CS)  t=41.319h  soc=440kWh  cd=0.54  sd=6.32  sw=7.53  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.052h  E_act=5.6kWh  -> soc_dep=440kWh
+
+  stop  33 (CS)  t=41.371h  soc=435kWh  cd=0.60  sd=6.37  sw=7.59  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.366h  E_act=40.3kWh  -> soc_dep=435kWh
+
+  stop  34 (CS)  t=41.737h  soc=394kWh  cd=0.96  sd=6.74  sw=7.95  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.443h  E_act=51.3kWh  -> soc_dep=394kWh
+
+  stop  35 (LAYBY)  t=42.180h  soc=343kWh  cd=1.40  sd=7.18  sw=8.40  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.556h  E_act=61.7kWh  -> soc_dep=343kWh
+
+  stop  36 (CS)  t=42.736h  soc=281kWh  cd=1.96  sd=7.73  sw=8.95  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.359h  E_act=41.8kWh  -> soc_dep=281kWh
+
+  stop  37 (CS)  t=43.095h  soc=239kWh  cd=2.32  sd=8.09  sw=9.31  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.245h  E_act=28.8kWh  -> soc_dep=239kWh
+
+  stop  38 (LAYBY)  t=43.340h  soc=211kWh  cd=2.56  sd=8.34  sw=9.56  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.101h  E_act=10.4kWh  -> soc_dep=211kWh
+
+  stop  39 (CS)  t=43.441h  soc=200kWh  cd=2.67  sd=8.44  sw=9.66  phi=0  r2=1
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.271h  E_act=31.5kWh  -> soc_dep=200kWh
+
+  stop  40 (CUST)  t=43.712h  soc=169kWh  cd=2.94  sd=8.71  sw=9.93  phi=0  r2=1
+     -> MUST-REST (R2) [spread 15.79h > 15h]      y=0  brk=---  rst=r2
+     dwell≈658min  (tauc=0m  taub=0m  taur=540m  tauq=0m)  D_act=0.099h  E_act=8.1kWh  -> soc_dep=169kWh
+
+  stop  41 (CS)  t=54.778h  soc=161kWh  cd=0.10  sd=0.10  sw=0.10  phi=0  r2=2
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈96min  (tauc=71m  taub=0m  taur=0m  tauq=15m)  D_act=0.119h  E_act=11.1kWh  -> soc_dep=500kWh
+
+  stop  42 (LAYBY)  t=56.494h  soc=489kWh  cd=0.12  sd=0.22  sw=0.63  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.520h  E_act=62.2kWh  -> soc_dep=489kWh
+
+  stop  43 (LAYBY)  t=57.015h  soc=427kWh  cd=0.64  sd=0.74  sw=1.15  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.230h  E_act=23.5kWh  -> soc_dep=427kWh
+
+  stop  44 (LAYBY)  t=57.245h  soc=403kWh  cd=0.87  sd=0.97  sw=1.38  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.644h  E_act=74.9kWh  -> soc_dep=403kWh
+
+  stop  45 (CUST)  t=57.888h  soc=328kWh  cd=1.51  sd=1.61  sw=2.03  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈106min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.161h  E_act=17.0kWh  -> soc_dep=328kWh
+
+  stop  46 (CS)  t=59.816h  soc=311kWh  cd=1.67  sd=1.77  sw=3.95  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.518h  E_act=54.7kWh  -> soc_dep=311kWh
+
+  stop  47 (LAYBY)  t=60.334h  soc=257kWh  cd=2.19  sd=2.29  sw=4.47  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.391h  E_act=46.8kWh  -> soc_dep=257kWh
+
+  stop  48 (CS)  t=60.725h  soc=210kWh  cd=2.58  sd=2.68  sw=4.86  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.260h  E_act=28.4kWh  -> soc_dep=210kWh
+
+  stop  49 (LAYBY)  t=60.985h  soc=181kWh  cd=2.84  sd=2.94  sw=5.12  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.250h  E_act=27.4kWh  -> soc_dep=181kWh
+
+  stop  50 (CS)  t=61.235h  soc=154kWh  cd=3.09  sd=3.19  sw=5.37  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.059h  E_act=5.2kWh  -> soc_dep=154kWh
+
+  stop  51 (CS)  t=61.295h  soc=149kWh  cd=3.15  sd=3.25  sw=5.43  phi=0  r2=2
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈108min  (tauc=73m  taub=0m  taur=0m  tauq=5m)  D_act=0.103h  E_act=12.0kWh  -> soc_dep=500kWh
+
+  stop  52 (CS)  t=63.197h  soc=488kWh  cd=0.10  sd=3.35  sw=6.12  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.056h  E_act=5.2kWh  -> soc_dep=488kWh
+
+  stop  53 (CS)  t=63.252h  soc=483kWh  cd=0.16  sd=3.41  sw=6.17  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.217h  E_act=25.2kWh  -> soc_dep=483kWh
+
+  stop  54 (CS)  t=63.469h  soc=458kWh  cd=0.38  sd=3.63  sw=6.39  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.218h  E_act=24.1kWh  -> soc_dep=458kWh
+
+  stop  55 (CS)  t=63.687h  soc=434kWh  cd=0.59  sd=3.84  sw=6.61  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.159h  E_act=18.3kWh  -> soc_dep=434kWh
+
+  stop  56 (LAYBY)  t=63.847h  soc=415kWh  cd=0.75  sd=4.00  sw=6.77  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.197h  E_act=14.5kWh  -> soc_dep=415kWh
+
+  stop  57 (CS)  t=64.043h  soc=401kWh  cd=0.95  sd=4.20  sw=6.96  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.331h  E_act=31.9kWh  -> soc_dep=401kWh
+
+  stop  58 (CS)  t=64.374h  soc=369kWh  cd=1.28  sd=4.53  sw=7.29  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.087h  E_act=4.2kWh  -> soc_dep=369kWh
+
+  stop  59 (CS)  t=64.462h  soc=365kWh  cd=1.37  sd=4.62  sw=7.38  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.530h  E_act=50.3kWh  -> soc_dep=365kWh
+
+  stop  60 (LAYBY)  t=64.992h  soc=314kWh  cd=1.90  sd=5.15  sw=7.91  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.239h  E_act=21.6kWh  -> soc_dep=314kWh
+
+  stop  61 (CS)  t=65.231h  soc=293kWh  cd=2.14  sd=5.39  sw=8.15  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.285h  E_act=25.7kWh  -> soc_dep=293kWh
+
+  stop  62 (LAYBY)  t=65.516h  soc=267kWh  cd=2.42  sd=5.67  sw=8.44  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.098h  E_act=11.1kWh  -> soc_dep=267kWh
+
+  stop  63 (LAYBY)  t=65.614h  soc=256kWh  cd=2.52  sd=5.77  sw=8.53  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.064h  E_act=6.9kWh  -> soc_dep=256kWh
+
+  stop  64 (LAYBY)  t=65.678h  soc=249kWh  cd=2.58  sd=5.83  sw=8.60  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.388h  E_act=29.7kWh  -> soc_dep=249kWh
+
+  stop  65 (CS)  t=66.066h  soc=219kWh  cd=2.97  sd=6.22  sw=8.99  phi=0  r2=2
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈84min  (tauc=61m  taub=0m  taur=0m  tauq=9m)  D_act=0.106h  E_act=11.8kWh  -> soc_dep=500kWh
+
+  stop  66 (LAYBY)  t=67.571h  soc=488kWh  cd=0.11  sd=6.33  sw=9.47  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.174h  E_act=18.0kWh  -> soc_dep=488kWh
+
+  stop  67 (LAYBY)  t=67.745h  soc=470kWh  cd=0.28  sd=6.50  sw=9.65  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.113h  E_act=12.0kWh  -> soc_dep=470kWh
+
+  stop  68 (LAYBY)  t=67.858h  soc=458kWh  cd=0.39  sd=6.62  sw=9.76  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.412h  E_act=39.4kWh  -> soc_dep=458kWh
+
+  stop  69 (LAYBY)  t=68.270h  soc=419kWh  cd=0.81  sd=7.03  sw=10.17  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.513h  E_act=56.8kWh  -> soc_dep=419kWh
+
+  stop  70 (LAYBY)  t=68.784h  soc=362kWh  cd=1.32  sd=7.54  sw=10.69  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.166h  E_act=17.9kWh  -> soc_dep=362kWh
+
+  stop  71 (LAYBY)  t=68.949h  soc=344kWh  cd=1.48  sd=7.71  sw=10.85  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.177h  E_act=18.1kWh  -> soc_dep=344kWh
+
+  stop  72 (LAYBY)  t=69.126h  soc=326kWh  cd=1.66  sd=7.88  sw=11.03  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.100h  E_act=10.5kWh  -> soc_dep=326kWh
+
+  stop  73 (LAYBY)  t=69.226h  soc=315kWh  cd=1.76  sd=7.98  sw=11.13  phi=0  r2=2
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.207h  E_act=23.7kWh  -> soc_dep=315kWh
+
+  stop  74 (LAYBY)  t=69.432h  soc=292kWh  cd=1.97  sd=8.19  sw=11.34  phi=0  r2=2
+     -> MUST-REST (R2)                            y=0  brk=---  rst=r2
+     dwell≈550min  (tauc=0m  taub=0m  taur=540m  tauq=0m)  D_act=1.531h  E_act=136.3kWh  -> soc_dep=292kWh
+
+  stop  75 (LAYBY)  t=80.130h  soc=155kWh  cd=1.53  sd=1.53  sw=1.53  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.100h  E_act=11.8kWh  -> soc_dep=155kWh
+
+  stop  76 (CS)  t=80.230h  soc=144kWh  cd=1.63  sd=1.63  sw=1.63  phi=0  r2=3
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈104min  (tauc=74m  taub=0m  taur=0m  tauq=6m)  D_act=0.133h  E_act=15.6kWh  -> soc_dep=500kWh
+
+  stop  77 (CUST)  t=82.099h  soc=484kWh  cd=0.13  sd=1.76  sw=2.27  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈40min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.919h  E_act=107.7kWh  -> soc_dep=484kWh
+
+  stop  78 (CUST)  t=83.684h  soc=377kWh  cd=1.05  sd=2.68  sw=3.85  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈30min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.335h  E_act=29.2kWh  -> soc_dep=377kWh
+
+  stop  79 (LAYBY)  t=84.519h  soc=347kWh  cd=1.39  sd=3.02  sw=4.69  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.184h  E_act=20.3kWh  -> soc_dep=347kWh
+
+  stop  80 (LAYBY)  t=84.703h  soc=327kWh  cd=1.57  sd=3.20  sw=4.87  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.049h  E_act=5.7kWh  -> soc_dep=327kWh
+
+  stop  81 (CUST)  t=84.752h  soc=321kWh  cd=1.62  sd=3.25  sw=4.92  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈52min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=1.134h  E_act=132.1kWh  -> soc_dep=321kWh
+
+  stop  82 (LAYBY)  t=86.753h  soc=189kWh  cd=2.75  sd=4.39  sw=6.92  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.167h  E_act=16.6kWh  -> soc_dep=189kWh
+
+  stop  83 (CS)  t=86.920h  soc=173kWh  cd=2.92  sd=4.55  sw=7.09  phi=0  r2=3
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈85min  (tauc=69m  taub=0m  taur=0m  tauq=4m)  D_act=0.495h  E_act=57.5kWh  -> soc_dep=500kWh
+
+  stop  84 (CS)  t=88.832h  soc=443kWh  cd=0.50  sd=5.05  sw=7.85  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.099h  E_act=11.6kWh  -> soc_dep=443kWh
+
+  stop  85 (LAYBY)  t=88.931h  soc=431kWh  cd=0.59  sd=5.15  sw=7.95  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.774h  E_act=73.9kWh  -> soc_dep=431kWh
+
+  stop  86 (CS)  t=89.705h  soc=357kWh  cd=1.37  sd=5.92  sw=8.72  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.557h  E_act=65.0kWh  -> soc_dep=357kWh
+
+  stop  87 (CS)  t=90.262h  soc=292kWh  cd=1.92  sd=6.48  sw=9.28  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.059h  E_act=6.5kWh  -> soc_dep=292kWh
+
+  stop  88 (LAYBY)  t=90.320h  soc=286kWh  cd=1.98  sd=6.53  sw=9.34  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.317h  E_act=33.7kWh  -> soc_dep=286kWh
+
+  stop  89 (LAYBY)  t=90.637h  soc=252kWh  cd=2.30  sd=6.85  sw=9.66  phi=0  r2=3
+     -> MUST-REST (R1) [spread 14.87h > 13h]      y=0  brk=---  rst=r1
+     dwell≈670min  (tauc=0m  taub=0m  taur=660m  tauq=0m)  D_act=0.867h  E_act=96.7kWh  -> soc_dep=252kWh
+
+  stop  90 (CS)  t=102.671h  soc=155kWh  cd=0.87  sd=0.87  sw=0.87  phi=0  r2=3
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈100min  (tauc=72m  taub=0m  taur=0m  tauq=14m)  D_act=0.158h  E_act=17.0kWh  -> soc_dep=500kWh
+
+  stop  91 (LAYBY)  t=104.491h  soc=483kWh  cd=0.16  sd=1.03  sw=1.49  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.245h  E_act=18.9kWh  -> soc_dep=483kWh
+
+  stop  92 (LAYBY)  t=104.736h  soc=464kWh  cd=0.40  sd=1.27  sw=1.73  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.249h  E_act=28.0kWh  -> soc_dep=464kWh
+
+  stop  93 (CS)  t=104.985h  soc=436kWh  cd=0.65  sd=1.52  sw=1.98  phi=0  r2=3
+     -> MUST-CHARGE                               y=1  brk=---  rst=---
+     dwell≈40min  (tauc=19m  taub=0m  taur=0m  tauq=5m)  D_act=1.338h  E_act=156.7kWh  -> soc_dep=500kWh
+
+  stop  94 (LAYBY)  t=106.994h  soc=343kWh  cd=1.99  sd=2.86  sw=3.99  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.192h  E_act=22.9kWh  -> soc_dep=343kWh
+
+  stop  95 (LAYBY)  t=107.186h  soc=320kWh  cd=2.18  sd=3.05  sw=4.18  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=1.296h  E_act=141.2kWh  -> soc_dep=320kWh
+
+  stop  96 (CS)  t=108.482h  soc=179kWh  cd=3.48  sd=4.35  sw=5.48  phi=0  r2=3
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈113min  (tauc=68m  taub=0m  taur=0m  tauq=14m)  D_act=0.225h  E_act=24.9kWh  -> soc_dep=500kWh
+
+  stop  97 (LAYBY)  t=110.593h  soc=475kWh  cd=0.23  sd=4.57  sw=6.46  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.480h  E_act=49.0kWh  -> soc_dep=475kWh
+
+  stop  98 (LAYBY)  t=111.073h  soc=426kWh  cd=0.71  sd=5.05  sw=6.94  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.412h  E_act=46.0kWh  -> soc_dep=426kWh
+
+  stop  99 (LAYBY)  t=111.485h  soc=380kWh  cd=1.12  sd=5.46  sw=7.35  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.436h  E_act=48.7kWh  -> soc_dep=380kWh
+
+  stop 100 (LAYBY)  t=111.920h  soc=331kWh  cd=1.55  sd=5.90  sw=7.79  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.265h  E_act=30.2kWh  -> soc_dep=331kWh
+
+  stop 101 (LAYBY)  t=112.186h  soc=301kWh  cd=1.82  sd=6.16  sw=8.05  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.669h  E_act=75.1kWh  -> soc_dep=301kWh
+
+  stop 102 (CS)  t=112.855h  soc=226kWh  cd=2.49  sd=6.83  sw=8.72  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.105h  E_act=10.9kWh  -> soc_dep=226kWh
+
+  stop 103 (LAYBY)  t=112.960h  soc=215kWh  cd=2.59  sd=6.94  sw=8.83  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.280h  E_act=31.0kWh  -> soc_dep=215kWh
+
+  stop 104 (LAYBY)  t=113.239h  soc=184kWh  cd=2.87  sd=7.22  sw=9.10  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.062h  E_act=6.5kWh  -> soc_dep=184kWh
+
+  stop 105 (CS)  t=113.301h  soc=178kWh  cd=2.93  sd=7.28  sw=9.17  phi=0  r2=3
+     -> MUST-REST (R1) [spread 13.59h > 13h]      y=0  brk=---  rst=r1
+     dwell≈672min  (tauc=0m  taub=0m  taur=660m  tauq=0m)  D_act=0.472h  E_act=28.2kWh  -> soc_dep=178kWh
+
+  stop 106 (CS)  t=124.973h  soc=149kWh  cd=0.47  sd=0.47  sw=0.47  phi=0  r2=3
+     -> MUST-CHARGE + free b45                    y=1  brk=b45  rst=---
+     dwell≈98min  (tauc=73m  taub=0m  taur=0m  tauq=13m)  D_act=0.556h  E_act=54.6kWh  -> soc_dep=500kWh
+
+  stop 107 (CS)  t=127.160h  soc=445kWh  cd=0.56  sd=1.03  sw=1.44  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.061h  E_act=7.3kWh  -> soc_dep=445kWh
+
+  stop 108 (LAYBY)  t=127.221h  soc=438kWh  cd=0.62  sd=1.09  sw=1.50  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.273h  E_act=17.8kWh  -> soc_dep=438kWh
+
+  stop 109 (LAYBY)  t=127.494h  soc=420kWh  cd=0.89  sd=1.36  sw=1.78  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.266h  E_act=26.8kWh  -> soc_dep=420kWh
+
+  stop 110 (LAYBY)  t=127.760h  soc=394kWh  cd=1.16  sd=1.63  sw=2.04  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.145h  E_act=16.7kWh  -> soc_dep=394kWh
+
+  stop 111 (LAYBY)  t=127.905h  soc=377kWh  cd=1.30  sd=1.77  sw=2.19  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.454h  E_act=40.3kWh  -> soc_dep=377kWh
+
+  stop 112 (CS)  t=128.359h  soc=337kWh  cd=1.75  sd=2.23  sw=2.64  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.569h  E_act=60.4kWh  -> soc_dep=337kWh
+
+  stop 113 (LAYBY)  t=128.928h  soc=276kWh  cd=2.32  sd=2.80  sw=3.21  phi=0  r2=3
+     -> PASS                                      y=0  brk=---  rst=---
+     dwell≈-0min  (tauc=0m  taub=0m  taur=0m  tauq=0m)  D_act=0.225h  E_act=25.5kWh  -> soc_dep=276kWh
+
+  stop 114 (LAYBY)  t=129.153h  soc=251kWh  cd=2.55  sd=3.02  sw=3.44  phi=0  r2=3
+     -> FERRY: forced 4.94 h crossing (counts as break)  y=0  brk=b45  rst=---
+     dwell≈306min  (tauc=0m  taub=45m  taur=0m  tauq=0m)  D_act=0.751h  E_act=85.0kWh  -> soc_dep=251kWh
+
+=================================================================
+  GREEDY COMPLETE
+  Arrival (absolute) : 135.011 h  (135:00)
+  Travel duration    : 127.011 h
+  Charges  : 13  breaks: 13  rests: 5  sync: 12
+  Wall-clock         : 0.0 s
+=================================================================
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/usecase_5_GREEDY_20260816_165248_004_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/usecase_5_GREEDY_20260816_165248_004.json
