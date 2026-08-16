@@ -222,6 +222,13 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
     is_CS     = stop in K_set
     batt_full = state.e_arr > 0.98 * full_data["Ecap"] or stop >= full_data["N"]
 
+    # Sea crossing: the vehicle is aboard for a known duration, so there is
+    # exactly one action and no decision to make (mirrors the x_b45 = 1 /
+    # taub = T_cross fixing in the MILP).  BEHDV substitutes the crossing
+    # duration for the 45-minute minimum when it executes this action.
+    if stop in {int(k) for k in (full_data.get("ferry") or {})}:
+        return [dict(y=0, break_type="b45", rest_type=None)]
+
     if charge_only:
         actions = [dict(y=0, break_type=None, rest_type=None)]
         if is_CS and not batt_full:

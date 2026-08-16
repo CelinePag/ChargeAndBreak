@@ -45,6 +45,7 @@ import re
 import shutil
 from collections import defaultdict
 from src import paths as _paths
+from src.output_analysis import run_cache
 
 ARCHIVE = _paths.archive()
 SOL_DIR = _paths.solutions()
@@ -82,12 +83,25 @@ def instance_index() -> dict[str, str]:
     return idx
 
 
+_INSTANCE_N: dict[str, int | None] = {}
+
+
 def instance_n(path: str) -> int | None:
+    """N of the instance at `path`, memoised.
+
+    Check F asks this once per oracle cache, and a handful of instances back
+    thousands of caches, so without the memo the audit re-parsed the same
+    instance files ~3 000 times.
+    """
+    if path in _INSTANCE_N:
+        return _INSTANCE_N[path]
     try:
         with open(path, "r", encoding="utf-8") as fh:
-            return int(json.load(fh)["instance"]["N"])
+            n = int(json.load(fh)["instance"]["N"])
     except Exception:
-        return None
+        n = None
+    _INSTANCE_N[path] = n
+    return n
 
 
 # ── audit ────────────────────────────────────────────────────────────────────
@@ -111,11 +125,12 @@ def audit():
     buckets: dict[str, list[str]] = defaultdict(list)
     latest: dict[tuple, tuple] = {}          # (title, alg, sup) -> (ts, path)
     params: dict[tuple, set] = defaultdict(set)
+    records: dict[str, dict] = {}            # path -> parsed run, for check H
 
-    for path in sorted(glob.glob(os.path.join(SOL_DIR, "*.json"))):
-        base = os.path.basename(path)
-        if base.startswith("oracle_"):
-            continue
+    # Parsed through run_cache: the corpus is read once per machine rather than
+    # once per reporting script (see src/output_analysis/run_cache.py).
+    for base, d in run_cache.load_runs(SOL_DIR):
+        path = os.path.join(SOL_DIR, base)
         m = _RUN_RE.match(base[:-5])
         if not m:
             continue
@@ -123,12 +138,10 @@ def audit():
         if alg == "ORACLE":       # writes a cache, not a run file
             continue
 
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                d = json.load(fh)
-        except Exception:
+        if "_error" in d:
             buckets["corrupt"].append(path)          # A
             continue
+        records[path] = d
 
         # The STORED field decides, not the file name.  Three pre-existing runs
         # carry a label-shaped segment in their run_id from a manual session
@@ -182,11 +195,10 @@ def audit():
         p = _KEY_PARAM.get(alg)
         if not p:
             continue
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                v = json.load(fh).get(p)
-        except Exception:
+        rec = records.get(path)
+        if rec is None:
             continue
+        v = rec.get(p)
         # A method-configuration sweep varies exactly the parameter this check
         # polices, so each label is its own scope: "LA/S25H12" must not be
         # reported as disagreeing with the base "LA/base" on n_scenarios.
@@ -198,24 +210,23 @@ def audit():
             scope = "base"
         params[(alg, scope)].add(str(v))
 
-    # F — oracle caches that do not match their instance
-    for path in sorted(glob.glob(os.path.join(SOL_DIR, "oracle_*.json"))):
-        title = os.path.basename(path)[7:-5]
+    # F — oracle caches that do not match their instance.  The cache stores the
+    # schedule LENGTH (_n_sol) rather than the schedule, which is all this check
+    # ever needed and keeps ~230 MB of oracle payload out of the audit.
+    for title, c in sorted(run_cache.load_oracles(SOL_DIR).items()):
+        path = os.path.join(SOL_DIR, f"oracle_{title}.json")
         ipath = idx.get(title)
         if ipath is None:
             buckets["oracle_orphan"].append(path)
             continue
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                c = json.load(fh)
-        except Exception:
+        if "_error" in c:
             buckets["corrupt"].append(path)
             continue
-        sol = c.get("sol") or []
-        if not sol:
+        n_sol = c.get("_n_sol") or 0
+        if not n_sol:
             continue                       # log-recovered cache: no schedule
         N = instance_n(ipath)
-        if N is not None and len(sol) != N + 1:
+        if N is not None and n_sol != N + 1:
             buckets["oracle_bad"].append(path)
 
     # SAFETY: only archive an unguarded greedy run when a guarded one survives

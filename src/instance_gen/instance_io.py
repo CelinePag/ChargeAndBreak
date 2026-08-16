@@ -585,6 +585,10 @@ def load_instance_json(filepath: str) -> tuple[dict, list, list, float]:
     # that JSON files generated before it still load and solve.
     _defaults = dict(
         L=[], M_lay={},
+        # {stop: crossing duration (h)} — layby nodes at which a break of
+        # exactly that duration is forced (sea crossings).  Empty for every
+        # synthetic instance.
+        ferry={},
         T_dead=None, hard_tw=False, beta=BETA_TW, allow_split=True,
         Tspr1=13.0, Tspr2=15.0, Twk60=60.0,
         rho_bar=3, ext_bar=2,

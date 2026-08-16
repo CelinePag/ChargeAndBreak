@@ -101,6 +101,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -763,32 +764,197 @@ def _fmt_seeds(seeds: list) -> str:
     return ",".join(parts)
 
 
+# Instance tags the LA report folds in as CELLS of its own sweep.  Deliberately
+# an allowlist, not "any tag": every one-at-a-time sensitivity axis also runs LA
+# on tagged copies (…__cs30, …__kw700, …__kwh300), and those are infrastructure
+# perturbations reported by section_sensitivity — pulling them onto the
+# configuration sweep would answer a different question with the same picture.
+# What belongs here is a change to the RULES the policy plans under, at
+# unchanged infrastructure: nosplit forbids the Art. 7 15'+30' split, so the
+# instance is physically the base case and only the legal action set moves.
+_LA_REGIMES = {"nosplit"}
+
+
+def _split_instance_tag(instance: str | None) -> tuple[str | None, str | None]:
+    """'RmediumCfewTnone_10__nosplit' -> ('RmediumCfewTnone_10', 'nosplit').
+
+    Sensitivity regimes run on TAGGED instance copies, so their route/window/
+    seed do not parse off the raw id and compile_solutions annotates them as
+    None.  Everything the LA report keys on has to come off the stripped stem.
+    """
+    if not instance or "__" not in instance:
+        return instance, None
+    stem, _, tag = instance.rpartition("__")
+    return stem, (tag or None)
+
+
+def _la_coords(rec, cs) -> tuple:
+    """(route, cust, window, seed, regime) for one LA run, tag-aware."""
+    stem, regime = _split_instance_tag(rec.get("instance"))
+    tags = cs._parse_instance_tags(stem)
+    return (tags["route_class"], tags["customers_class"],
+            tags["window_class"], _instance_seed(stem), regime)
+
+
+def _la_cell_tag(variant: str | None, regime: str | None,
+                 method: str = "LA") -> str:
+    """Config label for one cell: the tail solver crossed with the regime.
+
+    Two orthogonal things pick out an LA cell.  The VARIANT says what the
+    policy does (absent = the LP tail at the base configuration, MIPTAIL = the
+    MIP tail), and the instance TAG says which regime it runs under (absent =
+    the base instances, nosplit = Art. 7 split break forbidden).  They are
+    crossed rather than merged so that, e.g., MIPTAIL+NOSPLIT can never be
+    silently pooled into MIPTAIL — the collision that cost us a batch once
+    already.  A cell run with an explicit S25H24 tag is the base cell written
+    the long way, so it normalises onto it.
+    """
+    # Greedy is carried alongside the LA cells as the do-nothing reference —
+    # the policy the look-ahead has to beat to justify its compute — so it takes
+    # a cell of its own rather than being folded into the base cell, which is
+    # LA's own LP configuration.
+    cfg = (_norm_la_tag(variant or "base") if method == "LA"
+           else method.upper())
+    if cfg == f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g}":
+        cfg = "base"
+    if not regime:
+        return cfg
+    reg = regime.upper()
+    return reg if cfg == "base" else f"{cfg}+{reg}"
+
+
+def _regap_regimes_to_base_oracle(rows, cs) -> int:
+    """Re-measure regime runs against the UNRESTRICTED (base) hindsight optimum.
+
+    By default every run is scored against the oracle for its own instance id,
+    which for a …__nosplit copy is the oracle that was itself denied the split
+    break.  That answers "how well did the policy do given the rule", and it is
+    the wrong question here: scored that way a regime can look BETTER simply
+    because its optimum got worse, and the cells stop being comparable across
+    the plane.
+
+    Scoring against the base oracle instead makes every cell in the figure a
+    distance to one common reference — the best achievable with every option
+    available — so forbidding the split shows up as the loss it is.  This is
+    only legitimate because no_split is a PATCH axis: the copy has identical
+    geometry and identical realisations, so the base oracle is the optimum of
+    the very same instance under the unrestricted rules, not of a different one.
+    Do not extend this to a regen axis, where the instances genuinely differ.
+    """
+    tagged = []
+    for r in rows:
+        if r.get("method") != "LA":
+            continue
+        stem, regime = _split_instance_tag(r.get("instance"))
+        if regime in _LA_REGIMES:
+            tagged.append((r, r["instance"], stem))
+    if not tagged:
+        return 0
+    # Reuse the real annotator rather than restating its arithmetic: point each
+    # record at the base stem, let it resolve that oracle, then put the id back
+    # so the pairing keys downstream still identify the run's own instance.
+    for r, _orig, stem in tagged:
+        r["instance"] = stem
+    cs._annotate_gap_to_oracle([r for r, _o, _s in tagged], _paths.solutions())
+    for r, orig, _s in tagged:
+        r["instance"] = orig
+    return len(tagged)
+
+
 def _la_discover(rows, cs) -> dict:
     """Footprint of the LA sweep as ACTUALLY RUN: configs, combos, TW classes
     and seeds read off the stored variant runs.
 
-    Derived from the VARIANT rows only, never the base ones.  The base cell is
+    Derived from the SWEEP rows only, never the base ones.  The base cell is
     the pre-existing unlabelled runs and covers every seed and combo ever run,
     so discovering from it would widen the scope to instances no variant cell
     has, and the level column would then compare a wide base average against
     narrow variant averages — exactly the distortion the --seeds filter exists
     to prevent.
+
+    A sweep row is one carrying a --variant OR one running under a regime tag
+    (…__nosplit): the regime cell has no variant of its own — its LP arm is an
+    ordinary unlabelled run — but it is still a sweep cell rather than the base,
+    and leaving it out of discovery would filter its own runs away.
     """
     cfgs, combos, tws, seeds = set(), set(), set(), set()
     for r in rows:
         if r.get("method") != "LA" or r.get("status") != "OK":
             continue
-        if not r.get("variant"):            # base cell — not evidence of scope
+        route, cust, tw, seed, regime = _la_coords(r, cs)
+        if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue
-        route, cust = r.get("route_class"), r.get("customers_class")
-        seed = _instance_seed(r.get("instance"))
+        if not r.get("variant") and not regime:   # base cell — not evidence
+            continue
         if not route or not cust or seed is None:
             continue
-        cfgs.add(_norm_la_tag(r["variant"]))
+        cfgs.add(_la_cell_tag(r.get("variant"), regime))
         combos.add(f"R{route}C{cust}")
-        tws.add(r.get("window_class"))
+        tws.add(tw)
         seeds.add(seed)
     return dict(configs=cfgs, combos=combos, tws=tws - {None}, seeds=seeds)
+
+
+# Per-stop decision times are not persisted: runner.py keeps only the mean and
+# the max in metrics.  They ARE in the run log, though — each stop opens with a
+# header carrying its type and closes with a '-> CHOSEN ... <t>s' line — so the
+# CS-only mean is recoverable from logs/ without re-running anything.
+#
+# Why CS stops specifically: they are the ones where a decision actually has
+# branching structure (charge / how long / and the break-rest interaction on top
+# of it), so their cost is what an operator would feel at the stop.  Averaging
+# over every stop dilutes that with laybys and customers, which enumerate far
+# fewer actions and run about half as long.
+_LA_LOG_HDR    = re.compile(r"^\[LA\] stop (\d+) \((\w+)\)")
+_LA_LOG_CHOSEN = re.compile(r"-> CHOSEN .*?([\d.]+)s\s*$")
+_LA_CS_CACHE: dict = {}
+
+
+def _cs_decision_mean_s(run_id: str | None):
+    """Mean decision time over CS stops only, parsed from logs/<run_id>.txt.
+
+    Returns None when the log is missing or carries no CS stop, which _agg then
+    drops — the same treatment any other absent measurement gets.
+    """
+    if not run_id:
+        return None
+    if run_id in _LA_CS_CACHE:                  # pooled rows re-read the same runs
+        return _LA_CS_CACHE[run_id]
+    path = _paths.logs(f"{run_id}.txt")
+    out, cur = None, None
+    try:
+        vals = []
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                m = _LA_LOG_HDR.match(line)
+                if m:
+                    cur = m.group(2)
+                    continue
+                if cur == "CS":
+                    m = _LA_LOG_CHOSEN.search(line)
+                    if m:
+                        vals.append(float(m.group(1)))
+        # A forced rest short-circuits decide_stop and prints no CHOSEN line, so
+        # a stop can be missing here; the mean is over the CS stops that were
+        # actually decided, which is the quantity being reported.
+        out = (sum(vals) / len(vals)) if vals else None
+    except OSError:
+        out = None
+    _LA_CS_CACHE[run_id] = out
+    return out
+
+
+def _dec_cs(rec, cs):
+    """Decision time per CS stop for one run, whatever produced it.
+
+    LA prints a per-stop line and gets the real CS-only mean.  Greedy prints no
+    timing at all and does not need one: its decision is a rule evaluation that
+    measures 0.0 s to four decimals at every stop, CS or not, so the stored
+    all-stop mean is the same number to any precision this report can show.
+    """
+    if rec.get("method") == "LA":
+        return _cs_decision_mean_s(rec.get("run_id"))
+    return cs._get(rec, ("metrics", "decision_time_mean_s"))
 
 
 def cmd_la_report(args) -> None:
@@ -825,6 +991,9 @@ def cmd_la_report(args) -> None:
     rows = cs.load_solutions(_paths.solutions())
     cs._annotate_instance_tags(rows)
     cs._annotate_gap_to_oracle(rows, _paths.solutions())
+    n_regap = _regap_regimes_to_base_oracle(rows, cs)
+    if n_regap:
+        print(f"  regime runs re-scored against the base-case oracle: {n_regap}")
     cs._annotate_outcome(rows)
     rows, _ = cs._dedup_latest(rows)
 
@@ -833,9 +1002,15 @@ def cmd_la_report(args) -> None:
         print("  no LA variant runs found in solutions/ — nothing to report")
         return
 
-    wanted_cfg = ({_norm_la_tag(c.strip()) for c in args.configs.split(",") if c.strip()}
+    wanted_cfg = ({_la_cell_tag(c.strip(), None) for c in args.configs.split(",")
+                   if c.strip()}
                   if args.configs else set(found["configs"]))
     wanted_cfg.add("base")
+    wanted_cfg.add("GREEDY")      # the do-nothing reference, never swept
+    # A regime cell needs its own LP arm as the reference the MIP arm is read
+    # against, and that arm carries no --variant, so asking for MIPTAIL+NOSPLIT
+    # has to pull NOSPLIT in with it.
+    wanted_cfg |= {c.split("+", 1)[1] for c in list(wanted_cfg) if "+" in c}
     combos = set(args.combos.split(",")) if args.combos else found["combos"]
     tws    = set(args.tw.split(","))     if args.tw     else found["tws"]
     # The base cell is the pre-existing unlabelled runs, and those cover every
@@ -854,21 +1029,26 @@ def cmd_la_report(args) -> None:
 
     groups: dict = {}
     for r in rows:
-        if r.get("method") != "LA" or r.get("status") != "OK":
+        if r.get("method") not in ("LA", "greedy") or r.get("status") != "OK":
             continue
-        route, cust = r.get("route_class"), r.get("customers_class")
+        route, cust, tw, seed, regime = _la_coords(r, cs)
+        if regime and regime not in _LA_REGIMES:  # another axis's sweep
+            continue
         if not route or not cust:
             continue
         if f"R{route}C{cust}" not in combos:
             continue
-        tw = r.get("window_class")
         if tw not in tws:
             continue
-        if _instance_seed(r.get("instance")) not in seeds:
+        if seed not in seeds:
             continue
-        cfg = _norm_la_tag(r.get("variant") or "base")
+        cfg = _la_cell_tag(r.get("variant"), regime, r.get("method"))
         if cfg not in wanted_cfg:
             continue
+        # The annotation upstream reads these off the raw instance id, which is
+        # None for a tagged copy; downstream pairing keys on window_class, so
+        # write the stripped-stem value back before it is used.
+        r["window_class"] = tw
         groups.setdefault((cfg, route, tw), []).append(r)
 
     if not groups:
@@ -879,20 +1059,30 @@ def cmd_la_report(args) -> None:
         vals = [v for v in vals if v is not None]
         return (stat.median(vals) if vals else None), len(vals)
 
-    # Paired reference: base duration per instance, keyed the same way the
-    # variant rows are, so a missing base run drops the pair instead of
+    # Paired reference: the LP arm's duration per instance, keyed the same way
+    # the variant rows are, so a missing reference run drops the pair instead of
     # silently comparing against a different instance.
+    #
+    # Selected on "carries no --variant" rather than on cfg == 'base', because
+    # a regime cell has its own LP arm and must be read against THAT, not
+    # against the split-break base: the key already carries the instance id, and
+    # a nosplit copy has a different one, so keying this way pairs each MIP arm
+    # with the LP arm on its own instance and can never cross the two regimes.
+    # Restricted to LA: greedy also carries no variant, and since the key is
+    # (instance, window) a greedy run would otherwise overwrite the LA arm on
+    # the same instance and every delta in the table would silently become a
+    # comparison against greedy.
+    _ref = lambda r: (r.get("method") == "LA" and not r.get("variant")
+                      and not cs._is_truly_infeasible(r))
     base_dur = {(r.get("instance"), r.get("window_class")): r.get("duration_h")
-                for (c, _rt, _tw), recs in groups.items() if c == "base"
-                for r in recs if not cs._is_truly_infeasible(r)}
+                for recs in groups.values() for r in recs if _ref(r)}
     # Same pairing on the PENALISED duration (arrival + beta * window misses),
     # which is the model's actual objective.  A configuration can shorten the
     # route by arriving late at customers, and the duration-only delta scores
     # that as an improvement; the penalised delta does not.
     base_pen = {(r.get("instance"), r.get("window_class")):
                 r.get("duration_pen_h")
-                for (c, _rt, _tw), recs in groups.items() if c == "base"
-                for r in recs if not cs._is_truly_infeasible(r)}
+                for recs in groups.values() for r in recs if _ref(r)}
 
     _paths.ensure_dirs()
     out = _paths.data_output("additional_la_stats.csv")
@@ -904,9 +1094,22 @@ def cmd_la_report(args) -> None:
                     "duration_median_h", "delta_vs_base_pct", "n_paired",
                     "duration_pen_median_h", "delta_pen_vs_base_pct",
                     "n_paired_pen",
-                    "decision_mean_s_median", "decision_max_s_median",
+                    "decision_mean_s_median", "decision_cs_mean_s_median",
+                    "decision_max_s_median",
                     "wall_clock_s_median"])
-        for (cfg, route, tw), recs in sorted(groups.items()):
+        # Window classes are also POOLED into a synthetic 'all' row per
+        # (config, route).  A figure that wants one row per configuration must
+        # not average the two per-window medians: the classes carry different
+        # run counts (and the base cell carries more than the sweep cells), so
+        # the average of medians is weighted by nothing meaningful.  Pooling the
+        # raw runs and re-taking the median is the honest version, and the
+        # per-instance pairing behind delta_vs_base_pct is unaffected because it
+        # keys on (instance, window_class) either way.
+        pooled = {}
+        for (cfg, route, _tw), recs in groups.items():
+            pooled.setdefault((cfg, route, "all"), []).extend(recs)
+        for (cfg, route, tw), recs in sorted(list(groups.items())
+                                             + list(pooled.items())):
             gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
                              if cs._gap_usable(r) and r.get("gap_pen") is not None])
             gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
@@ -914,6 +1117,7 @@ def cmd_la_report(args) -> None:
             dur, _   = _agg([r.get("duration_h") for r in recs])
             dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
                              for r in recs])
+            dcs, _   = _agg([_dec_cs(r, cs) for r in recs])
             decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
                              for r in recs])
             wall, _  = _agg([r.get("wall_clock_s") for r in recs])
@@ -945,6 +1149,7 @@ def cmd_la_report(args) -> None:
                         None if durp is None else round(durp, 3),
                         None if dlp is None else round(dlp, 3), n_pair_pen,
                         None if dec is None else round(dec, 4),
+                        None if dcs is None else round(dcs, 4),
                         None if decx is None else round(decx, 4),
                         None if wall is None else round(wall, 1)])
             print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
@@ -952,7 +1157,8 @@ def cmd_la_report(args) -> None:
                   f"(from {n_gp} run(s) with an oracle bound)  "
                   f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
                   f"(n={n_pair})  "
-                  f"dec={'—' if dec is None else f'{dec:.1f}s'}")
+                  f"dec={'—' if dec is None else f'{dec:.1f}s'}"
+                  f" (CS {'—' if dcs is None else f'{dcs:.1f}s'})")
     print(f"  CSV saved   : {out}")
 
 

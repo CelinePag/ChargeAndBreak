@@ -17,6 +17,8 @@ Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
   tex/tables/additional_sensitivity.tex
   figures/additional_la_config.png|pdf       §8.3 look-ahead configuration
   figures/additional_la_frontier.png|pdf     §8.3 cost/quality frontier
+  figures/additional_la_all.png|pdf          §8.3 whole LA study on one plane
+                                             (horizon + scenarios + policy)
   tex/tables/additional_la.tex               (both read
   additional_analysis.py's data_output/additional_la_stats.csv)
   tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
@@ -47,15 +49,18 @@ import re
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as _pe
 import matplotlib.ticker as mticker
 import numpy as np
 
-from src.settings import T_START, BETA_TW
+from src.settings import (T_START, BETA_TW,
+                          BATTERY_CAPACITY, CHARGER_POWER_BASE_KW)
 
 # Shared palette + chrome (see paper_style.py): colour follows the entity, so
 # Greedy is the same blue here as in the base-case figures.
 from src.plot import paper_style as ps
 from src import paths as _paths
+from src.output_analysis import run_cache
 
 INK, MUT, GRID = ps.INK_PRIMARY, ps.INK_MUTED, ps.GRID
 BLUE  = ps.METHOD_COLOR["greedy"]
@@ -150,6 +155,35 @@ def _load(path: str) -> dict | None:
         return None
 
 
+_RUNS: dict | None = None
+
+
+def _RUNS_BY_NAME() -> dict[str, dict]:
+    """Stripped run records keyed by file name, loaded on first use."""
+    global _RUNS
+    if _RUNS is None:
+        _RUNS = run_cache.runs_by_name(_paths.solutions())
+    return _RUNS
+
+
+_ORACLE_JSON: dict[str, dict | None] = {}
+
+
+def _load_oracle(path: str) -> dict | None:
+    """``_load`` for oracle caches, memoised per process.
+
+    Unlike the run files, an oracle's per-stop schedule IS needed here (§8.4
+    decomposes the dwell, §8.3 reads tauc/g), so these cannot come from
+    run_cache's stripped records.  They are, however, asked for repeatedly —
+    _oracle() and _oracle_dwell() want the same file, and the diesel section
+    walks the same instances several times — and a cache is ~70 KB, so parsing
+    each one once turns the section's oracle I/O into a single pass.
+    """
+    if path not in _ORACLE_JSON:
+        _ORACLE_JSON[path] = _load(path)
+    return _ORACLE_JSON[path]
+
+
 def _policy(stem: str, alg: str, tag: str | None = None) -> dict | None:
     """Latest simulated-policy solution for a (possibly tagged) instance.
 
@@ -163,7 +197,9 @@ def _policy(stem: str, alg: str, tag: str | None = None) -> dict | None:
     for p in pats:
         f = _latest(p)
         if f:
-            d = _load(f)
+            # duration_h + metrics only, so the stripped run_cache record is
+            # enough and the trajectory arrays are never read off disk.
+            d = _RUNS_BY_NAME().get(os.path.basename(f))
             if d and d.get("duration_h") is not None:
                 infeas = bool((d.get("metrics") or {}).get("run_infeasible"))
                 return dict(duration=float(d["duration_h"]), infeasible=infeas)
@@ -184,7 +220,7 @@ def _oracle(stem: str, tag: str | None = None) -> dict | None:
              [_paths.solutions(f"oracle_{stem}__{tag}.json"),
               _paths.solutions(f"oracle_{stem}_{tag}.json")])
     for n in names:
-        d = _load(n)
+        d = _load_oracle(n)
         if not (d and d.get("feasible")):
             continue
         sol = d.get("sol") or []
@@ -1106,13 +1142,17 @@ def section_sensitivity():
     # so the response variable gets the tall, gridded axis it needs to be read
     # quantitatively (the horizontal version had to be read against ticks that
     # were 5 rows apart).
-    # The sweep is two distinct experiments (charger spacing vs charger power)
-    # and the levels are only comparable within one.  That grouping is carried
-    # by SPACING alone — levels of the same experiment sit close together, the
-    # two experiments are pushed apart — so no separator rule is needed.
+    # The sweep is three distinct experiments (charger spacing / charger power /
+    # battery capacity) and the levels are only comparable within one.  That
+    # grouping used to be carried by SPACING alone, which cost ~0.85 of a column
+    # per boundary and, with three blocks, stretched the figure to a 3.5:1 band
+    # that had to be shrunk past legibility to fit \linewidth.  The gap is now
+    # only wide enough to read as a break, and the separating work is done by an
+    # alternating background band instead — which costs no width at all.
     _grp = [_sens_group(t) for _l, t, _p in _SENS_ROWS]
     bounds = [i for i in range(1, len(_grp)) if _grp[i] != _grp[i - 1]]
-    _BLOCK_GAP = 0.85
+    _BLOCK_GAP = 0.30
+    _BAND = "#f4f4f4"
     x = np.array([i + _BLOCK_GAP * sum(1 for b in bounds if b <= i)
                   for i in range(len(fig_rows))], dtype=float)
     # Method order = benchmark first, then the policies in increasing
@@ -1127,8 +1167,22 @@ def section_sensitivity():
     vals = [st[m][0] for _l, _p, per in fig_rows for st in per.values()
             for m in _SENS_METHODS if st[m][0] is not None]
 
-    fig, ax = plt.subplots(figsize=(1.3 * (x[-1] + 1) + 1.2, 3.9))
+    # Fixed page geometry, not derived from the column count.  The figure is
+    # printed at \linewidth, so a width that grows with the number of levels is
+    # a width that shrinks the type: the previous 13.8 in band rendered its
+    # 7.5 pt ticks at about 3.5 pt on the page.  Sizing to the text block makes
+    # the drawn point size the printed point size.
+    _FIG_W, _FIG_H = 7.0, 4.3
+    fig, ax = plt.subplots(figsize=(_FIG_W, _FIG_H))
     drawn_m, drawn_r = set(), set()
+
+    # Alternating band per experiment, drawn under the grid.  This replaces the
+    # width the old block gap spent on the same job.
+    half = 0.5 + _BLOCK_GAP / 2
+    for bi, (s, e) in enumerate(zip([0] + bounds, bounds + [len(_grp)])):
+        if bi % 2:
+            ax.axvspan(x[s] - half, x[e - 1] + half,
+                       facecolor=_BAND, edgecolor="none", zorder=0)
 
     for xi, (label, planned, per) in zip(x, fig_rows):
         any_here = False
@@ -1142,23 +1196,29 @@ def section_sensitivity():
             col = ps.METHOD_COLOR[meth]
             face = _route_face(col, route)
             off = (k - (len(series) - 1) / 2) * w
+            # No per-bar value label.  Nine series x eight levels is 72 labels;
+            # at \linewidth the bar pitch is ~5 pt, so they only fit rotated at
+            # a size nobody can read, and they were the reason the figure had to
+            # be drawn three times too wide.  The values live in
+            # tex/tables/additional_sensitivity.tex, which the results section
+            # now includes alongside this figure.
             ax.bar(xi + off, mean_v, width=w, color=face,
-                   edgecolor=col, linewidth=0.5)
-            ax.text(xi + off, mean_v + np.sign(mean_v) * 0.15, f"{mean_v:+.1f}",
-                    ha="center", va="bottom" if mean_v >= 0 else "top",
-                    rotation=90, fontsize=5.5, color=INK)
+                   edgecolor=col, linewidth=0.35)
         if not any_here:
             note = "pending" if planned else "pending (needs a model flag)"
             ax.text(xi, 0.2, note, ha="center", va="bottom", rotation=90,
-                    fontsize=6.5, color=MUT, style="italic")
+                    fontsize=7, color=MUT, style="italic")
 
     ax.axhline(0, color=INK, lw=0.9)
     lo = min(-2.0, (min(vals) if vals else 0) - 2.0)
     hi = max(3.0, (max(vals) if vals else 0) + 2.0)
     # Extra headroom above the tallest bar so the in-axes legend sits over empty
-    # space instead of over data.
-    ax.set_ylim(lo, hi + 0.24 * (hi - lo))
-    ax.set_xlim(x[0] - 0.6, x[-1] + 0.6)
+    # space instead of over data.  Less is needed now that no rotated value
+    # labels stand on top of the bars.
+    ax.set_ylim(lo, hi + 0.17 * (hi - lo))
+    # Exactly the band extent, so the alternating blocks reach the axes edges
+    # instead of stopping short of them.
+    ax.set_xlim(x[0] - half, x[-1] + half)
     # Tick labels keep only the level ("30 km", "150 kW"); the swept quantity is
     # carried once per block by the group label under the axis.
     ax.set_xticks(x, [" ".join(r[0].split()[-2:]) for r in fig_rows])
@@ -1174,15 +1234,15 @@ def section_sensitivity():
     ax.tick_params(axis="y", which="minor", length=2)
     ax.set_axisbelow(True)
 
-    # One label per block, centred under its levels — the gap above does the
-    # separating, so nothing is drawn inside the axes.
+    # One label per block, centred under its levels.  The band above already
+    # separates the blocks; this names them.
     span = ax.get_xaxis_transform()  # x in data coords, y in axes fraction
     for s, e in zip([0] + bounds, bounds + [len(_grp)]):
         # Fixed point offset (not an axes fraction) so the block label clears
         # the tick labels by the same margin whatever the figure height is.
         ax.annotate(_grp[s], xy=(float(x[s:e].mean()), 0), xycoords=span,
-                    xytext=(0, -24), textcoords="offset points",
-                    ha="center", va="top", fontsize=7.5, color=MUT)
+                    xytext=(0, -22), textcoords="offset points",
+                    ha="center", va="top", fontsize=8, color=INK)
 
     # ONE legend naming each drawn bar exactly (method x route), so no reader
     # has to infer that the lighter shade means the shorter route
@@ -1199,13 +1259,13 @@ def section_sensitivity():
     # results_section).  The legend lives INSIDE the axes, in the headroom
     # reserved above the tallest bar by the set_ylim above.
     if handles:
-        ax.legend(handles, labels, frameon=True, framealpha=0.9,
-                  edgecolor="none", facecolor="white", fontsize=7,
+        ax.legend(handles, labels, frameon=True, framealpha=0.92,
+                  edgecolor="none", facecolor="white", fontsize=7.5,
                   loc="upper center", ncol=min(3, len(handles)),
                   handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
     # Bottom reserve: the block labels hang below the axes and tight_layout
     # does not measure annotations drawn outside them.
-    fig.tight_layout(rect=(0, 0.09, 1, 1))
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     _save(fig, "additional_sens_effects")
 
     lines = [
@@ -1972,9 +2032,598 @@ def section_la_policy(effect: str = "dur"):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# §8.3 — THE WHOLE LOOK-AHEAD STUDY ON ONE PLANE
+# ══════════════════════════════════════════════════════════════════════════════
+# section_la and section_la_policy split the sweep because the two ladders have
+# a position on an axis and the policy variants do not.  That split is right for
+# a RESPONSE plot (x = |Xi| or x = L), but it hides the only question the reader
+# actually has: given a per-decision compute budget, where does the next second
+# go — horizon, scenarios, or a MIP tail?  On the cost/quality plane every cell
+# has a position, ladder or not, so all three analyses collapse into one figure.
+#
+# Encoding, four channels on one set of axes:
+#   x  decision time per CS stop        — what the configuration costs
+#   y  gap to the hindsight optimum     — what it buys
+#   line colour + marker  which analysis the cell belongs to (horizon ladder,
+#                                        scenario ladder, policy variant)
+#   marker FILL  infeasibility rate     — the correction the level needs
+# The fill is not decoration: the gap median is taken over FEASIBLE runs only,
+# so a configuration that strands the truck more often can post a better median
+# for exactly the wrong reason (S25H12 strands up to 22%).  The ramp is the
+# module-wide _INFEAS_CMAP (bluish green -> yellow -> vermillion), the same one
+# the base-case box figure and both other LA figures use, so a reader who has
+# learned "red = strands the truck" once carries it across every figure.  It
+# does collide with the horizon ladder's green at the clean end; the marker EDGE
+# keeps series identity and the fill is read against the colourbar, not against
+# the line palette.
+#
+# Window classes are POOLED (the window_class = 'all' rows that
+# additional_analysis.py's la-report writes from the raw runs).  Splitting them
+# doubled the panel count to say something this figure is not asking: the
+# configuration ranking is the same under both classes, and the level shift
+# between them belongs to section_la's response plots.
+#
+# Series colour is deliberately OUTSIDE the method palette.  Everything drawn
+# here is one method (LA), so a method hue would be a false cue: green would
+# claim the horizon ladder is "the LA one" and blue would read as Greedy to
+# anyone who has seen the base-case figures.  What varies across these series is
+# the CONFIGURATION, which has no entry in paper_style, so the three take hues
+# no method owns.
+#
+# The choice is constrained from two sides: clear of every method hue (blue,
+# vermillion, orange, green, reddish purple, grey) AND clear of the
+# green/yellow/vermillion the marker fills run through, which rules out the
+# warm half of the wheel for a line that has to stay visible as a thin ring
+# around a filled marker.  Violet and magenta are what survive, and they are
+# separated by lightness as well as hue.
+_LA_HUE_HORIZON = "#6A3D9A"    # violet   — horizon ladder L
+_LA_HUE_SCEN    = "#C2007A"    # magenta  — scenario ladder |Xi|
+# Every non-ladder cell shares ONE ink.  Splitting them grey-for-LP against
+# charcoal-for-MILP was tried and abandoned twice: a grey light enough to read
+# as "not black" is too light to read at all at a 1.4 pt marker edge, and a grey
+# dark enough to see is no longer distinguishable from the charcoal it is
+# supposed to contrast with.  Lightness is simply not a wide enough channel here,
+# so the solver and the regime both move to the MARKER instead, where four
+# shapes separate cleanly, and the ink stays at full strength for all of them.
+_LA_HUE_CELL    = "#1A1A1A"
+_LA_POLICY_MARK = {"MIPTAIL": "D", "TB0": "v"}
+
+# ── the non-ladder cells ─────────────────────────────────────────────────────
+# Everything that is not a rung on the horizon or scenario ladder, declared in
+# one place so a cell that has not been run yet still has a name and a legend
+# entry, and appears as a labelled absence rather than vanishing.
+#
+# The MARKER carries both distinctions among the LA cells: round/diamond for the
+# split break as Art. 7 permits it, triangles for the regime that forbids it;
+# circle/triangle-up for the LP subproblem, diamond/triangle-down for the MILP.
+#
+# Greedy is the exception that keeps a COLOUR: it is a different method, not an
+# LA configuration, so it takes the method hue it wears everywhere else in the
+# paper.  That is also why it gets no leader — a leader means "displacement from
+# the base configuration", and greedy is not a configuration of anything.  It
+# sits on the cost axis at 0.0 s because it solves nothing, which is precisely
+# the reference the look-ahead has to earn its compute against.
+#
+# Every LA variant is drawn as a displacement from the BASE cell — one leader
+# each, all sharing a tail, so the panel reads as a fan out of the reference
+# rather than a chain.  That reading is honest on the y-axis because la-report
+# scores the no-split cells against the BASE-CASE oracle rather than the one
+# that was itself denied the split break (see _regap_regimes_to_base_oracle):
+# every point is a distance to the same unrestricted optimum, and a regime that
+# removes an option can only move away from it.
+#
+# `above` sends the tag over or under its marker.  It is declared rather than
+# derived because the two regimes land on top of each other by construction:
+# the whole point of the no-split pair is that it sits beside the split pair, so
+# their tags would collide on every panel unless the members of each pair are
+# pushed to opposite sides once, here, instead of being nudged per panel.
+#
+# The CSV keys these by the launcher's tags (MIPTAIL, NOSPLIT, and the crossed
+# MIPTAIL+NOSPLIT written by la-report); the reader sees the model names.  The
+# base cells drop a ($|\Xi| = 25$, $L = 24$ h) qualifier: both ladder entries
+# already state that centre point, so repeating it three times padded the legend
+# without adding anything.
+_LA_ALL_CELLS = [
+    # cfg key         panel tag        legend label            mark colour   above leader
+    ("base",            "base",          r"base case",
+     "o", _LA_HUE_CELL, True,  False),
+    ("MIPTAIL",         "MILP",          r"MILP subpr.",
+     "D", _LA_HUE_CELL, True,  True),
+    ("NOSPLIT",         "LP no-split",   r"base case, no split break",
+     "^", _LA_HUE_CELL, True,  True),
+    ("MIPTAIL+NOSPLIT", "MILP no-split", r"MILP subpr., no split break",
+     "v", _LA_HUE_CELL, False, True),
+    # Empty panel tag: greedy is the only coloured marker on the plane and the
+    # legend names it, while its position — hard against the left spine, in the
+    # busiest part of every panel — is exactly where an extra label collides
+    # with the base cell and the cheap ends of both ladders.
+    ("GREEDY",          "",              r"Greedy (no look-ahead)",
+     "P", BLUE,         False, False),
+]
+_LA_ALL_BY_CFG = {c[0]: c for c in _LA_ALL_CELLS}
+
+
+def section_la_all():
+    """§8.3 — one figure for the entire LA study (horizon, scenarios, policy).
+
+    Reads the same data_output/additional_la_stats.csv as section_la and
+    section_la_policy; it replaces neither, it re-reads both onto shared axes.
+    Needs the pooled window_class = 'all' rows, so re-run
+    `additional_analysis.py la-report` if the CSV predates them.
+    """
+    print("== Sec 8.3 look-ahead — combined cost/quality plane ==")
+    stats = _la_stats()
+    if not stats:
+        print("  additional_la_stats.csv missing — nothing drawn")
+        return
+    routes = ps.ROUTE_ORDER
+    TW = "all"                       # pooled over window classes — see above
+    if not any(t == TW for (_c, _r, t) in stats):
+        print("  additional_la_stats.csv has no pooled 'all' window rows — "
+              "re-run: python -m src.output_analysis.additional_analysis "
+              "la-report")
+        return
+
+    # The non-ladder cells: the declared ones first, in the order they are meant
+    # to be read, then anything else the CSV happens to carry so a variant run
+    # under a tag nobody added here still shows up.  TB0 stays excluded by name
+    # — it is the one variant whose runs were never launched, and a permanent
+    # "pending" note is noise, not information.  section_la_policy still has it.
+    have = {c for (c, _r, _t) in stats}
+    extra = sorted(c for c in have
+                   if c not in _LA_ALL_BY_CFG and c != "TB0"
+                   and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
+    cells = ([c for c in _LA_ALL_CELLS if c[0] != "base"]
+             + [(c, c, c, "*", _LA_HUE_CELL, True, True) for c in extra])
+
+    # Below this a "median" is not an estimate of anything, and one such cell
+    # can wreck the figure for every other: a 2-run long-route MILP no-split
+    # cell landed at 13.8 % mid-sweep and stretched the shared y-axis to 15 %,
+    # compressing the 2-6 % band where the entire study lives.  Such a cell is
+    # reported as still pending, with its count, rather than plotted.
+    _MIN_N = 5
+
+    def cell(cfg, route, tw=TW):
+        """(cost, quality, infeasibility rate) for one cell, or None."""
+        row = stats.get((cfg, route, tw))
+        c = _la_num(row, "decision_cs_mean_s_median")
+        q = _la_num(row, "gap_pen_median_pct")
+        if c is None or q is None:
+            return None
+        n, i = _la_num(row, "n_runs"), _la_num(row, "n_infeasible")
+        if (n or 0) < _MIN_N:
+            return None
+        return c, q, ((i / n) if (n and i is not None) else None)
+
+    def n_runs(cfg, route, tw=TW):
+        return _la_num(stats.get((cfg, route, tw)), "n_runs") or 0
+
+    # A cell still filling up is not just noisier than the base cell, it is a
+    # different POPULATION: the sweeps land combo by combo, so a half-finished
+    # cell is typically all-Tnone or all-Cfew while the base cell it is read
+    # against is pooled over every combo and window.  Tnone is the easy half, so
+    # such a cell can plot BELOW the base cell while being WORSE than it on the
+    # instances they share — which is exactly what the no-split arms did at
+    # ~12 % coverage.  Rather than let the figure state that, an under-covered
+    # cell carries its run count in its tag, so the reader sees the sample it is
+    # looking at and the mark disappears by itself once the runs land.
+    _PARTIAL_AT = 0.60
+
+    def partial(cfg, route, tw=TW):
+        base_n = n_runs("base", route, tw)
+        n = n_runs(cfg, route, tw)
+        return bool(base_n and n and n < _PARTIAL_AT * base_n)
+
+    # A point is (tag, is_base, colour, marker, below, cost, gap, infeas).
+    # The base cell is the last element of no ladder and the middle of two — it
+    # is what both pivot on, so it is skipped inside the ladders and drawn once,
+    # on top, together with the variants that fan out of it.
+    def paths(route):
+        out = []
+        for ladder, is_h, col, pfx in (
+                (_LA_HORIZONS, True,  _LA_HUE_HORIZON, "L"),
+                (_LA_SCENARIOS, False, _LA_HUE_SCEN, "S")):
+            pts = []
+            for v in ladder:
+                cfg = ("base" if (v == _LA_BASE[1] if is_h else v == _LA_BASE[0])
+                       else _la_cfg(_LA_BASE[0], float(v)) if is_h
+                       else _la_cfg(int(v), _LA_BASE[1]))
+                got = cell(cfg, route)
+                if got:
+                    # Scenario rungs label below, horizon rungs above: on the
+                    # long routes the two ladders end within a marker's width of
+                    # each other, and the vertical split is what stops those
+                    # tags overprinting.
+                    pts.append((f"{pfx}{v:g}", cfg == "base", col,
+                                "o" if is_h else "s", not is_h, *got))
+            if pts:
+                out.append(("ladder", None, pts))
+        for cfg, tag, _lbl, mk, col, above, leader in cells:
+            got = cell(cfg, route)
+            if got:
+                if partial(cfg, route):
+                    tag = f"{tag} (n={n_runs(cfg, route):.0f})"
+                out.append(("cell", "base" if leader else None,
+                            [(tag, False, col, mk, not above, *got)]))
+        return out
+
+    allpts = [p for r in routes for _k, _a, pts in paths(r) for p in pts]
+    fmax = max([p[7] for p in allpts if p[7]] or [1.0])
+    # Room for the tags, which are drawn OUTSIDE the data range: the costliest
+    # cell (MIPTAIL on the medium routes, ~95 s) is a wide label anchored to the
+    # right of its marker, and autoscale would clip it against the spine.
+    # The axis is LINEAR: a log axis puts equal ratios at equal distances, which
+    # flatters the cheap end and makes the base->MIPTAIL leader look like a
+    # gentle slope instead of the 5-20x jump in compute it actually is.  Cost
+    # here is a budget the reader spends in seconds, not a scale-free quantity,
+    # so distance on the page should be seconds.
+    # The left margin is negative on purpose: the cheapest rung of each ladder
+    # labels to the LEFT of its marker, and on a linear axis that rung sits
+    # within a few seconds of the origin, so a hard zero clips the tag.
+    costs = [p[5] for p in allpts] or [1.0, 10.0]
+    xlim  = (-0.055 * max(costs), max(costs) * 1.16)
+    # Same reason on y: the tallest rung (L12 on the medium routes) carries its
+    # tag ABOVE the marker, and matplotlib's autoscale margin is not deep enough
+    # to hold it under the spine.
+    quals = [p[6] for p in allpts] or [0.0, 1.0]
+    span  = (max(quals) - min(quals)) or 1.0
+    ylim  = (min(quals) - 0.16 * span, max(quals) + 0.16 * span)
+
+    fig, axs = plt.subplots(1, len(routes), figsize=(7.2, 2.9),
+                            sharex=True, sharey=True)
+    axs = np.atleast_1d(axs)
+
+    # Tags are drawn outside their marker, so a cell close to either spine has
+    # to lean inwards or it prints off the panel.  These two bands are where
+    # that happens; everything between them keeps the side it asked for.
+    _lo = xlim[0] + 0.10 * (xlim[1] - xlim[0])
+    _hi = xlim[0] + 0.80 * (xlim[1] - xlim[0])
+
+    for ri, route in enumerate(routes):
+        ax = axs[ri]
+        got = paths(route)
+        base = cell("base", route)
+        # A cell that exists but is under _MIN_N is reported here WITH its count,
+        # so "too few runs to plot" is visibly different from "not launched".
+        missing = [f"{tag or lbl} (n={n_runs(cfg, route):.0f})"
+                   if n_runs(cfg, route) else (tag or lbl)
+                   for cfg, tag, lbl, _m, _c, _b, _ld in cells
+                   if not cell(cfg, route)]
+
+        for kind, anchor, pts in got:
+            col = pts[0][2]
+            if kind == "ladder" and len(pts) > 1:
+                ax.plot([p[5] for p in pts], [p[6] for p in pts], "-",
+                        color=col, lw=1.2, zorder=2)
+            elif kind == "cell" and anchor:
+                # A variant is a DISPLACEMENT from its regime's LP arm, not a
+                # rung on a ladder, so it is joined to that arm by a dotted
+                # leader which cannot be mistaken for a sampled path.  Drawn
+                # only when the arm exists: without it the displacement has no
+                # meaning and a line to the wrong regime would invent one.
+                a = cell(anchor, route)
+                if a:
+                    ax.plot([a[0], pts[0][5]], [a[1], pts[0][6]], ":",
+                            color=col, lw=1.0, zorder=2)
+            for tag, is_base, col, mk, below, c, q, f in pts:
+                if is_base:
+                    continue                     # drawn once, below
+                ax.plot(c, q, mk, ms=5.6,
+                        mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
+                        mec=col, mew=1.4, zorder=4)
+                # Two rules keep the tags apart without hand-placing them per
+                # panel: horizontally each tag hugs the side its cell sits on
+                # relative to base, and vertically it goes to the side its
+                # series declared (`below`, set where the series is built).
+                # Greedy sits at 0.0 s, hard against the left spine, so the
+                # "cheaper than base -> label on the left" rule would push its
+                # tag off the panel; inside either edge band the tag leans
+                # inwards regardless of which side of base the cell is on.
+                right = c < _lo or ((c >= (base[0] if base else c))
+                                    and c <= _hi)
+                # White stroke under the glyphs: S10 sits a hair below the base
+                # cell on the short routes, which is exactly where the
+                # base->MIPTAIL leader leaves the anchor, and a tag printed
+                # straight onto a dotted line is unreadable.
+                if not tag:
+                    continue                     # keyed by the legend alone
+                ax.annotate(tag, (c, q),
+                            xytext=(4 if right else -4, -8 if below else 7),
+                            textcoords="offset points",
+                            ha="left" if right else "right",
+                            va="top" if below else "bottom",
+                            fontsize=5.4, color=ps.shade(col, 0.25),
+                            zorder=5,
+                            path_effects=[_pe.withStroke(linewidth=1.7,
+                                                         foreground="white")])
+        # The base cell last and on top: it is the reference every leader fans
+        # out of, and it is the one point two ladders and every variant all
+        # touch, so it must not be overdrawn by whichever series lands last.
+        # It carries no tag — the legend names it, and a label on the busiest
+        # point in the panel is where clutter starts.
+        if base:
+            c, q, f = base
+            ax.plot(c, q, "o", ms=5.6,
+                    mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
+                    mec=_LA_HUE_CELL, mew=1.4, zorder=6)
+        if missing:
+            # Top-right, not bottom-right: the policy variants land in the
+            # cheap-and-good corner, so a note down there sits on the very
+            # markers it is describing the absence of.
+            ax.text(0.985, 0.965, "pending: " + ", ".join(missing),
+                    transform=ax.transAxes, ha="right", va="top",
+                    fontsize=5.8, color=MUT, style="italic")
+        if not got:
+            ax.text(0.5, 0.5, "pending", ha="center", va="center",
+                    fontsize=7.5, color=MUT, style="italic",
+                    transform=ax.transAxes)
+
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.xaxis.set_major_locator(
+            mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+        ax.grid(True, which="major", color=GRID, lw=0.6)
+        ax.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
+        ax.xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.set_axisbelow(True)
+        ax.tick_params(which="minor", length=2)
+        ax.set_title(ps.ROUTE_LBL[route], loc="left")
+        ax.set_xlabel("Decision time per CS stop (s)")
+        if ri == 0:
+            ax.set_ylabel("Gap to hindsight optimum (%)")
+
+    handles = [plt.Line2D([], [], color=_LA_HUE_HORIZON, lw=1.3, marker="o",
+                          ms=5.0, mfc="white", mec=_LA_HUE_HORIZON, mew=1.1),
+               plt.Line2D([], [], color=_LA_HUE_SCEN, lw=1.3, marker="s",
+                          ms=5.0, mfc="white", mec=_LA_HUE_SCEN, mew=1.1)]
+    labels  = [r"horizon ladder $L$ (h), $|\Xi| = 25$",
+               r"scenario ladder $|\Xi|$, $L = 24$ h"]
+    # Every declared cell is listed whether or not it has runs yet, so the
+    # legend states the intended design and the panels say how much of it has
+    # landed.  The base cell shows as a bare marker, variants with their leader.
+    for _cfg, _tag, lbl, mk, col, _ab, leader in _LA_ALL_CELLS:
+        handles.append(plt.Line2D(
+            # Cells without a leader key as a bare marker.  ls must be "none"
+            # and not ":" at lw=0 — matplotlib rejects a dash pattern whose
+            # segments are all zero-length.
+            [], [], color=col, lw=1.0 if leader else 0,
+            ls=":" if leader else "none",
+            marker=mk, ms=5.2, mfc="white", mec=col, mew=1.4))
+        labels.append(lbl)
+    for cfg in extra:
+        handles.append(plt.Line2D([], [], color=_LA_HUE_CELL, lw=1.0, ls=":",
+                                  marker="*", ms=5.2, mfc="white",
+                                  mec=_LA_HUE_CELL, mew=1.4))
+        labels.append(_LA_POLICY_LBL.get(cfg, cfg))
+    fig.subplots_adjust(left=0.088, right=0.895, top=0.735, bottom=0.175,
+                        wspace=0.09)
+    fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
+               ncol=3, bbox_to_anchor=(0.5, 0.998), handlelength=1.8,
+               handletextpad=0.4, columnspacing=1.6)
+
+    # Marker-fill key, scaled to the worst cell in the figure (as everywhere
+    # else in this module) rather than to a hypothetical 100%.
+    import matplotlib.cm as _cm
+    from matplotlib.colors import Normalize as _Norm
+    _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_INFEAS_CMAP)
+    _sm.set_array([])
+    _p = axs[-1].get_position()
+    _cax = fig.add_axes([_p.x1 + 0.014, _p.y0, 0.010, _p.height])
+    _cb = fig.colorbar(_sm, cax=_cax, orientation="vertical",
+                       ticks=[0, 100.0 * fmax])
+    _cb.ax.set_yticklabels(["0", f"{100.0 * fmax:.0f}"])
+    _cb.outline.set_linewidth(0.3)
+    _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
+    _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
+    _save(fig, "additional_la_all")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# §8.3 — PACK x CHARGE POINT GRID
+# ══════════════════════════════════════════════════════════════════════════════
+# Why a grid and not two one-at-a-time rows: Emin = SOC_MIN_FRAC.Ecap and the
+# tail acceptance is TAIL_C_RATE.Ecap, so resizing the pack moves BOTH the range
+# and the point where the charge curve tapers.  A battery sweep at fixed charger
+# power therefore measures range and taper avoidance together and cannot say
+# which one moved the duration.  Crossing the two axes separates them: reading
+# ACROSS a row isolates charge speed at a fixed pack, reading DOWN a column
+# isolates pack at a fixed charge point, and curvature between the two is the
+# interaction the one-at-a-time sweep folds away.
+#
+# The base row (350 kW) and base column (500 kWh) ARE the one-at-a-time sweeps —
+# additional_analysis.cmd_grid gives those cells the single-axis tag on purpose,
+# so they share instances and runs with §8.3 rather than duplicating them.
+
+_GRID_BATTERY = [300, 500, 700, 900]      # kWh  (500 = base pack)
+_GRID_POWER   = [150, 350, 700, 1000]     # kW   (350 = base charge point)
+# The grid is run on short + medium only (agreed 2026-08-14): 9 crossed cells x
+# 200 instances is already 1800 window-MILP generations, and long routes carry
+# the slowest of those.  Long still has the one-at-a-time sweeps, so it appears
+# in section_sensitivity — but here it would contribute nothing except the base
+# row and column it shares with them, i.e. a panel that is empty by design.
+# Widen this list if the crossed cells are ever run for long routes.
+_GRID_ROUTES = ["short", "medium"]
+
+
+def _grid_tag(batt, power) -> str | None:
+    """Variant tag for one grid cell, or None for the base case.
+
+    Mirrors additional_analysis._materialise_grid: only the axes that DIFFER
+    from the base contribute, joined battery-first, so a cell on a base row or
+    column collapses to exactly the one-at-a-time tag ("kwh300", "kw150") and
+    finds the runs the sensitivity sweep already produced.
+    """
+    parts = []
+    if float(batt) != float(BATTERY_CAPACITY):
+        parts.append(f"kwh{batt:g}")
+    if float(power) != float(CHARGER_POWER_BASE_KW):
+        parts.append(f"kw{power:g}")
+    return "_".join(parts) or None
+
+
+def _grid_cell_values(route, combos_s, tws_s, seeds_s, tag) -> list:
+    """Paired greedy deltas (%) vs the base instance for one cell.
+
+    Paired exactly like section_sensitivity: base and variant must BOTH exist
+    and BOTH be feasible, so a cell is never contaminated by an instance that
+    stranded on one side only.  The base cell returns 0.0 per instance by
+    construction (it is the denominator), which is what anchors the diverging
+    colour scale at a real reference rather than at the data's midpoint.
+    """
+    out = []
+    for r, c in combos_s:
+        if r != route:
+            continue
+        for tw in tws_s:
+            for seed in seeds_s:
+                st = _stem(r, c, tw, seed)
+                bg = _greedy(st)
+                vg = bg if tag is None else _greedy(st, tag)
+                if (bg and vg and not bg["infeasible"]
+                        and not vg["infeasible"] and bg["duration"] > 0):
+                    out.append(100.0 * (vg["duration"] / bg["duration"] - 1.0))
+    return out
+
+
+def section_grid():
+    print("== Sec 8.3 grid: battery capacity x charger power ==")
+    tags = [t for t in (_grid_tag(b, p)
+                        for b in _GRID_BATTERY for p in _GRID_POWER) if t]
+    found    = _discover_scope(tags)
+    combos_s = found["combos"] or COMBOS
+    tws_s    = found["tws"]    or TWS
+    seeds_s  = found["seeds"]  or list(SEEDS)
+    routes   = [r for r in (found["routes"] or _ROUTE_SPLIT)
+                if r in _GRID_ROUTES] or _GRID_ROUTES
+    combos_s = [(r, c) for r, c in combos_s if r in _GRID_ROUTES] or combos_s
+    print(f"  scope     : combos {','.join(f'R{r}C{c}' for r, c in combos_s)}")
+    print(f"              tw {','.join(tws_s)}  "
+          f"seeds {min(seeds_s)}-{max(seeds_s)} (n={len(seeds_s)})  "
+          f"routes {','.join(routes)}")
+
+    nb, np_ = len(_GRID_BATTERY), len(_GRID_POWER)
+    mats, cnts = {}, {}
+    for route in routes:
+        M = np.full((nb, np_), np.nan)
+        C = np.zeros((nb, np_), dtype=int)
+        for i, b in enumerate(_GRID_BATTERY):
+            for j, p in enumerate(_GRID_POWER):
+                v = _grid_cell_values(route, combos_s, tws_s, seeds_s,
+                                      _grid_tag(b, p))
+                if v:
+                    M[i, j] = float(np.mean(v))
+                    C[i, j] = len(v)
+        mats[route], cnts[route] = M, C
+
+    filled = sum(int(np.isfinite(m).sum()) for m in mats.values())
+    print(f"  cells     : {filled} filled of {nb * np_ * len(routes)}")
+
+    # ── colour: DIVERGING, because the value is signed (below/above the base
+    # duration) and 0 is a real reference, not the data midpoint.  Two hues plus
+    # a neutral grey centre — never a rainbow, never a hue at the midpoint.  The
+    # poles are the Okabe-Ito blue/vermillion pair (the strongest CVD-separated
+    # pair available); no method identity appears in this figure, so borrowing
+    # the two hues here cannot collide with METHOD_COLOR.
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
+        "pack_power_div", [BLUE, "#f4f4f4", VERM])
+    cmap.set_bad("#fbfbfb")                       # empty slots stay near-surface
+    finite = np.concatenate([m[np.isfinite(m)].ravel() for m in mats.values()]
+                            or [np.array([0.0])])
+    vmax = float(np.nanmax(np.abs(finite))) if finite.size else 1.0
+    vmax = max(vmax, 0.5)                         # keep a sane range when flat
+    norm = matplotlib.colors.Normalize(vmin=-vmax, vmax=vmax)
+
+    # Height is driven by the square cells, not chosen: nb rows of squares at
+    # the panel width, plus a fixed allowance for tick labels, axis titles and
+    # the panel heading.  Keeps the figure a single-column-friendly band rather
+    # than the near-square block "auto" aspect produced.
+    _panel_w = 2.45
+    fig, axes = plt.subplots(1, len(routes),
+                             figsize=(_panel_w * len(routes) + 0.9,
+                                      _panel_w * nb / np_ + 0.95),
+                             squeeze=False)
+    axes = axes[0]
+
+    for ax, route in zip(axes, routes):
+        M, C = mats[route], cnts[route]
+        # aspect="equal": square cells.  A cell is a (pack, power) COMBINATION,
+        # not a quantity, so stretching it to fill the axes gives the two axes
+        # a visual weight they do not have and wastes column height in a paper.
+        ax.imshow(np.ma.masked_invalid(M), cmap=cmap, norm=norm,
+                  origin="lower", aspect="equal")
+        # 2 px surface gap between cells: adjacent fills must not touch
+        ax.set_xticks(np.arange(-0.5, np_, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, nb, 1), minor=True)
+        ax.grid(which="minor", color="white", linewidth=2)
+        ax.tick_params(which="minor", length=0)
+
+        for i in range(nb):
+            for j in range(np_):
+                if not np.isfinite(M[i, j]):
+                    ax.text(j, i, "--", ha="center", va="center",
+                            color=MUT, fontsize=7)
+                    continue
+                # Ink colour by cell luminance so the value stays legible at
+                # both poles; this is a contrast fix, not a second encoding.
+                r_, g_, b_ = cmap(norm(M[i, j]))[:3]
+                lum = 0.2126 * r_ + 0.7152 * g_ + 0.0722 * b_
+                ax.text(j, i, f"{M[i, j]:+.1f}", ha="center", va="center",
+                        color=("white" if lum < 0.5 else INK),
+                        fontsize=7.5,
+                        fontweight=("bold" if _grid_tag(_GRID_BATTERY[i],
+                                                        _GRID_POWER[j]) is None
+                                    else "normal"))
+        # mark the base cell — every number in the panel is relative to it
+        bi = _GRID_BATTERY.index(BATTERY_CAPACITY) \
+            if BATTERY_CAPACITY in _GRID_BATTERY else None
+        bj = _GRID_POWER.index(CHARGER_POWER_BASE_KW) \
+            if CHARGER_POWER_BASE_KW in _GRID_POWER else None
+        if bi is not None and bj is not None:
+            ax.add_patch(plt.Rectangle((bj - 0.5, bi - 0.5), 1, 1, fill=False,
+                                       edgecolor=ps.BASELINE, linewidth=1.4,
+                                       zorder=5))
+
+        ax.set_xticks(range(np_)); ax.set_xticklabels(_GRID_POWER)
+        ax.set_yticks(range(nb));  ax.set_yticklabels(_GRID_BATTERY)
+        ax.set_xlabel("Charger power (kW)")
+        if route == routes[0]:
+            ax.set_ylabel("Battery capacity (kWh)")
+        # Per-cell n is NOT on the figure — it lives in additional_grid_stats.csv,
+        # one column per cell.  Keep an eye on it: the pairing rule drops any
+        # instance that was infeasible on either side, so a partially-run grid
+        # or a stranding-prone row (small packs) carries fewer pairs than the
+        # nominal seed count, and cross-cell comparison is then uneven.
+        ax.set_title(ps.ROUTE_LBL[route], color=INK)
+        for s in ax.spines.values():
+            s.set_edgecolor(MUT)
+
+    cb = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
+                      ax=list(axes), fraction=0.045, pad=0.02)
+    cb.set_label("Duration vs base case (%)", color=INK)
+    cb.outline.set_edgecolor(MUT)
+    cb.ax.tick_params(color=MUT)
+    _save(fig, "additional_grid_battery_power")
+
+    rows = []
+    for route in routes:
+        for i, b in enumerate(_GRID_BATTERY):
+            for j, p in enumerate(_GRID_POWER):
+                m = mats[route][i, j]
+                rows.append([route, b, p, _grid_tag(b, p) or "base",
+                             "" if not np.isfinite(m) else f"{m:.3f}",
+                             int(cnts[route][i, j])])
+    _write_csv("additional_grid_stats.csv",
+               ["route_class", "battery_kwh", "charger_kw", "tag",
+                "greedy_duration_vs_base_%", "n_paired"], rows)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
+                 grid=section_grid,
                  la=section_la,
+                 la_all=section_la_all,
                  # both effect measures: route duration and the penalised
                  # objective the model actually minimises
                  la_policy=lambda: (section_la_policy("dur"),

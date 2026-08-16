@@ -1249,7 +1249,50 @@ def build_model(data: dict) -> pyo.ConcreteModel:
     # metrics.weekly_cap_exceeded), reported in the paper as a compliance-
     # margin statistic on long routes.  Twk60 stays declared as a parameter
     # for that diagnostic.
+
+    _fix_ferry_nodes(m, data)
     return m
+
+
+def _fix_ferry_nodes(m, data: dict) -> None:
+    """Force the mandatory break at sea-crossing (ferry) nodes.
+
+    A ferry node is a layby at which the vehicle is aboard a vessel for a
+    KNOWN duration.  It is expressed with two variable fixings rather than new
+    constraints:
+
+        x_b45[F] = 1          the break is taken, not chosen
+        taub[F]  = T_cross    for exactly the crossing duration
+
+    Everything else follows from the constraints that already exist:
+      * one_brk forces x_b15 = x_b30 = rho1 = rho2 = 0, and rst_ub then forces
+        taur[F] = 0 — so a daily rest can never be taken on board (Art. 9's
+        rest-on-ferry option is deliberately out of scope);
+      * xsum[F] = 1 makes the layby departure equation charge M_lay[F], the
+        boarding/disembarking overhead, which the vehicle therefore cannot
+        avoid;
+      * the crossing is node dwell, so it never enters the driving
+        accumulators cd / sd, and taub is not work, so it does not enter sw;
+      * the consecutive-driving reset indicator already contains x_b45, so the
+        4.5 h clock resets on disembarkation, as Art. 9 of Reg. (EC) 561/2006
+        prescribes.
+
+    The crossing does count toward the shift spread h (it is on-duty dwell,
+    not a rest), which is the intended reading.
+    """
+    ferry = {int(k): float(v) for k, v in (data.get("ferry") or {}).items()}
+    if not ferry:
+        return
+    L_set = set(data.get("L", []))
+    for f, t_cross in ferry.items():
+        if f not in m.I:
+            continue
+        if f not in L_set:
+            raise ValueError(
+                f"ferry node {f} must be a layby (in data['L']); got "
+                f"{'customer' if f in set(data['C']) else 'CS' if f in set(data['K']) else 'unknown'}")
+        m.x_b45[f].fix(1)
+        m.taub[f].fix(t_cross)
 
 
 def solve_model(model, tee=True, mipgap=0.005, timelimit=60 * 60 * 2):
@@ -1370,6 +1413,11 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
     M_seq_loc  = {j: full_data["M_seq"].get(start_stop + j, 0.0)  for j in K_loc}
     M_lay_loc  = {j: full_data.get("M_lay", {}).get(start_stop + j, 0.0)
                   for j in L_loc}
+    # ferry nodes fall inside the horizon window only sometimes; map to local
+    _ferry_glob = {int(k): float(v)
+                   for k, v in (full_data.get("ferry") or {}).items()}
+    ferry_loc = {j: _ferry_glob[start_stop + j]
+                 for j in L_loc if (start_stop + j) in _ferry_glob}
     # Keep old M dict for covering-inequality helper (uses M_dict = sub_data["M"])
     M_loc = {j: full_data["M"].get(start_stop + j, 5.0 / 60)
              for j in range(H + 1)}
@@ -1419,7 +1467,7 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         N=H, I=I_loc, C=C_loc, K=K_loc, L=L_loc, R=R, Rseg=Rseg,
         D=D_loc, E=E_loc,
         S=S_loc, Q=Q_loc, M=M_loc, M_stop=M_stop_loc, M_seq=M_seq_loc,
-        M_lay=M_lay_loc,
+        M_lay=M_lay_loc, ferry=ferry_loc,
         Wha=Wha_loc, Whf=Whf_loc,
         t0=t0,                      # sub-window start time
         H=H_bigM,                   # C1 window / rest big-M (full-route bound)
@@ -1634,6 +1682,12 @@ def build_horizon_model(sub_data: dict, init_state: dict,
     #pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b15[i] == 0)
     #pyo.Constraint(m.Cset, rule=lambda m, i: m.x_b30[i] == 0)
 
+    # Sea crossings inside this horizon window (local indices) — same two
+    # fixings as the full-route model.  Stop 0 is the vehicle's current
+    # position and its dwell is already realized, so it is never re-fixed.
+    _sub_ferry = dict(sub_data.get("ferry") or {})
+    _sub_ferry.pop(0, None)
+    _fix_ferry_nodes(m, dict(sub_data, ferry=_sub_ferry))
 
     return m
 

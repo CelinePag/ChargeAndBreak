@@ -246,6 +246,14 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     K_set  = set(full_data["K"])
     is_CS  = stop_global in K_set
 
+    # Sea crossing: aboard for a known duration — no decision to make.  The
+    # break is forced exactly as in the MILP (x_b45 = 1, taub = T_cross); the
+    # executed duration is substituted by BEHDV.
+    if stop_global in {int(k) for k in (full_data.get("ferry") or {})}:
+        t_cross = float(full_data["ferry"][stop_global])
+        return ({"y": 0, "break_type": "b45", "rest_type": None},
+                f"FERRY: forced {t_cross:.2f} h crossing (counts as break)")
+
     Ecap   = full_data["Ecap"]
     Emin   = full_data["Emin"]
     usable = Ecap - Emin
@@ -569,7 +577,17 @@ def run_greedy(full_data: dict,
     log = open(paths["log"], "w", encoding="utf-8")
 
     def _p(msg):
-        if verbose: print(msg)
+        # The log handle is utf-8, but stdout is whatever the console/pipe
+        # gives us — cp1252 on a redirected Windows run, which cannot encode
+        # the "dwell~=" glyph below and killed EVERY run in a piped batch
+        # (3/3 failed with UnicodeEncodeError before this guard).  Same
+        # treatment as oracle._safe_print: degrade the glyph, never the run.
+        if verbose:
+            try:
+                print(msg)
+            except UnicodeEncodeError:
+                enc = getattr(sys.stdout, "encoding", None) or "ascii"
+                print(msg.encode(enc, "replace").decode(enc, "replace"))
         try: print(msg, file=log)
         except Exception: pass
 

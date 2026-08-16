@@ -28,12 +28,10 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
-import json
-import os
 import re
 from collections import defaultdict
 from src import paths as _paths
+from src.output_analysis import run_cache
 
 METHODS = ["GREEDY", "RO", "ROBU", "LA", "2SP"]
 _MLBL   = {"GREEDY": "greedy", "RO": "RO", "ROBU": "ROBU", "LA": "LA",
@@ -58,20 +56,16 @@ def _classes():
     return [f"{r}{c}T{t}" for r in ROUTES for c in CUSTS for t in TWS]
 
 
-def _variant_of(path: str, stem: str) -> str | None:
+def _variant_of(rec: dict, stem: str) -> str | None:
     """The run's method-configuration label, or None.
 
-    Cheap by design: only files whose NAME already looks labelled are opened,
-    and the label counts only when the run actually recorded it — a handful of
-    legacy manual run_ids look labelled but predate the flag entirely.
+    The label counts only when the run actually recorded it — a handful of
+    legacy manual run_ids look labelled but predate the flag entirely — so the
+    name is screened first and the stored field decides.
     """
     if not (_paths.parse_run_id(stem) or {}).get("variant"):
         return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh).get("variant") or None
-    except Exception:
-        return None
+    return rec.get("variant") or None
 
 
 def scan(sol_dir: str, variants: bool):
@@ -80,10 +74,8 @@ def scan(sol_dir: str, variants: bool):
     params  = defaultdict(set)
     bad     = defaultdict(int)
     latest  = {}          # (cls,alg,seed) -> (ts, param value)
-    for path in glob.glob(os.path.join(sol_dir, "*.json")):
-        base = os.path.basename(path)
-        if base.startswith("oracle_"):
-            continue
+    # Parsed through run_cache (see src/output_analysis/run_cache.py).
+    for base, d in run_cache.load_runs(sol_dir):
         stem = base[:-5]
         # A method-configuration sweep (--variant) runs on the BASE instances,
         # so its stem carries no "__tag": without this leg it would be counted
@@ -92,7 +84,7 @@ def scan(sol_dir: str, variants: bool):
         # is only a candidate — the STORED `variant` field decides, so the few
         # legacy run_ids that merely look labelled (…_RO_box_…) keep counting as
         # base coverage exactly as before.
-        labelled = _variant_of(path, stem)
+        labelled = _variant_of(d, stem)
         tagged = ("__" in stem) or ("_diesel_" in base) or bool(labelled)
         if tagged != variants:
             continue
@@ -109,10 +101,7 @@ def scan(sol_dir: str, variants: bool):
         alg  = m.group("alg")
         seed = int(m.group("inst").rsplit("_", 1)[1])
         key  = (cls, alg)
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                d = json.load(fh)
-        except Exception:
+        if "_error" in d:                       # unparseable file
             bad[key] += 1
             continue
         if d.get("sim_arrival_h") is None:      # started but never finished
@@ -131,19 +120,14 @@ def scan(sol_dir: str, variants: bool):
 
 def oracle_coverage(sol_dir: str):
     have = defaultdict(set)
-    for path in glob.glob(os.path.join(sol_dir, "oracle_R*.json")):
-        b = os.path.basename(path)[7:-5]
+    for b, d in run_cache.load_oracles(sol_dir).items():
         if "__" in b or b.endswith("_diesel"):
             continue
         m = re.match(r"(R[a-z]+C[a-z]+T[a-z]+)_(\d+)$", b)
         if not m:
             continue
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                d = json.load(fh)
-        except Exception:
-            continue
-        if d.get("feasible") and d.get("sol"):
+        # _n_sol is the cached len(sol): "has a schedule" is all this asked.
+        if d.get("feasible") and d.get("_n_sol"):
             have[m.group(1)].add(int(m.group(2)))
     return have
 

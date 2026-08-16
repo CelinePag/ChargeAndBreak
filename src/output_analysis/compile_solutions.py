@@ -61,6 +61,7 @@ from openpyxl.styles import (
 )
 from openpyxl.utils import get_column_letter
 from src import paths as _paths
+from src.output_analysis import run_cache
 
 # ── colour palette ──────────────────────────────────────────────────────────
 _HEADER_BG   = "1F4E79"   # dark blue
@@ -250,31 +251,32 @@ def _pct(x, nd=1):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def load_solutions(solutions_dir: str) -> list[dict]:
-    """Load all *.json solution files from solutions_dir (skips oracle caches)."""
+    """Load all *.json solution files from solutions_dir (skips oracle caches).
+
+    Goes through run_cache, so the corpus is parsed once per machine instead of
+    once per reporting script, and the trajectory arrays — which nothing here
+    reads — never enter memory.  See src/output_analysis/run_cache.py.
+    """
     if not os.path.isdir(solutions_dir):
         print(f"  ERROR: directory not found: '{solutions_dir}'", file=sys.stderr)
         sys.exit(1)
 
-    paths = sorted(
-        os.path.join(solutions_dir, f)
-        for f in os.listdir(solutions_dir)
-        if f.endswith(".json") and not f.startswith("oracle_")
-    )
-    if not paths:
-        print(f"  WARNING: no run .json files found in '{solutions_dir}/'")
-
     rows = []
-    for p in paths:
-        try:
-            with open(p, encoding="utf-8") as fh:
-                data = json.load(fh)
-            data["_file"] = os.path.basename(p)
-            data["status"] = "OK"
-            data["note"] = ""
-            rows.append(data)
-        except Exception as e:
-            print(f"  SKIP {p}: {e}", file=sys.stderr)
+    for name, data in run_cache.load_runs(solutions_dir):
+        if "_error" in data:
+            print(f"  SKIP {os.path.join(solutions_dir, name)}: "
+                  f"{data['_error']}", file=sys.stderr)
+            continue
+        # copied: the cache hands out the record it will hand the next caller
+        # in this process, and the annotators below write into these dicts
+        data = dict(data)
+        data["_file"] = name
+        data["status"] = "OK"
+        data["note"] = ""
+        rows.append(data)
 
+    if not rows:
+        print(f"  WARNING: no run .json files found in '{solutions_dir}/'")
     print(f"  Loaded {len(rows)} finished run(s) from '{solutions_dir}/'")
     return rows
 
@@ -461,28 +463,33 @@ def _annotate_solver_gap(rows: list[dict], logs_dir: str):
     return n_hit
 
 
-_ORACLE_CACHE: dict = {}   # instance -> oracle dict (or None), memoized per run
-
-
 def _oracle_for(instance: str, solutions_dir: str):
-    """Load the shared oracle cache solutions/oracle_<instance>.json on demand.
+    """The shared oracle cache for `instance`, or None when it is unsolved.
 
     The oracle is decoupled from method runs: a method's solution file no longer
-    embeds it, so the gap is computed here from this cache whenever it exists.
-    Returns None when the oracle has not been solved yet (gap stays undefined).
-    Kept dependency-light (plain JSON) so reporting needs no solver stack."""
-    if instance in _ORACLE_CACHE:
-        return _ORACLE_CACHE[instance]
-    path = os.path.join(solutions_dir, f"oracle_{instance}.json")
-    oracle = None
-    if os.path.isfile(path):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                oracle = json.load(fh)
-        except Exception:
-            oracle = None
-    _ORACLE_CACHE[instance] = oracle
-    return oracle
+    embeds it, so the gap is computed here from solutions/oracle_<instance>.json
+    whenever it exists.  run_cache hands back the oracle's scalars plus the three
+    schedule facts the gap needs (_ta_N, _misses, _n_sol) — the schedule itself
+    is ~70 KB an oracle and was only ever reduced to those numbers.
+    """
+    rec = run_cache.load_oracles(solutions_dir).get(instance)
+    return None if (rec is None or "_error" in rec) else rec
+
+
+def _oracle_schedule_facts(oracle: dict) -> tuple:
+    """-> (ta_N, misses) from either a cached oracle or an embedded legacy one.
+
+    Runs written before the oracle was decoupled carry their own `oracle` block
+    with a full `sol` list; those are read here so the fallback in
+    _annotate_gap_to_oracle keeps working.
+    """
+    if "_ta_N" in oracle or "_misses" in oracle:
+        return _safe_float(oracle.get("_ta_N")), oracle.get("_misses")
+    sol = oracle.get("sol") or []
+    if not sol:
+        return None, None
+    return (_safe_float(sol[-1].get("ta")),
+            sum(int(s.get("delta") or 0) for s in sol))
 
 
 def _annotate_gap_to_oracle(rows: list[dict], solutions_dir: str = _paths.solutions()):
@@ -518,11 +525,10 @@ def _annotate_gap_to_oracle(rows: list[dict], solutions_dir: str = _paths.soluti
             oracle = _oracle_for(rec.get("instance"), solutions_dir) \
                      or rec.get("oracle") or {}
             oobj = _safe_float(oracle.get("obj"))
-            osol = oracle.get("sol") or []
-            if oobj is not None and osol and t0 is not None:
-                ta_N = _safe_float(osol[-1].get("ta"))
+            ta_N, misses = _oracle_schedule_facts(oracle)
+            if oobj is not None and t0 is not None:
                 if ta_N is not None:
-                    ora_miss    = sum(int(s.get("delta") or 0) for s in osol)
+                    ora_miss    = misses
                     ora_dur     = ta_N - t0
                     ora_dur_pen = ora_dur + (oobj - ta_N)   # + beta * misses
             if dur is not None and ora_dur not in (None, 0):
@@ -704,6 +710,30 @@ def _style_header(cell, bg=_HEADER_BG, fg=_HEADER_FG):
     cell.border    = _BORDER
 
 
+# The Results sheet is ~49 columns x ~11 500 rows, so _style_data runs on
+# ~560 000 cells.  Building a fresh PatternFill/Font/Alignment per cell meant
+# 1.7 M throwaway style objects; there are only a handful of distinct (bg, fg)
+# pairs, so they are built once and shared.  openpyxl emits one <xf> per
+# DISTINCT style either way, so the workbook is unchanged.
+_ALIGN_DATA = Alignment(horizontal="center", vertical="center")
+_FILL_CACHE: dict[str, PatternFill] = {}
+_FONT_CACHE: dict[str, Font] = {}
+
+
+def _fill(bg: str) -> PatternFill:
+    f = _FILL_CACHE.get(bg)
+    if f is None:
+        f = _FILL_CACHE[bg] = PatternFill("solid", start_color=bg)
+    return f
+
+
+def _font(fg: str) -> Font:
+    f = _FONT_CACHE.get(fg)
+    if f is None:
+        f = _FONT_CACHE[fg] = Font(name="Arial", size=10, color=fg)
+    return f
+
+
 def _style_data(cell, row_idx: int, num_fmt: str, status: str):
     if status in ("INFEASIBLE", "infeasible"):
         bg, fg = _INFEASIBLE_BG, _INFEASIBLE_FG
@@ -713,9 +743,9 @@ def _style_data(cell, row_idx: int, num_fmt: str, status: str):
         bg, fg = _UNSOLVED_BG, _UNSOLVED_FG
     else:
         bg, fg = (_ALT_ROW_BG if row_idx % 2 == 0 else "FFFFFF"), "000000"
-    cell.fill      = PatternFill("solid", start_color=bg)
-    cell.font      = Font(name="Arial", size=10, color=fg)
-    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.fill      = _fill(bg)
+    cell.font      = _font(fg)
+    cell.alignment = _ALIGN_DATA
     cell.border    = _BORDER
     cell.number_format = num_fmt
 
@@ -1055,7 +1085,7 @@ def build_feasibility_latex(rows) -> list[str]:
     """
     Table 2 — feasibility / robustness by method.
 
-    The robustness rates (HoS violation, stranding, repairs, window hit) are
+    The robustness rates (infeasibility, window hit) are
     computed over CERTIFIED runs only — runs whose plan the offline solver
     actually finished — so a solver that timed out without certifying its plan
     (ROBU C&CG not converged) does not masquerade as a stranding failure.  Two
@@ -1080,35 +1110,54 @@ def build_feasibility_latex(rows) -> list[str]:
     unmeasured and drop out of the mean, so the caption reports how many solves
     each number rests on.
 
-    Repairs are '--' for the box-robust plans (RO, ROBU): the simulator never
-    invokes a repair for them, so a rate of 0\% would read as a measured result
-    rather than an inapplicable cell.
+    Infeasibility pools the two execution failures — an HoS breach and a
+    stranding — into one column, because that is the operational question: the
+    share of runs the schedule did not survive.  It is an OR over runs, not the
+    sum of the two rates, since a single run can do both and must not be counted
+    twice.  The split still matters to the argument (the failure mode is a
+    readout of what each architecture may change en route: the myopic policy
+    breaches driving limits and never strands, the two-stage plan strands and
+    almost never breaches), so it is reported per method in the caption, where
+    it costs no column.
+
+    The repair-frequency column is dropped: it applied to one method only and a
+    dash in every other row spent a column on a single number.  It remains in
+    the Results sheet.
     """
     ok = [r for r in rows if _is_ok(r)]
 
     # Plain method names: the scenario/horizon configuration belongs in the
     # caption or the running text, not in a parenthesis on every row label.
-    # (data method value, display label, repairs-applicable?, has offline opt?)
+    # (data method value, display label, has offline opt?)
     method_rows = [
-        ("greedy", "Greedy", False, False),
-        ("RO",     "RO",     False, True),
-        ("ROBU",   "ROBU",   False, True),
-        ("LA",     "LA",     False, False),
-        ("2SP",    "SP",     True,  True),
+        ("greedy", "Greedy", False),
+        ("RO",     "RO",     True),
+        ("ROBU",   "ROBU",   True),
+        ("LA",     "LA",     False),
+        ("2SP",    "SP",     True),
     ]
 
     def _rate(recs, pred):
         return (sum(1 for r in recs if pred(r)) / len(recs)) if recs else None
 
+    def _breach(r):
+        return _hos_viol_count(r) > 0
+
+    def _strand(r):
+        return (_mval(r, "n_stranding") or 0) > 0
+
     # rows first, so the caption can state what the Opt. gap column rests on
-    body, cover = [], []
-    for mval, label, has_repair, has_opt in method_rows:
+    # and carry the per-method HoS/SOC split the merged column folds away
+    body, cover, split = [], [], []
+    for mval, label, has_opt in method_rows:
         u      = [r for r in ok if r.get("method") == mval]
         solved = [r for r in u if not _is_unsolved(r)]
-        hos  = _rate(solved, lambda r: _hos_viol_count(r) > 0)
-        strd = _rate(solved, lambda r: (_mval(r, "n_stranding") or 0) > 0)
-        rep  = (_rate(solved, lambda r: (_mval(r, "n_repairs") or 0) > 0)
-                if has_repair else None)
+        # OR, not sum: a run that both breaches and strands is one failed run.
+        infeas = _rate(solved, lambda r: _breach(r) or _strand(r))
+        hos    = _rate(solved, _breach)
+        strd   = _rate(solved, _strand)
+        if hos is not None and strd is not None:
+            split.append(rf"{label} {_pct(hos, 1)}/{_pct(strd, 1)}")
         twh  = _mean([_mval(r, "tw_hit_rate") for r in solved])
         # the offline solves that did NOT prove optimality: the only ones with
         # a gap to optimal worth averaging
@@ -1119,35 +1168,35 @@ def build_feasibility_latex(rows) -> list[str]:
         ogap = _mean(meas) if (has_opt and meas) else None
         if has_opt and nopt_runs:
             cover.append(rf"{label} {len(meas)} of {len(nopt_runs)}")
-        rep_s  = _pct(rep, 1) if has_repair else "--"
         nopt_s = _pct(nopt, 1) if has_opt else "--"
         ogap_s = _pct(ogap, 1) if ogap is not None else "--"
-        body.append(f"{label} & {_pct(hos,1)} & {_pct(strd,1)} & {rep_s} "
+        body.append(f"{label} & {_pct(infeas,1)} "
                     f"& {_pct(twh,1)} & {nopt_s} & {ogap_s} \\\\")
     cover_txt = ("  It averages the solver logs retained for "
                  + ", ".join(cover) + " such solves.") if cover else ""
+    split_txt = ("  Infeasibility pools the two execution failures; as an "
+                 r"HoS-breach/stranding split it is "
+                 + ", ".join(split) + ".") if split else ""
 
     L = []
     L.append(r"\begin{table}[htbp]")
     L.append(r"\centering")
     L.append(r"\caption{Feasibility and robustness statistics by method: "
-             r"HoS-violation rate, SOC-violation (stranding) rate, repair "
-             r"frequency (offline plans), and window hit rate, computed over "
-             r"runs whose plan the "
+             r"the share of runs that failed in execution, through either an "
+             r"HoS breach or a stranding, and the window hit rate, computed "
+             r"over runs whose plan the "
              r"solver certified.  ``Not opt.'' is the share of runs returned at "
              r"the time limit without a proven optimum and ``Opt.\ gap'' the "
              r"mean final MIP gap over those solves alone, the proven optima "
              r"contributing no gap; both are undefined for the online "
              r"policies, which solve no offline program."
-             + cover_txt + r"}")
+             + split_txt + cover_txt + r"}")
     L.append(r"\label{tab:feasibility}")
     L.append(r"\resizebox{\textwidth}{!}{%")
-    L.append(r"\begin{tabular}{lcccccc}")
+    L.append(r"\begin{tabular}{lcccc}")
     L.append(r"\toprule")
-    # "SOC viol." rather than "Stranding": the paper's wording for the same
-    # metric (the battery hitting its floor in execution).
-    L.append(r"\textbf{Method} & \textbf{HoS viol. (\%)} & \textbf{SOC viol. (\%)} "
-             r"& \textbf{Repairs (\%)} & \textbf{TW hit (\%)} "
+    L.append(r"\textbf{Method} & \textbf{Infeasible (\%)} "
+             r"& \textbf{TW hit (\%)} "
              r"& \textbf{Not opt. (\%)} & \textbf{Opt. gap (\%)}\\")
     L.append(r"\midrule")
     L += body
@@ -1175,20 +1224,36 @@ def build_runtime_latex(rows) -> list[str]:
         return out
 
     # (data method value, display, offline?, decision?)
+    #
+    # has_dec=False is a MODELLING statement, not a missing measurement: RO and
+    # ROBU commit every activity and every duration before departure and the
+    # simulator replays the plan, so there is no per-stop decision to time.
+    # Printing 0.00 there invited the reading that they decide at every stop and
+    # happen to be fast, which is the opposite of the architectural point the
+    # section makes.  Greedy does decide at every stop and is merely
+    # instantaneous, so it keeps its zeros.
+    #
+    # The oracle is not a policy but an ex-post bound (Section 6.7), so it has
+    # no online cost by construction and its offline solve time is not retained
+    # in the cache; a row of six dashes carried no information and is dropped.
     method_rows = [
         ("greedy", labels["greedy"], False, True),
-        ("RO",     labels["RO"],     True,  True),
-        ("ROBU",   labels.get("ROBU", "ROBU"), True,  True),
+        ("RO",     labels["RO"],     True,  False),
+        ("ROBU",   labels.get("ROBU", "ROBU"), True,  False),
         ("LA",     labels["LA_mean"], False, True),
         ("2SP",    labels["twosp"],  True,  True),
-        ("__oracle__", "Oracle",     True,  False),   # offline not recorded -> '--'
     ]
 
     L = []
     L.append(r"\begin{table}[htbp]")
     L.append(r"\centering")
     L.append(r"\caption{Computation times by method and instance class: "
-             r"offline solve time (s) and per-stop online decision time (s).}")
+             r"offline solve time (s) and per-stop online decision time (s).  "
+             r"Every offline solve is capped at a 7\,200\,s time limit, so a "
+             r"figure at that value is a method that did not terminate rather "
+             r"than one that took exactly that long.  ``--'' in the per-stop "
+             r"columns marks a method that commits its full schedule before "
+             r"departure and therefore takes no decision en route.}")
     L.append(r"\label{tab:runtime}")
     L.append(r"\begin{tabular}{lcccccc}")
     L.append(r"\toprule")
@@ -1212,8 +1277,6 @@ def build_runtime_latex(rows) -> list[str]:
     L.append(r"\bottomrule")
     L.append(r"\end{tabular}")
     L.append(r"\end{table}")
-    L.append(r"% NOTE: the Oracle offline solve time is not stored in the "
-             r"oracle_*.json cache, so those cells show '--'.")
     return L
 
 

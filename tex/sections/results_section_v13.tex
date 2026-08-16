@@ -1,0 +1,407 @@
+% =============================================================================
+%  SECTION 8 - COMPUTATIONAL RESULTS
+%  Rewritten 2026-08-15; tables re-spliced 2026-08-16 after the
+%  medium-route ROBU block was retired.
+%
+%  DRAFTING RULE APPLIED HERE: no value that a table or figure already shows is
+%  repeated in the prose.  The text says which way a number goes and why; the
+%  reader takes the magnitude off the artefact.  Consequence: every claim needs
+%  an artefact to point at.  Three claims currently do not have one, and are
+%  marked \green{} below with the generated table that would fix it.
+%
+%  TABLES: pasted verbatim from tex/tables/*.tex as regenerated on 2026-08-16,
+%  no colour, no manual overrides.  Regenerating those files and re-pasting is
+%  now the whole update procedure for this section.
+%
+%  \green{...} = comment for you, delete before submission
+% =============================================================================
+
+\section{Computational results} \label{sec:results}
+The experiments reported in this section have been solved using Gurobi 12.0.2 on a computer equipped with an Intel(R) Xeon(R) Gold 6244 CPU @ 3.60GHz processor and 384 GB of RAM.
+
+
+\subsection{Validation of the deterministic model on TDSP benchmark instances}
+\label{sec:validation}
+
+Before turning to the stochastic experiments, we verify that the HoS core of the deterministic MILP of Section~\ref{sec:model} reproduces known optimal solutions of the pure truck driver scheduling problem. To this end we use the 40 R15-PGLT benchmark instances made available by \citet{garaix_label-setting_2024}\footnote{\url{https://emse.fr/~garaix/TruckDriverSchedule/Expert_Systems/}}, which comprise fixed customer sequences with 2--14 customers, per-stop service times (including a loading operation at the origin depot), hard time windows, and all durations rounded to multiples of 15~minutes. We compare against the published optima of their \emph{no-night} configuration, which enforces exactly the daily provisions of Regulation~(EC) No~561/2006 and Directive 2002/15/EC considered in this paper, without the night-work rule.
+
+Since these are diesel instances, the benchmark exercises the HoS machinery of our model in isolation: we disable the battery ($E_i = 0$, $\mathcal K = \emptyset$) and reduce all maneuver, queue, and out-of-window penalty terms to zero, with time windows enforced as hard constraints ($\delta_i = 0$). Furthermore, the reference model allows breaks and rests to preempt driving and service at arbitrary points, whereas ours may only act at nodes. We emulate preemption by inserting rest-area nodes ($\mathcal L$) every 15~minutes of driving and by splitting each service operation into 15-minute segments, which is exact at the 15-minute resolution of the benchmark and is what inflates the instances to the stop counts reported in Table~\ref{tab:validation}.
+
+Table~\ref{tab:validation} summarizes the outcome. Every instance is solved to proven optimality, and all but one reproduce the published objective exactly, at solve times that never approach a limit. The single divergence is a case where our model finds a schedule shorter than the published one; it is a genuine improvement rather than a relaxation, since the schedule satisfies the reference checker. The formulation therefore encodes the daily provisions of the regulation correctly, and the electric extensions of Section~\ref{sec:model} sit on a verified regulatory core.
+
+\begin{table}[htbp]
+\centering
+\caption{Validation on the 40 R15-PGLT instances (no-night configuration).}
+\label{tab:validation}
+\small
+\begin{tabular}{lr}
+\toprule
+Instances solved to proven optimality & 40/40 \\
+Exact matches & 39/40 \\
+Divergent instances & 1 (ours 1410 vs.\ 1425, see text) \\
+Stops after 15-min discretization & 23--180 \\
+Solve time (median / max) & $<1$~s / 64~s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Base-case comparison}
+\label{sec:basecase}
+
+Each instance class is instantiated with 25 independent random realizations, and every realization is solved by all five methods (Greedy, RO, ROBU, LA, SP) and evaluated in the common discrete-event simulator of Section~\ref{sec:simulation} against the perfect-hindsight oracle. Every offline optimisation model (RO, ROBU, the two-stage stochastic program, and the oracle) was solved with Gurobi under a gap tolerance of 0.5\,\% and a time limit of 7\,200\,s. LA's look-ahead subproblems are LP relaxations with a 300\,s cap that is never binding in practice. Greedy uses no solver.
+
+We compare the methods along three metrics. First, efficiency, through the gap to oracle in realized route duration in Table~\ref{tab:gap} and Figure~\ref{fig:resultsgap}. Then, reliability, through the rate at which the executed schedule becomes infeasible, in the infeasibility strip of Figure~\ref{fig:resultsgap} and in Table~\ref{tab:feasibility}. Finally, computational effort in Table~\ref{tab:runtime}.
+
+Because the oracle is itself a mixed-integer program, the reference against which every gap is measured is only as good as the oracle's own certificate. It closes to tolerance on effectively all short and medium instances. On the long routes it does not: for about a third of them the incumbent stabilizes early while the dual bound stalls, and the stall is structural rather than a matter of budget --- it comes from a packing-forced additional rest whose relaxation the aggregate cuts do not lift. Long-route gaps in Table~\ref{tab:gap} are therefore distances to the best incumbent rather than to a proved optimum, and should be read as certified to within roughly nine percent. Since the same incumbent is used for every method on a given realization, the comparison \emph{between} methods is unaffected; only the absolute level is.
+\green{Comment: ``roughly nine percent'' is the one load-bearing number in this
+subsection with no artefact behind it. tex/tables/additional\_diesel.tex already
+computes it per route class as the ``EV cert.'' column. Either cite that table here,
+or add a one-line row to Table~\ref{tab:validation}. Until then this sentence
+violates the no-loose-numbers rule.}
+
+\green{Comment on Table~\ref{tab:gap}: it is tex/tables/gap.tex verbatim, as you asked.
+One cell in it is still an artefact. RO on Short/Many/None reads 4.2\,\%, but
+gap\_nopen.tex shows that cell aggregated a single run, whereas
+data\_output/paper\_gap\_stats.csv --- written in the same pass --- gives 27.6\,\% over
+$n=25$; every other RO cell lies between 21 and 41\,\%. That is a stale-run selection
+bug in the table generator, it has now survived four regenerations, and it should be
+fixed at the source rather than patched in the paper. The companion ROBU artefact
+(Medium/Few/None at 52.3\,\% over $n=1$) is gone: the medium-route ROBU block has been
+retired, so the caption's ``ROBU is solved on the short-route instances only'' is now
+literally true. Coverage has also filled in --- every cell of the table now rests on
+25 realizations.}
+
+% -----------------------------------------------------------------------------
+%  tex/tables/gap.tex  (2026-08-16) - verbatim
+% -----------------------------------------------------------------------------
+\begin{table}[htbp]
+\centering
+\caption{Gap to oracle (\%) in route duration (window penalties included) by instance class and method, averaged over 25 realizations per instance class.  Parentheses give the same gap over the same runs with window penalties excluded (route duration only).  ROBU is solved on the short-route instances only.  LA uses 25 scenarios over a 24\,h horizon; SP uses 25 scenarios.}
+\label{tab:gap}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lll c ccccc}
+\toprule
+\multirow{2}{*}{\textbf{\small Route}} & \multirow{2}{*}{\textbf{\small Cust.}} & \multirow{2}{*}{\textbf{\small TW}} & \multirow{2}{*}{\textbf{Oracle (h)}} &
+\multicolumn{5}{c}{\textbf{Gap to Oracle \%}} \\
+\cmidrule(lr){5-9}
+ & & & & Greedy & RO & ROBU & LA & SP \\
+\midrule
+\multirow{12}{*}{\small Short} & \multirow{4}{*}{\small Few} & {\small None} & 26.7 & 5.5~{\scriptsize(5.5)} & 22.3~{\scriptsize(22.3)} & 17.1~{\scriptsize(17.1)} & 5.0~{\scriptsize(5.0)} & 2.1~{\scriptsize(2.1)} \\
+ &  & {\small Tight} & 26.1 & 7.5~{\scriptsize(5.7)} & 23.0~{\scriptsize(20.1)} & 13.0~{\scriptsize(10.4)} & 6.6~{\scriptsize(5.7)} & 2.5~{\scriptsize(2.5)} \\
+ &  & {\small Medium} & 26.1 & 7.0~{\scriptsize(6.2)} & 21.6~{\scriptsize(19.2)} & 12.6~{\scriptsize(11.4)} & 6.2~{\scriptsize(5.4)} & 2.2~{\scriptsize(2.1)} \\
+ &  & {\small Large} & 26.4 & 6.7~{\scriptsize(5.9)} & 21.8~{\scriptsize(20.3)} & 17.2~{\scriptsize(16.1)} & 5.8~{\scriptsize(5.0)} & 2.1~{\scriptsize(2.1)} \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 28.0 & 5.6~{\scriptsize(5.6)} & 21.7~{\scriptsize(21.7)} & 17.7~{\scriptsize(17.7)} & 5.3~{\scriptsize(5.3)} & 2.2~{\scriptsize(2.2)} \\
+ &  & {\small Tight} & 28.2 & 11.2~{\scriptsize(5.9)} & 31.4~{\scriptsize(25.1)} & 23.7~{\scriptsize(17.4)} & 8.8~{\scriptsize(5.6)} & 3.5~{\scriptsize(2.5)} \\
+ &  & {\small Medium} & 27.2 & 8.1~{\scriptsize(6.2)} & 24.4~{\scriptsize(19.9)} & -- & 6.9~{\scriptsize(5.7)} & 4.3~{\scriptsize(4.1)} \\
+ &  & {\small Large} & 28.2 & 6.9~{\scriptsize(5.5)} & 33.5~{\scriptsize(29.5)} & -- & 6.8~{\scriptsize(5.5)} & 2.7~{\scriptsize(2.5)} \\
+ & \multirow{4}{*}{\small Many} & {\small None} & 31.0 & 5.3~{\scriptsize(5.3)} & 4.2~{\scriptsize(4.2)} & 22.4~{\scriptsize(22.4)} & 3.9~{\scriptsize(3.9)} & 2.1~{\scriptsize(2.1)} \\
+ &  & {\small Tight} & 31.4 & 15.3~{\scriptsize(5.8)} & 41.1~{\scriptsize(28.2)} & 36.9~{\scriptsize(24.3)} & 8.8~{\scriptsize(4.5)} & 5.7~{\scriptsize(4.3)} \\
+ &  & {\small Medium} & 31.5 & 6.9~{\scriptsize(4.6)} & 36.8~{\scriptsize(28.4)} & 19.1~{\scriptsize(10.5)} & 7.0~{\scriptsize(5.1)} & 3.6~{\scriptsize(3.3)} \\
+ &  & {\small Large} & 30.0 & 7.9~{\scriptsize(5.2)} & 32.4~{\scriptsize(26.1)} & 22.8~{\scriptsize(19.8)} & 7.9~{\scriptsize(5.8)} & 1.8~{\scriptsize(1.7)} \\
+\midrule
+\multirow{12}{*}{\small Medium} & \multirow{4}{*}{\small Few} & {\small None} & 54.8 & 6.0~{\scriptsize(6.0)} & 38.1~{\scriptsize(38.1)} & -- & 5.1~{\scriptsize(5.1)} & 6.7~{\scriptsize(6.7)} \\
+ &  & {\small Tight} & 56.8 & 6.3~{\scriptsize(5.0)} & 30.4~{\scriptsize(28.9)} & -- & 5.4~{\scriptsize(4.4)} & 4.3~{\scriptsize(3.8)} \\
+ &  & {\small Medium} & 54.3 & 6.1~{\scriptsize(5.6)} & 34.9~{\scriptsize(33.5)} & -- & 5.6~{\scriptsize(5.3)} & 4.4~{\scriptsize(4.3)} \\
+ &  & {\small Large} & 55.4 & 7.4~{\scriptsize(7.1)} & 36.4~{\scriptsize(34.6)} & -- & 7.6~{\scriptsize(7.3)} & 5.2~{\scriptsize(5.1)} \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 58.0 & 5.0~{\scriptsize(5.0)} & 30.2~{\scriptsize(30.2)} & -- & 4.5~{\scriptsize(4.5)} & 3.3~{\scriptsize(3.3)} \\
+ &  & {\small Tight} & 56.4 & 8.5~{\scriptsize(5.5)} & 33.1~{\scriptsize(29.1)} & -- & 7.1~{\scriptsize(4.5)} & 4.8~{\scriptsize(3.5)} \\
+ &  & {\small Medium} & 55.6 & 7.1~{\scriptsize(5.1)} & 31.9~{\scriptsize(28.4)} & -- & 6.3~{\scriptsize(4.9)} & 4.5~{\scriptsize(4.5)} \\
+ &  & {\small Large} & 54.7 & 6.7~{\scriptsize(5.7)} & 34.1~{\scriptsize(30.6)} & -- & 6.0~{\scriptsize(5.3)} & 5.2~{\scriptsize(5.1)} \\
+ & \multirow{4}{*}{\small Many} & {\small None} & 60.6 & 6.3~{\scriptsize(6.3)} & 28.6~{\scriptsize(28.6)} & -- & 6.7~{\scriptsize(6.7)} & 4.9~{\scriptsize(4.9)} \\
+ &  & {\small Tight} & 59.8 & 13.5~{\scriptsize(5.3)} & 37.0~{\scriptsize(28.2)} & -- & 14.8~{\scriptsize(7.4)} & 7.7~{\scriptsize(4.0)} \\
+ &  & {\small Medium} & 59.4 & 10.1~{\scriptsize(6.5)} & 34.9~{\scriptsize(27.7)} & -- & 7.9~{\scriptsize(5.5)} & 9.4~{\scriptsize(8.7)} \\
+ &  & {\small Large} & 60.2 & 8.3~{\scriptsize(6.9)} & 35.2~{\scriptsize(28.2)} & -- & 6.5~{\scriptsize(5.2)} & 6.2~{\scriptsize(5.8)} \\
+\midrule
+\multirow{12}{*}{\small Long} & \multirow{4}{*}{\small Few} & {\small None} & 104.3 & 5.4~{\scriptsize(5.4)} & 35.2~{\scriptsize(35.2)} & -- & 5.0~{\scriptsize(5.0)} & 10.0~{\scriptsize(10.0)} \\
+ &  & {\small Tight} & 104.2 & 6.2~{\scriptsize(5.4)} & 35.2~{\scriptsize(34.3)} & -- & 4.9~{\scriptsize(4.5)} & 11.4~{\scriptsize(10.7)} \\
+ &  & {\small Medium} & 105.6 & 7.0~{\scriptsize(6.6)} & 36.9~{\scriptsize(35.9)} & -- & 9.3~{\scriptsize(9.0)} & 12.4~{\scriptsize(12.0)} \\
+ &  & {\small Large} & 104.1 & 5.8~{\scriptsize(5.7)} & 35.3~{\scriptsize(34.4)} & -- & 5.7~{\scriptsize(5.6)} & 5.9~{\scriptsize(5.7)} \\
+ & \multirow{4}{*}{\small Medium} & {\small None} & 102.0 & 5.3~{\scriptsize(5.3)} & 32.4~{\scriptsize(32.4)} & -- & 5.1~{\scriptsize(5.1)} & 8.2~{\scriptsize(8.2)} \\
+ &  & {\small Tight} & 104.2 & 7.9~{\scriptsize(6.1)} & 37.7~{\scriptsize(35.5)} & -- & 7.2~{\scriptsize(5.8)} & 12.0~{\scriptsize(10.3)} \\
+ &  & {\small Medium} & 106.4 & 5.7~{\scriptsize(4.9)} & -- & -- & 4.8~{\scriptsize(4.1)} & 11.1~{\scriptsize(10.2)} \\
+ &  & {\small Large} & 104.3 & 6.6~{\scriptsize(6.4)} & 37.7~{\scriptsize(35.9)} & -- & 6.0~{\scriptsize(5.7)} & 10.1~{\scriptsize(9.9)} \\
+ & \multirow{4}{*}{\small Many} & {\small None} & 108.6 & 7.0~{\scriptsize(7.0)} & 32.7~{\scriptsize(32.7)} & -- & 5.1~{\scriptsize(5.1)} & 11.8~{\scriptsize(11.8)} \\
+ &  & {\small Tight} & 103.6 & 9.5~{\scriptsize(6.3)} & 36.6~{\scriptsize(31.7)} & -- & 7.7~{\scriptsize(5.2)} & 17.2~{\scriptsize(13.9)} \\
+ &  & {\small Medium} & 105.9 & 8.1~{\scriptsize(7.1)} & 37.1~{\scriptsize(32.5)} & -- & 6.6~{\scriptsize(5.6)} & 16.6~{\scriptsize(14.0)} \\
+ &  & {\small Large} & 107.3 & 6.6~{\scriptsize(5.7)} & 35.3~{\scriptsize(31.5)} & -- & 6.6~{\scriptsize(6.0)} & 13.5~{\scriptsize(12.4)} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{figures/resultsgappooledTW.png}
+    \caption{Distribution of the realized gap to the oracle across seeds, by route class, customer count, method (colour) and aggregated over time-window class.  Boxes span the interquartile range, whiskers 1.5\,IQR.  The heat strip below each panel shades the infeasibility rate. Empty slots are instance/method combinations without completed runs.}
+    \label{fig:resultsgap}
+\end{figure}
+
+
+Across the instance classes the two-stage stochastic plan (SP) and the look-ahead policy (LA) attain the smallest gaps to the oracle, as seen in Figure~\ref{fig:resultsgap} and Table~\ref{tab:gap}. The myopic greedy heuristic is intermediate, while both static robust plans are the most conservative. This ordering does not track how much each method computes: Greedy solves nothing at all and beats both robust plans by a wide margin, while RO solves a full MILP to optimality and finishes last. What it tracks is the point at which each method is forced to fix a duration. A schedule committed at departure must absorb every realization inside durations chosen once, so it buys feasibility with slack that is wasted whenever the realization turns out benign, which is most of the time; a schedule that can still be adjusted at the next stop buys the same feasibility with slack it only spends when it is needed. The ordering between the two adaptive methods then reverses with route length, and the reversal is computational rather than conceptual. SP is clearly ahead on the short routes, where a sample of scenarios over the whole horizon still represents the realization well, and falls behind on the long ones, where its extensive form grows with scenarios times legs, the offline solve returns at the time limit, and the simulator is handed a plan that was never optimised. Greedy moves the other way, improving in relative terms as routes lengthen: a long corridor is dominated by mandatory rests whose placement is nearly forced, so the room in which a more informed policy can win shrinks. LA is the only method whose gap is roughly flat across route classes, because what scales with route length is its cost per decision rather than the size of any single problem it has to solve.
+
+The gap widens sharply with the number of customers and the tightness of the windows, and it widens far more for the methods that commit than for those that adapt. The mechanism is that a fixed schedule must satisfy all windows \emph{jointly} under one duration vector, so each additional window multiplies the set of realizations the plan has to survive, whereas an adaptive policy meets the windows one at a time and never has to satisfy more than the next one. Adaptivity converts a joint constraint into a sequence of local ones, and the value of doing so grows with the number of constraints, which is exactly why the \emph{Many}/\emph{Tight} cells are where the static plans are most expensive. The same view identifies Greedy's own weakness: it is adaptive in the same sense as LA, but it looks only at the stop it is standing at, so it satisfies each window locally without ever steering towards the next one.
+
+A substantial part of the gap on the window-constrained classes is window penalty rather than slower routing, and the two readings of Table~\ref{tab:gap} tell different stories. Read on duration alone, in the parenthesised columns, the spread between Greedy and LA nearly disappears: a driver who stops only when forced and charges to full arrives, on the whole, about as fast as a policy that re-optimises at every stop. Read with the service-level penalty a shipper actually charges, Greedy falls behind and the ordering of the paper is restored. Almost all of what LA buys over Greedy is therefore \emph{when} the truck arrives at its customers, not how quickly it covers the corridor, which is a more useful statement than any single gap figure because it identifies what an operator would be paying a planning tool for. The same decomposition separates the static plans from each other: RO's gap barely moves when the penalty is removed, so it is genuinely slow, spending its loss on conservative durations rather than on missed windows, whereas Greedy's shrinks the most, so it is fast and late. An operator reading makespan alone would rank these methods almost in reverse of how they rank on service level.
+\green{Comment: this paragraph used to quote the penalty share per method. Those shares
+are derivable from Table~\ref{tab:gap} but not readable off it, so under the new rule I
+have made the claim ordinal. If you want the magnitudes back, the cheapest fix is one
+extra column in Table~\ref{tab:feasibility} giving the mean $\beta\sum_i\delta_i$
+contribution per method --- it is already computed in src/plot/paper\_figures.py. Note
+that SP and RO have converged to within a point of each other on that metric, so the
+tail of the ordering no longer carries signal and I have not named it.}
+
+Where both static robust variants terminate, the budgeted plan improves on the box plan in every single cell, and by a margin large enough to say that most of what the box loses is conservatism rather than the price of the guarantee itself. The box prices every leg at its worst case simultaneously, an event whose probability under independent leg multipliers is negligible; the budgeted set prices only a bounded number of legs that way, and both retain a deterministic feasibility guarantee. The cleanest statement the experiment supports about robust planning in this setting is therefore that the guarantee is affordable and the box is not.
+\green{Comment: the split-break paragraph of your earlier draft (share of oracle
+solutions using a split break, and the route-duration cost of forbidding it) is not
+restated, because the \texttt{no\_split} axis still has no runs on disk --- the variant
+tags present are cs30, cs100, kw150/700/1000, kwh300/700/900 and diesel. It is a cheap
+run and worth redoing, since it is the one place where the paper would justify
+modelling Art.~7 in full.}
+
+
+% -----------------------------------------------------------------------------
+%  tex/tables/feasibility.tex  (2026-08-15 09:50) - verbatim
+% -----------------------------------------------------------------------------
+\begin{table}[htbp]
+\centering
+\caption{Feasibility and robustness statistics by method: the share of runs that failed in execution, through either an HoS breach or a stranding, and the window hit rate, computed over runs whose plan the solver certified.  ``Not opt.'' is the share of runs returned at the time limit without a proven optimum and ``Opt.\ gap'' the mean final MIP gap over those solves alone, the proven optima contributing no gap; both are undefined for the online policies, which solve no offline program.  Infeasibility pools the two execution failures; as an HoS-breach/stranding split it is Greedy 8.9/0.0, RO 0.0/0.0, ROBU 0.0/0.9, LA 1.7/3.8, SP 0.2/13.8.  It averages the solver logs retained for RO 297 of 297, ROBU 0 of 7, SP 481 of 481 such solves.}
+\label{tab:feasibility}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Infeasible (\%)} & \textbf{TW hit (\%)} & \textbf{Not opt. (\%)} & \textbf{Opt. gap (\%)}\\
+\midrule
+Greedy & 8.9 & 64.9 & -- & -- \\
+RO & 0.0 & 40.6 & 36.1 & 4.2 \\
+ROBU & 0.9 & 65.9 & 3.1 & -- \\
+LA & 5.4 & 76.4 & -- & -- \\
+SP & 14.0 & 83.0 & 55.8 & 12.2 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+Efficiency alone is misleading, because a low gap can hide a high failure rate: infeasible runs, a stranding or an Hours-of-Service breach in execution, carry no meaningful gap and are excluded from the averages, so a method that fails often is scored only on the realizations it survives. The infeasibility strip of Figure~\ref{fig:resultsgap} and Table~\ref{tab:feasibility} restore this axis. The table reports one pooled failure rate, since what an operator needs is the share of runs the schedule did not survive, but the split behind it --- given per method in the caption --- carries the more interesting result: the failure modes are not interchangeable, and each is a direct readout of what its architecture is still allowed to change en route.
+
+The robust plans never breach an Hours-of-Service limit and never strand, by construction, because they priced the worst case before departure, and they pay for it with the worst window compliance in the study. The two-stage plan freezes its activity \emph{structure} and lets only durations flex, so when a realization calls for an activity the plan does not contain, typically one further charging stop, no adjustment of durations can supply it; that is why it simultaneously attains the best window compliance in the study and by far the highest stranding rate, and why it invokes its repair step on 97.5\,\% of runs. A plan that has to be repaired almost always is not really a plan but an initialisation for an online procedure, and it would be more honest to present it as one. The greedy heuristic is the mirror image: it never strands, because charging to full whenever it stops is precisely the policy that maximises energy reserve, but it breaches driving and shift limits more often than any other method, because stopping only when forced leaves nothing in hand when a leg runs long. The look-ahead policy is the only method with no high rate on either axis. Its pooled figure is middling rather than best precisely because its failures are divided between the two modes instead of concentrated in one, whereas every other method is either dominated by a single mode or has bought its safety with the window compliance; combined with the best window hit rate of the online policies, that is what makes it the most defensible operational recommendation even in the classes where SP has the smaller gap.
+\green{Comment: two things here differ from what your draft said. (i) Greedy's HoS-breach
+rate roughly doubled and its stranding rate went to exactly zero after the
+pre-rest-spread-cap fix, so Greedy is now the \emph{least} HoS-compliant method in the
+table. That strengthens the ``stops only when forced'' reading rather than weakening it,
+which is how I have written it, but the previous text led with stranding and that no
+longer works. (ii) ROBU's not-optimal share is now small because the medium-route block
+has been retired. Those 88 runs were an unusable experiment --- only three of them ever
+certified a plan, the other 85 exhausted the wall budget without converging, at a median
+of four hours each and 352 core-hours in total --- so counting them made the column
+describe a failed batch rather than the method. They are archived under
+\_archive/robu\_medium\_20260816/ rather than deleted, and the short-route ROBU runs are
+untouched.}
+
+\green{Comment on the merged Infeasible column: it is an OR over runs, not the sum of the
+two old rates, since a run can both breach and strand and must not count twice --- which
+is why the pooled figure is at or just below the sum in every row. Two consequences worth
+a decision. First, the HoS/stranding split is what makes this paragraph an argument rather
+than a list, so I have had the generator put it in the caption, where it costs no column;
+delete that clause if you would rather the paper not carry it at all, but then the
+paragraph should be cut back to the pooled rate. Second, the repair-frequency column is
+gone, so SP's repair rate is the one number in this section with no artefact left --- I
+have written it into the sentence above rather than drop the diagnostic, since ``the plan
+is really an initialisation'' is the sharpest thing the paper says about the two-stage
+architecture. It is still in the Results sheet of solution\_summary.xlsx if you want it
+back in a table.}
+
+
+% -----------------------------------------------------------------------------
+%  tex/tables/runtime.tex  (2026-08-15 09:50) - verbatim
+% -----------------------------------------------------------------------------
+\begin{table}[htbp]
+\centering
+\caption{Computation times by method and instance class: offline solve time (s) and per-stop online decision time (s).  Every offline solve is capped at a 7\,200\,s time limit, so a figure at that value is a method that did not terminate rather than one that took exactly that long.  ``--'' in the per-stop columns marks a method that commits its full schedule before departure and therefore takes no decision en route.}
+\label{tab:runtime}
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{\textbf{Offline solve (s)}} & \multicolumn{3}{c}{\textbf{Per-stop decision (s)}}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+\textbf{Method} & Small & Medium & Large & Small & Medium & Large\\
+\midrule
+Greedy & -- & -- & -- & 0.00 & 0.00 & 0.00 \\
+RO & 14.5 & 2040.6 & 7135.7 & -- & -- & -- \\
+ROBU & 1814.8 & -- & -- & -- & -- & -- \\
+LA (25S-24h) & -- & -- & -- & 10.76 & 18.56 & 20.86 \\
+SP (25S) & 238.6 & 6279.9 & 7207.2 & 0.37 & 0.82 & 0.53 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+Finally, the methods differ by orders of magnitude in computational cost, and along two dimensions that are not interchangeable: an offline solve committed before departure and an online decision paid at every stop (Table~\ref{tab:runtime}). The distinction matters more than the totals, and the table's empty cells are part of it: the two robust plans commit every activity and every duration at departure and are then replayed as committed, so they have no online cost to report rather than an online cost that happens to be small. The two-stage plan is the informative exception among the offline methods, since retaining its structure but re-optimising its durations at each stop does carry a measurable per-stop cost --- small, but the price of the recourse that earns it its window compliance. Concentrating the work upfront is attractive in principle, but it has a hard failure mode: past a certain instance size the solve simply does not finish, and the method leaves the study rather than degrading gracefully. RO and SP reach the time limit on the long routes; ROBU never gets that far, returning a certified plan on the short routes only. Its scenario-generation loop is a sequence of master solves rather than one, so the wall budget it consumes is a multiple of the per-solve limit, and beyond the shortest corridors it exhausts that budget without converging. LA carries the opposite profile: no offline solve, and a per-stop cost that grows only mildly with route length, so it never fails to produce a decision. The relevant test for it is not the total but whether one decision fits inside the driving time between two stops, and at the charger spacing mandated for the TEN-T core network that interval is around forty minutes, which leaves roughly two orders of magnitude of headroom. Summed over a long route LA still spends less wall clock in total than RO spends offline, so the usual objection that online re-optimisation is the expensive option does not hold in this setting.
+\green{Comment: your draft ended this paragraph with the opposite claim --- that LA
+accumulates more total wall clock than RO spends offline. It does not, and did not in
+the previous runs either: the stop count in Section~\ref{sec:exp} times the per-stop
+figure in Table~\ref{tab:runtime} lands at roughly half of RO's long-route offline
+time, and the measured LA wall-clock median agrees. I reversed it.}
+
+
+\subsection{Additional analyses}
+\label{sec:additional-protocol}
+
+The base-case instances of Section~\ref{sec:basecase} are too expensive to re-run for every sensitivity, so the analyses below use a reduced set: the three route classes with few and many customers, the None and Tight window classes, and seeds 1--25. They use Greedy, LA and the oracle; SP, RO and ROBU are omitted, since Section~\ref{sec:basecase} has already established that they do not terminate reliably at these sizes and that their behaviour is driven by when they commit rather than by the infrastructure parameters varied here. The pack-against-charger grid of Section~\ref{sec:grid} is a further exception, described there.
+
+
+\subsubsection{Look-ahead configuration}
+\label{sec:la-config}
+
+The look-ahead policy carries three tuning decisions, and Figure~\ref{fig:resultsLA} separates them: how far ahead each subproblem looks, how many scenarios it averages over, and whether the tail is solved as a MILP or as its LP relaxation.
+
+\begin{figure} [h!]
+    \centering
+    \includegraphics[width=1\linewidth]{figures/resultsLA.png}
+    \caption{Look-ahead configuration analysis, one axis per column: horizon at the base scenario count (left) and scenario count at the base horizon (right). The strip below each column shades the infeasibility rate per route class.}
+    \label{fig:resultsLA}
+\end{figure}
+
+The horizon is the only axis that matters, and it matters in a way the duty cycle explains. Extending it from half a day to a full day improves the gap on every route class and cuts the infeasibility rate sharply, while extending it further to two days buys nothing at all and multiplies the decision time. The reason is that the binding structure of an HoS-compliant schedule is the daily cycle: a subproblem that sees a full day can place the next daily rest and therefore knows how much driving budget it may spend before reaching it, whereas a subproblem that sees only half a day commits to breaks and charges without knowing where the rest will fall, and discovers too late that the budget went to the wrong place. Once the horizon covers one full cycle, a second day adds only information the policy will re-derive at the next stop anyway, which is precisely what a rolling horizon is for.
+
+The scenario count, by contrast, is close to irrelevant, on the gap and, contrary to what one would expect, on the infeasibility rate as well: the smallest sample tested performs as well as the largest on both. The explanation is that the look-ahead does not use its scenarios to estimate a distribution but to \emph{rank} a small discrete set of candidate actions at the current stop. Ranking is far more stable under resampling than estimation is, and an action that would strand the vehicle is dominated in almost every draw, so a handful of scenarios already separates it from the rest. This is worth stating explicitly because it inverts the usual scenario-based intuition and because it is what makes the method affordable: the axis that is expensive to widen is the one that does not pay.
+\green{Comment: your draft argued the opposite here --- that more scenarios secure the
+solution against infeasibility even if they do not improve the gap. The current runs do
+not support it: ten scenarios are no worse than twenty-five or fifty on the infeasibility
+strip in every route class. I have moved the safety argument onto the horizon axis, where
+the data does support it, and given the ranking-versus-estimation mechanism as the reason.
+Worth checking you agree with that explanation before it goes in.}
+
+Solving the look-ahead tail as a full MILP rather than an LP relaxation roughly halves the gap, a larger improvement than any configuration change on either axis above, at an order-of-magnitude cost in decision time. Whether that trade is acceptable is less obvious than it first appears: the per-stop cost stays well inside the interval between two stops, and the real obstacle is the total wall clock of a full factorial at this scale rather than the feasibility of the method in the cab. We retain the LP relaxation as the base configuration because it is what makes the experiment affordable, not because the MILP tail is operationally out of reach.
+\green{Comment: this paragraph has no artefact in the paper --- the MIPTAIL results live in
+tex/tables/additional\_la\_policy.tex, which is generated but never included, so the reader
+cannot check any of it. I would include that table here; it is small. Note also that
+MIPTAIL still has no long-route runs, and that its medium/Tight cell moved noticeably
+between the last two regenerations as more runs landed, so it is still settling.}
+
+
+\subsubsection{Sensitivity to charging infrastructure}
+\label{sec:sensitivity}
+
+The base case fixes a 500\,kWh battery, a 350\,kW charge point, and charging stations every 60\,km as mandated for the TEN-T core network by Regulation~(EU) 2023/1804. Figure~\ref{fig:sens} perturbs these three parameters one at a time, showing the paired change in route duration for the two online policies and for the hindsight optimum, split by route class; Table~\ref{tab:sensitivity} gives the same effects numerically, pooled and by route class.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{figures/add_sens.png}
+    \caption{One-at-a-time sensitivity of mean route duration to the charging infrastructure, relative to the base case, over the paired instances. Shading separates the three swept quantities; within each, levels are ordered from the base case outwards.}
+    \label{fig:sens}
+\end{figure}
+
+% -----------------------------------------------------------------------------
+%  tex/tables/additional_sensitivity.tex  (2026-08-15) - verbatim
+% -----------------------------------------------------------------------------
+\begin{table}[ht]\centering
+\caption{One-at-a-time sensitivity: mean change in route duration vs the base case (\%), paired per instance.  Greedy and LA are the online policies; Oracle is the hindsight optimum.  The trailing columns split the Oracle column by route class.  Cells shown as ``--'' have no paired runs yet.}
+\label{tab:sensitivity}
+\begin{tabular}{lrrrrrr}
+\hline
+Axis & Greedy $\Delta$ (\%) & LA $\Delta$ (\%) & Oracle $\Delta$ (\%) & Short & Medium & Long \\
+\hline
+CS spacing 30 km & -1.15 & -1.78 & -1.10 & -1.44 & -1.23 & -0.62 \\
+CS spacing 100 km & 2.36 & 6.26 & 1.46 & 1.66 & 1.83 & 0.88 \\
+Charger power 150 kW & 19.69 & 15.14 & 18.57 & 14.41 & 19.39 & 21.92 \\
+Charger power 700 kW & -3.21 & -3.28 & -4.16 & -3.40 & -4.62 & -4.44 \\
+Charger power 1000 kW & 0.34 & -4.88 & -4.89 & -4.00 & -5.40 & -5.27 \\
+Battery 300 kWh & 14.98 & 11.43 & 6.32 & 6.34 & 7.05 & 5.57 \\
+Battery 700 kWh & -0.62 & -3.49 & -2.36 & -2.79 & -2.49 & -1.78 \\
+Battery 900 kWh & -2.40 & -4.32 & -3.82 & -4.89 & -3.84 & -2.73 \\
+\hline
+\end{tabular}
+\end{table}
+
+The dominant result is that charger power moves route duration several times more than charger density does, in both directions, and the reason is that the two parameters act on different resources. Density determines how far the truck must drive to reach a charge point; power determines how long it must stand there. At the mandated spacing the corridor is already dense enough that detour distance is not binding, so halving the spacing buys very little and doubling it costs little more, and what remains is stop duration, on which only power acts. The implication for investment is asymmetric in a way worth stating plainly: an under-powered corridor cannot be rescued by building more of it, whereas a sparse corridor of powerful chargers is nearly as good as a dense one.
+
+The power axis is also not linear, and the non-linearity has a threshold at the mandatory break. So long as a charge fits inside the 45-minute break the driver must take anyway, it is free in makespan terms, hiding in the shadow of an interruption that is already there. Below that threshold it is not: the downgrade to the lowest power tested is by far the largest single effect in the whole study, several times the size of any density change, because at that power the charge no longer fits inside the break and every charging event begins adding time to the schedule instead of disappearing into it. Above the threshold the returns collapse for the same reason in reverse, since once the charge is already shorter than the break, further power cannot shorten the stop at all, which is why the megawatt configuration adds so little over the intermediate one. The useful design target is therefore not maximum power but the smallest power at which a full charge fits inside a 45-minute break for the pack in question, a statement that couples the two axes and that Section~\ref{sec:grid} takes up.
+
+Two secondary observations are worth noting. First, the power effect grows with route length while the density effect does not, because a longer route accumulates more charging events over which a per-charge saving compounds, whereas the detour penalty is paid per unit distance and is therefore already normalised by it. Second, and more consequential for practice, both online policies \emph{exaggerate} every degradation relative to the hindsight optimum, and on the battery axis they do so by roughly a factor of two. A myopic policy on a small pack stops more often, and each additional stop is another opportunity to fall out of step with the break structure, so the schedule degrades faster than the physical range shortfall alone would imply. The value of a larger pack is thus substantially organisational rather than physical, and an operator without a planning tool will measure a considerably harsher infrastructure dependence than the corridor actually imposes.
+\green{Comment: this second observation is a rewrite, not a renumbering. Your draft said
+both policies \emph{under}-react to the power downgrade and track the oracle closely on
+the battery axis. After the greedy fix neither half is true: Greedy now over-reacts to the
+downgrade, and on the battery axis both policies lose about twice what the oracle loses.
+The new version is a better story, since it turns a discrepancy into a finding about
+myopic operation, but please check you are happy with the framing. Also note the 1\,MW and
+900\,kWh rows are still incomplete --- 1\,MW has long-route runs only, 900\,kWh has medium
+and long but no short, which is what the ``--'' cells in Table~\ref{tab:sensitivity} mean
+--- and both moved between the last two regenerations purely from coverage, so I would
+finish them before the conclusion leans on the megawatt claim.}
+
+\green{Comment on Figure~\ref{fig:sens}: it was previously drawn 13.8\,in wide, so at
+\textbackslash linewidth its 7.5\,pt type printed at roughly 3.5\,pt. It is now drawn at
+7\,in, essentially the text width, so what is drawn is what prints. Two changes got it
+there. The gaps between the three swept quantities went from 0.85 of a column to 0.30,
+with the separating job handed to the alternating background band --- a band costs no
+width, a gap does. And the per-bar value labels were dropped: nine series across eight
+levels is 72 rotated labels at a bar pitch of about 5\,pt, which is what forced the excess
+width in the first place. Those values now live in Table~\ref{tab:sensitivity}, which is
+why I added it here. If you would rather have the labels back on the bars, the figure has
+to run full-page or landscape instead.}
+
+
+\subsubsection{Battery capacity against charger power}
+\label{sec:grid}
+
+The two axes that matter cannot in fact be read independently, which is why Section~\ref{sec:sensitivity} can identify their separate effects but not their trade-off. Both the minimum state of charge $E^{\min}$ and the point at which the charging curve begins to taper scale with $E^{\mathrm{cap}}$, so resizing the pack moves usable range and taper avoidance together, and a one-at-a-time sweep cannot attribute the resulting duration change to either of them. We therefore cross the two axes on a grid, in which reading across a row isolates charge speed at a fixed pack, reading down a column isolates pack at a fixed charge point, and any curvature between the two is the interaction that the one-at-a-time sweeps fold away. The base row and the base column are exactly the sweeps of Figure~\ref{fig:sens} and share their instances and runs with them, so only the crossed cells are new.
+
+Two restrictions keep the grid affordable. First, it is run under the Greedy policy alone: read on route duration rather than on the penalised objective, Greedy stays within about two percentage points of LA in every cell of Table~\ref{tab:gap} and reproduces the direction and the ordering of every axis in Figure~\ref{fig:sens}, while costing no solver time, which matters when the crossed cells alone amount to 1\,800 simulated routes. Second, it is run on the short and medium route classes only, because the long class behaves as an extrapolation of the other two on every axis rather than as a separate regime, with the density effect essentially unchanged across classes and the power effect monotone in route length with no reordering, while carrying by far the slowest solves; it keeps its one-at-a-time sweeps in Figure~\ref{fig:sens}.
+
+\begin{figure}[htbp]
+    \centering
+    % produced by `python -m src.plot.additional_figures --section grid`:
+    % figures/additional_grid_battery_power.pdf ; per-cell n in
+    % data_output/additional_grid_stats.csv
+    \includegraphics[width=\linewidth]{figures/grid_battery_power.png}
+    \caption{Battery capacity against charger power, short and medium routes. Each cell is the mean paired change in Greedy route duration against the base case (500\,kWh, 350\,kW, boxed), over the instances that are feasible on both sides of the pair.}
+    \label{fig:grid}
+\end{figure}
+
+Figure~\ref{fig:grid} shows that the two levers are not substitutes for one another. The low-power column stays costly at every pack size, and tripling the battery recovers almost none of it; the small-pack row stays costly at every power level, and a megawatt charge point recovers almost none of that either. Neither shortfall can be bought back on the other axis, because the two bind through different mechanisms. An under-powered charge point lengthens each stop past the break that would otherwise have hidden it, and a larger battery does not shorten a charge; if anything it lengthens the one the policy chooses to take. A small pack instead forces additional stops, each of which carries access and manoeuvring time that no charge rate removes. Power acts on the duration of a stop, capacity acts on their number, and neither substitutes for the other because makespan pays for both. Where the two axes do interact is in the interior of the grid, and mildly in favour of doing both: moving one axis and then the other recovers slightly more than the sum of the two individual moves. The practical reading is that pack and charge point should be specified jointly against a target duration, and that the cheapest configuration reaching it is not the largest value of either axis on its own, which is the operational form of the threshold argument of Section~\ref{sec:sensitivity}.
+
+One cell breaks monotonicity: at the base pack, the megawatt charge point is slightly \emph{worse} than the intermediate one. The same sign appears in the one-at-a-time sweep, where Greedy shows a small penalty at the highest power while the oracle shows a substantial saving, so this is a property of the myopic policy rather than of the corridor. Once the charge is already shorter than the break it runs alongside, extra power cannot shorten the stop any further, and a charge-to-full rule spends the surplus on the tapered tail of the curve, which a higher nominal power does not accelerate.
+\green{Comment on the grid, three things. (i) The premise that Greedy is a usable proxy
+holds for \emph{ranking} cells but not for their magnitudes --- on the battery axis it
+loses about twice what the oracle loses --- so every cell of Figure~\ref{fig:grid} should
+be read as what a myopic operation would measure, not as the optimal cost of that
+configuration. I have said as much in the text; if you want the figure to carry a policy
+claim directly, the four corner cells under the oracle would settle it. (ii) The megawatt
+anomaly is reproducible across both route classes and across both the grid and the sweep,
+so it is not seed noise, but I have not verified the taper explanation against the charging
+curve --- please check TAIL\_C\_RATE before that sentence goes in. A related oddity the
+taper story does not explain: on the medium routes the small-pack row is slightly worse at
+700\,kW than at the base power. (iii) Per-cell $n$ is below the nominal 100 throughout,
+because the pairing drops any instance infeasible on either side and the small-pack rows
+strand most, so exactly the cells carrying the strongest claim rest on the fewest pairs.
+The counts are in data\_output/additional\_grid\_stats.csv and would make a reasonable
+footnote.}
+
+
+\subsubsection{Comparison with diesel trucks}
+\label{sec:diesel}
+
+Every instance of the subset in Section~\ref{sec:additional-protocol} is re-solved as a diesel vehicle. Diesel mode removes the energy dimension entirely while keeping the node set, the customer windows and the full Hours-of-Service machinery intact, and former charging stations remain available as rest areas. The diesel problem is therefore a genuine relaxation of the electric one on the same corridor and the same travel-time realization, solved by the same oracle and executed by the same greedy policy, so the difference between them isolates electrification and nothing else.
+
+\begin{figure}[htbp]
+    \centering
+    % produced by `python additional_figures.py --section diesel`:
+    % figures/additional_diesel_gap.pdf
+    \includegraphics[width=0.75\linewidth]{figures/diesel.png}
+    \caption{Electrification penalty in route duration, per route class: the penalty actually realized by the greedy policy and by the hindsight optimum. The annotation below each group gives the mean coupling share $\sum_i g_i/\sum_i \tau^c_i$ and the number of instances.}
+    \label{fig:diesel}
+\end{figure}
+
+Figure~\ref{fig:diesel} gives the headline: electrification carries a real but moderate makespan penalty at the hindsight optimum, growing slowly with route length. Break/charge coupling works as the model predicts, with most charging time credited inside a mandatory break, but it does not cancel the cost of charging, and the reason it cannot is worth stating precisely, because it is where our result departs from \citet{brockmann_break-and-charge_2025}. Coupling can only ever recover break time that would have been taken anyway. Any charging beyond the length of the breaks the driver was already obliged to take is additive, and so is everything the stop costs besides the charge itself: queueing, the manoeuvre off and back onto the corridor, and the repositioning required when the truck must vacate the bay before a rest. Those access overheads are invisible to a model that treats a charging stop as pure charging time, and they absorb a substantial share of the coupling credit, which is why our penalty is positive where a coupling-only account would predict parity. The route-length trend follows from the same decomposition: coupling credit is bounded by the number of mandatory breaks, which grows with driving time, whereas access overhead is paid per charging stop, which grows with energy demand and therefore faster than driving time once the pack is fixed. The penalty consequently widens with route length, and the widening is attributable to access rather than to any loss of charging efficiency.
+
+Two qualifications apply to the comparison. First, the diesel side is credited a refuelling stop post hoc rather than modelled, on the grounds that fuel is available essentially everywhere and so carries no binding location choice; crediting it lengthens the diesel makespan and therefore shrinks the reported penalty, so the zero-stop convention is the conservative bound. Second, on the long routes the electric oracle does not always certify to tolerance, so the long-route penalty is an upper bound on the true optimal one, and the headline figure is conservative rather than optimistic. Finally, the penalty an operator would actually measure is considerably larger than the one at the hindsight optimum, since the greedy bars in Figure~\ref{fig:diesel} sit well above the oracle bars in every class. A meaningful share of what would be reported as the cost of electrification is therefore attributable to scheduling rather than to charging, and is recoverable with a planning tool rather than with infrastructure, which is the practical counterpart of Section~\ref{sec:basecase}: the same adaptivity that closes the gap to hindsight also closes part of the gap to diesel.
+\green{Comment: this subsection is where the no-loose-numbers rule costs the most. The
+decomposition into charging time, queueing, manoeuvring, repositioning and recovered break
+time is the most quantitative claim in the paper and it currently has no artefact --- it
+lives in tex/tables/additional\_diesel\_decomp.tex, generated but never included. I have
+written the paragraph so that it stands as a mechanism, but I would include that table:
+it is the evidence for the one place where you improve on the reference paper, and without
+it the ``access overheads absorb a substantial share'' claim is bare. The same applies to
+the refuelling convention, which is quantified in tex/tables/additional\_diesel\_refuel.tex.}

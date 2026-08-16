@@ -448,6 +448,20 @@ class BEHDV:
                          max(0, full_data["Tb15"] - tauc_exec) if brk == "b15" else
                          max(0, full_data["Tb30"] - tauc_exec) if brk == "b30" else 0.0)
 
+        # ── 1.4. Sea crossing — forced break of exactly the crossing duration ──
+        # Applies on BOTH paths: the MILP fixes taub to the same value, but a
+        # greedy/fallback action would otherwise execute the 45-minute minimum.
+        # No charging and no rest on board; the boarding overhead is M_lay.
+        _ferry = {int(k): float(v) for k, v in (full_data.get("ferry") or {}).items()}
+        if stop in _ferry:
+            brk        = "b45"
+            rst        = None
+            taub_exec  = _ferry[stop]
+            taur_exec  = 0.0
+            tauc_exec  = 0.0
+            tauq_exec  = 0.0
+            y          = 0
+
         # ── 1.5. Time-window compliance (customer stops only) ──────────────────
         # SIM1 (v3): NO waiting logic.  Service starts immediately at
         # arrival, whether or not the window is open.  An arrival outside
