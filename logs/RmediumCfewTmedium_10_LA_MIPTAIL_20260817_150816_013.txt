@@ -1145,3 +1145,39 @@
 [LA] stop 90 (CS)  t=60.130h  soc=144kWh  cd=2.57h  sd=5.91h  sw=6.44h  phi=0  r2=2  ext_sh=2/2  sd_lim=9h
      horizon [90->92]  travel=0.51h  10 actions × 25 scen  1w  [mean,mip]  ws=prev
      [FREE-MIP]  obj=61.152h  0.1s  ws=no  87v/158c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=1  brk=0    rst=0   61.142h (0.037h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  72.226h (0.037h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.7s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r2  70.226h (0.037h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=b45  rst=0   61.642h (0.037h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.6s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=1  brk=b15  rst=0   61.142h (0.037h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=0 rst=0 chg=0 c+b=0 c+r=0  0.1s
+  -> CHOSEN y=1  brk=b15  rst=0  tauc=15m (+87kWh)  taub=0m  [CONC]  ta=60.130h  td=60.640h  (mean=61.142h)  16.3s
+
+[LA] stop 91 (LAYBY)  t=60.900h  soc=207kWh  cd=2.83h  sd=6.17h  sw=6.96h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [91->92]  travel=0.26h  5 actions × 25 scen  1w  [mean,mip]  pruned=1  ws=prev
+     [FREE-MIP]  obj=61.156h  0.1s  ws=yes  48v/89c
+  y=0  brk=0    rst=0   61.147h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=0    rst=r1  72.314h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=0    rst=r2  70.314h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=0  brk=b45  rst=0   62.064h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.5s)
+  y=0  brk=b30  rst=0   61.814h (0.015h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.6s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=60.900h  td=60.900h  (mean=61.147h)  7.8s
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 61.134 h  (61:08)
+  Duration : 53.134 h
+  Wall     : 6335.3 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RmediumCfewTmedium_10_LA_MIPTAIL_20260817_150816_013_scenarios.json  (coverage=94.5%)
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RmediumCfewTmedium_10_LA_MIPTAIL_20260817_150816_013.json
