@@ -83,6 +83,8 @@ from typing import Optional
 
 import pyomo.environ as pyo
 
+from src.settings import apply_solver_threads as _apply_solver_threads
+
 from src.methods.MILP      import (
     _declare_common_params,
     _solve_quiet,
@@ -674,6 +676,7 @@ def solve_2sp(model: pyo.ConcreteModel,
       extra_options any further Gurobi option → value overrides.
     """
     solver = pyo.SolverFactory("gurobi")
+    _apply_solver_threads(solver)
     solver.options["MIPGap"]    = mip_gap
     solver.options["TimeLimit"] = time_limit
     if heuristics is not None:

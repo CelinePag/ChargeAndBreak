@@ -55,6 +55,7 @@ import pyomo.environ as pyo
 
 from src.instance_gen.instances import compute_time_bounds
 from src.settings import BETA_TW, TRAVEL_TIME_CV_TARGET
+from src.settings import apply_solver_threads as _apply_solver_threads
 from src import paths as _paths
 
 FIGURES_DIR        = _paths.figures()
@@ -1298,6 +1299,7 @@ def _fix_ferry_nodes(m, data: dict) -> None:
 def solve_model(model, tee=True, mipgap=0.005, timelimit=60 * 60 * 2):
     """Solve the full-route MIP (default: 0.5% gap, 2h limit)."""
     solver = pyo.SolverFactory("gurobi")
+    _apply_solver_threads(solver)
     solver.options["MIPGap"]    = mipgap
     solver.options["TimeLimit"] = timelimit
     try:
@@ -1826,6 +1828,7 @@ def _solve_horizon_model(model, time_limit=8, tee=False, relax=True, had_warm=Fa
                         vdata.setub(1.0)
 
     solver = pyo.SolverFactory("gurobi")
+    _apply_solver_threads(solver)
     solver.options["TimeLimit"] = time_limit
     if not relax:
         solver.options["MIPGap"] = 0.005

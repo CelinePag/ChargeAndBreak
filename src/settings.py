@@ -6,7 +6,42 @@ All times in hours, energies in kWh, distances in km.
 """
 
 from __future__ import annotations
+import os
 import numpy as np
+
+# ── solver threading ─────────────────────────────────────────────────────────
+# How many threads Gurobi may use for ONE subproblem solve.  0 keeps Gurobi's
+# own default, which is the machine's physical core count.
+#
+# The default is wrong for a throughput batch and right for a single run, which
+# is why it is an environment variable rather than a constant.  Every LA stop
+# fans its scenario solves over a process pool, and runner_dispatch runs several
+# instances at once, so the concurrent solve count is already jobs x n_workers.
+# Letting each of those grab every core on top of that oversubscribes the
+# machine by another factor of the core count and the time goes into context
+# switching rather than branch-and-bound.  On a batch, set CB_GRB_THREADS=1 and
+# let the parallelism come from running many independent solves; on a single
+# latency measurement, leave it unset so one solve can use the whole machine.
+#
+# Read once at import: each run is its own process, so a per-process value is
+# exactly the granularity wanted, and nothing can change it mid-run.
+try:
+    GUROBI_THREADS = int(os.environ.get("CB_GRB_THREADS", "0") or 0)
+except ValueError:                      # a typo must not take a batch down
+    GUROBI_THREADS = 0
+
+
+def apply_solver_threads(solver):
+    """Pin Gurobi's thread count on a Pyomo solver, if CB_GRB_THREADS is set.
+
+    Goes through solver.options (a command-line argument to the solver) rather
+    than a gurobi.env file: SolverFactory("gurobi") is the SHELL interface, so
+    Gurobi runs in Pyomo's temp directory and would never read a gurobi.env
+    left in the project root.
+    """
+    if GUROBI_THREADS:
+        solver.options["Threads"] = GUROBI_THREADS
+    return solver
 
 # ── ECR energy model — simplified road load ────────────────────────────────────
 # ECR(v) = A/v + B + C·v²  (kWh/km) is not a fitted curve: it is the road-load

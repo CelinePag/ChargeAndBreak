@@ -202,8 +202,10 @@ def _nominal_milp_arrivals(full_data: dict,
     t_greedy = compute_nominal_arrivals(full_data)
 
     try:
+        from src.settings import apply_solver_threads as _apply_solver_threads
         model  = build_model(full_data)
         solver = pyo.SolverFactory("gurobi")
+        _apply_solver_threads(solver)
         solver.options["MIPGap"]    = mip_gap
         solver.options["TimeLimit"] = solver_time_limit
         _sink = _io.StringIO()

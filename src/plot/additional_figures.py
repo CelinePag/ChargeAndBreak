@@ -2148,7 +2148,11 @@ _LA_ALL_BY_CFG = {c[0]: c for c in _LA_ALL_CELLS}
 # Configs the CSV may carry that must never become a cell here: other methods,
 # ad-hoc timing probes, and variants that were never launched.  Anything else
 # unrecognised still draws, so a genuinely new cell is not silently dropped.
-_LA_ALL_SKIP = {"GREEDY", "LOCAL", "TB0"}
+_LA_ALL_SKIP = {"GREEDY", "TB0"}
+# Prefix-matched, for the same reason la-report matches variants that way: the
+# LOCAL family arrives under several spellings (LOCAL, LOCAL_MIPTAIL, ...) and
+# an exact-match list lets each new one through as a spurious cell.
+_LA_ALL_SKIP_PREFIX = ("LOCAL",)
 
 
 def section_la_all(csv_name: str = "additional_la_stats.csv",
@@ -2193,6 +2197,7 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
     by_cfg = {c[0]: c for c in cells_all}
     extra = sorted(c for c in have
                    if c not in by_cfg and c not in _LA_ALL_SKIP
+                   and not c.upper().startswith(_LA_ALL_SKIP_PREFIX)
                    and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
     cells = ([c for c in cells_all if c[0] != anchor]
              + [(c, c, c, "*", _LA_HUE_CELL, True, True) for c in extra])
@@ -2265,17 +2270,13 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
         for cfg, tag, _lbl, mk, col, above, leader in cells:
             got = cell(cfg, route)
             if got:
-                # No name on the point: the legend already binds marker to cell,
-                # and repeating it three times per panel is the label clutter
-                # the ladders genuinely need and these cells do not.  The rungs
-                # keep theirs because L12 / S50 carry a VALUE the legend cannot
-                # state — it names the ladder, not which rung is which.  The
-                # only thing left worth printing is a run count, and only while
-                # the cell is still filling up.
-                tag = (f"n={n_runs(cfg, route):.0f}"
-                       if partial(cfg, route) else "")
+                # Nothing printed on the point at all: the legend already binds
+                # marker to cell, and the ladders are the only series whose
+                # labels carry a VALUE the legend cannot state — it names the
+                # ladder, not which rung is which.  Run counts belong in the
+                # table, not scattered over the panels.
                 out.append(("cell", anchor if leader else None,
-                            [(tag, False, col, mk, not above, *got)]))
+                            [("", False, col, mk, not above, *got)]))
         return out
 
     allpts = [p for r in routes for _k, _a, pts in paths(r) for p in pts]
@@ -2507,6 +2508,125 @@ def section_la_local():
                    # a timing probe is a few instances on purpose; one run is
                    # already the measurement, not a sample of one
                    min_n=1)
+    section_la_local_table()
+
+
+# ── the LOCAL timing table ───────────────────────────────────────────────────
+# Read from the LOGS, not the solution JSONs, for two reasons.  The stored
+# metrics keep only a mean and a max over ALL stops, so a CS-only figure has to
+# be re-derived per stop anyway; and a timing measurement does not need the run
+# to have finished, because every completed stop has already printed its own
+# line.  Only a gap needs a finished route, and this table carries none — which
+# is what lets a run still in progress contribute the stops it has done.
+_LA_LOCAL_LOG_HDR = re.compile(r"^\[LA\] stop (\d+) \((\w+)\)")
+_LA_LOCAL_LOG_CHO = re.compile(r"-> CHOSEN .*?([\d.]+)s\s*$")
+# (solver, no_split) -> the two label columns, in the order the table reads.
+# Grouped by solver rather than by regime: with the regime broken out into a
+# column of its own, the pairs the reader compares are the two regimes under one
+# solver, so they belong adjacent.
+_LA_LOCAL_ROWS = [
+    ("LP",   False, r"LP",   r"base"),
+    ("LP",   True,  r"LP",   r"no split"),
+    ("MILP", False, r"MILP", r"base"),
+    ("MILP", True,  r"MILP", r"no split"),
+]
+
+
+def _la_local_logs() -> dict:
+    """Per-run CS/all-stop timings for every LOCAL log on disk.
+
+    -> {(solver, no_split): {"done": [...], "running": [...]}}.  A run counts
+    as finished once it has a solution JSON.  Both are pooled into the table,
+    but the split is kept so the count can be flagged: a partial route is not a
+    small sample of a whole one, since the look-ahead is dearest early while the
+    horizon still reaches far ahead.  Measured on the two finished MILP runs,
+    their first 103 stops read 100.5 s and 164.3 s per CS stop against 84.1 s
+    and 129.0 s over the full route — 20 to 27 % hot.
+    """
+    out: dict = {}
+    for path in sorted(glob.glob(_paths.logs("*_LA_LOCAL*.txt"))):
+        rid = os.path.basename(path)[:-4]
+        by, cur, head, inst = {}, None, "", ""
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if "Settings :" in line:
+                    head = line
+                elif "Instance :" in line:
+                    inst = line
+                m = _LA_LOCAL_LOG_HDR.match(line)
+                if m:
+                    cur = m.group(2)
+                    continue
+                if cur:
+                    m = _LA_LOCAL_LOG_CHO.search(line)
+                    if m:
+                        by.setdefault(cur, []).append(float(m.group(1)))
+        css = by.get("CS", [])
+        if not css:
+            continue
+        key = ("MILP" if re.search(r"\bMIP\b", head) else "LP",
+               "__nosplit" in inst)
+        done = bool(glob.glob(_paths.solutions(f"{rid}.json")))
+        out.setdefault(key, {"done": [], "running": []})
+        out[key]["done" if done else "running"].append(
+            dict(all=[t for v in by.values() for t in v], cs=css))
+    return out
+
+
+def section_la_local_table():
+    """§8.3 — what the chosen configuration costs on cab-grade hardware.
+
+    Every row of the 2x2 is printed whether or not it has runs, so the table
+    states the experiment and shows how much of it has landed.
+    """
+    data = _la_local_logs()
+    body, partial = [], []
+    for solver, nosplit, c_solver, c_regime in _LA_LOCAL_ROWS:
+        d = data.get((solver, nosplit), {})
+        runs = d.get("done", []) + d.get("running", [])
+        n_run = len(d.get("running", []))
+        head = f"{c_solver} & {c_regime}"
+        if not runs:
+            body.append(f"{head} & \\multicolumn{{4}}{{c}}{{\\emph{{pending}}}}")
+            continue
+        allv = [t for r in runs for t in r["all"]]
+        css = [t for r in runs for t in r["cs"]]
+        n = f"{len(runs)}" + (f"$^{{\\dagger}}$" if n_run else "")
+        body.append(f"{head} & {n} & {sum(allv) / len(allv):.1f} & "
+                    f"{sum(css) / len(css):.1f} & {max(css):.1f}")
+        if n_run:
+            partial.append(f"{c_solver}/{c_regime} ({n_run})")
+
+    lines = [
+        r"\begin{table}[htbp]\centering",
+        r"\caption{Look-ahead decision cost on a single machine of the class "
+        r"available in a vehicle, pooled over the runs made so far.  "
+        r"Charging-station stops are reported separately because they carry the "
+        r"branching part of the decision and are the wait a driver actually "
+        r"experiences; the maximum is taken over individual stops, not over "
+        r"runs.  The configuration is held at the base cell ($|\Xi| = 25$, "
+        r"$L = 24$\,h) throughout, so the only quantities varying down the "
+        r"table are the subproblem solver and the break regime.}",
+        r"\label{tab:la_local}",
+        r"\begin{tabular}{llrrrr}", r"\toprule",
+        r"Subproblem & Break regime & Runs & $\bar{t}$ / stop (s) & "
+        r"$\bar{t}$ / CS stop (s) & $\max t$ / CS stop (s) \\",
+        r"\midrule",
+    ]
+    lines += [b + r" \\" for b in body]
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    if partial:
+        # Flagged rather than dropped: the run in progress is real measurement,
+        # but its stops are drawn from the expensive early part of a route, so a
+        # reader comparing rows needs to know which ones carry one.
+        lines.append(
+            r"\\[2pt]{\footnotesize $^{\dagger}$ includes a run still in "
+            r"progress (" + ", ".join(partial) + r"), whose completed stops are "
+            r"pooled with the rest.  Such a run contributes only the early part "
+            r"of a route, where the look-ahead is dearest because the horizon "
+            r"still reaches far ahead, so the affected rows read slightly high.}")
+    lines += [r"\end{table}", ""]
+    _write_tex("additional_la_local.tex", "\n".join(lines))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

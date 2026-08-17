@@ -787,7 +787,19 @@ _LA_REGIMES = {"nosplit"}
 # whole Tmedium population into the pooled rows and moved the base cell from 150
 # runs at 5.24 % to 224 at 5.47 %.  A cell must be evidence of its own scope
 # only.
-_LA_NON_CELL_VARIANTS = {"LOCAL", "TB0"}
+_LA_NON_CELL_VARIANTS = {"TB0"}
+# Matched by PREFIX, not by exact string.  An exact-match list was tried and
+# failed twice: a LOCAL batch varies the solver while keeping one label, so the
+# tags arrive as LOCAL, LOCAL_MIPTAIL, and whatever comes next — and each new
+# spelling silently re-entered the sweep, widening the discovered combos to the
+# off-grid instances these probes run on and moving every pooled cell with it.
+_LA_NON_CELL_PREFIXES = ("LOCAL",)
+
+
+def _is_non_cell_variant(variant: str | None) -> bool:
+    """True for a --variant that labels an ad-hoc run rather than a sweep cell."""
+    v = (variant or "").upper()
+    return v in _LA_NON_CELL_VARIANTS or v.startswith(_LA_NON_CELL_PREFIXES)
 
 
 def _split_instance_tag(instance: str | None) -> tuple[str | None, str | None]:
@@ -910,7 +922,7 @@ def _la_discover(rows, cs) -> dict:
         if r.get("method") != "LA" or r.get("status") != "OK":
             continue
         route, cust, tw, seed, regime = _la_coords(r, cs)
-        if (r.get("variant") or "").upper() in _LA_NON_CELL_VARIANTS:
+        if _is_non_cell_variant(r.get("variant")):
             continue                              # ad-hoc run, not a cell
         if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue
@@ -1062,7 +1074,7 @@ def cmd_la_report(args) -> None:
         if r.get("method") not in ("LA", "greedy") or r.get("status") != "OK":
             continue
         route, cust, tw, seed, regime = _la_coords(r, cs)
-        if (r.get("variant") or "").upper() in _LA_NON_CELL_VARIANTS:
+        if _is_non_cell_variant(r.get("variant")):
             continue                              # ad-hoc run, not a cell
         if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue

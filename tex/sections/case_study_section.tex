@@ -41,9 +41,16 @@ corridor is sparser than the $60$\,km charger spacing the generator assumes.
 We assign no time windows, as delivery appointments are absent from the export
 and windows fitted to the observed arrivals would build the realised schedule
 into the instance, so the case study reads against the Long/Many/None row of
-Table~\ref{tab:gap}.  \red{Pending: realised duration, gap to oracle and
-infeasibility for all methods, and whether the oracle certifies within budget
-at this size.}
+Table~\ref{tab:gap}.  Results are given in Table~\ref{tab:usecase}.  The
+oracle certifies to within $0.5\%$ on every realization, so the instance is not
+the computational obstacle its size suggests.  LA ($2.5\%$) and the greedy rule
+($2.8\%$) both come closer to the oracle here than on the synthetic instances of
+the same class ($5.1\%$ and $7.3\%$), SP trails at $8.7\%$, and the conservative
+robust plan costs $20.9\%$.  \red{Caveats to resolve before submission: the
+methods were not run at a single common guard configuration; LA's energy
+reserve quantile (0.82) is calibrated on these five realizations; and SP draws
+its scenario sample live, so its feasibility on this geometry varies between
+runs of identical settings.}
 
 \begin{figure}[htbp]
     \centering

@@ -45,6 +45,8 @@ import warnings
 import numpy as np
 import pyomo.environ as pyo
 
+from src.settings import apply_solver_threads as _apply_solver_threads
+
 from src.simulation.BEHDV     import _energy_after_charging
 from src.methods.MILP      import build_model, extract_solution, add_valid_inequalities
 from src.instance_gen.instances import compute_time_bounds
@@ -804,6 +806,7 @@ def oracle_solve(full_data: dict, D_actual_list: list,
             f"start (binary skeleton; Gurobi completes the LP)")
 
     solver = pyo.SolverFactory("gurobi")
+    _apply_solver_threads(solver)
     solver.options["MIPGap"]     = mip_gap
     solver.options["TimeLimit"]  = time_limit
     # Long routes stall on the DUAL bound, not the incumbent (a near-final
