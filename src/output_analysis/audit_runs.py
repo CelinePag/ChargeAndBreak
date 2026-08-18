@@ -59,10 +59,17 @@ LOG_DIR = _paths.logs()
 # of the same thing and --apply would archive the older one.
 _RUN_RE = _paths.RUN_ID_RE
 
-# parameters that must agree across the latest runs of a method.  ROBU's gamma
+# Parameters that must agree across the latest runs of a method.  ROBU's gamma
 # is eps-derived and legitimately varies with N, so it is not listed.
-_KEY_PARAM = {"GREEDY": "prune_quantile", "LA": "n_scenarios",
-              "2SP": "n_scenarios"}
+#
+# Several per method, not one: LA's policy is defined by its energy guard as
+# well as its scenario count, and a batch launched with a different
+# la_energy_quantile is a different policy pooled under the same name.  With
+# only n_scenarios checked, a 514/500 split on that guard sat in the corpus
+# unreported — the check that exists to catch exactly this could not see it.
+_KEY_PARAM = {"GREEDY": ("prune_quantile",),
+              "LA": ("n_scenarios", "la_energy_quantile"),
+              "2SP": ("n_scenarios",)}
 
 # the protocol's greedy departure guard (see additional_analysis.DEFAULT_GUARD)
 GUARD = 0.95
@@ -149,7 +156,13 @@ def audit():
         # the name as authoritative would retro-classify them and quietly drop
         # them out of the base tables.  A run is a variant only when the runner
         # recorded it as one.
-        var = d.get("variant") or None
+        #
+        # effective_variant then applies the LA configuration swap, so this
+        # audit sees the same base/variant split as every table and figure: the
+        # MILP-tail runs are the base LA, the LP-tail ones a variant.
+        var = _paths.effective_variant(d.get("method"),
+                                       d.get("variant") or None,
+                                       d.get("solve_mode"))
 
         title = str(d.get("instance") or "")
         if title not in idx:
@@ -192,13 +205,13 @@ def audit():
 
     # H — parameter consistency over the surviving latest runs
     for (title, alg, _sup, var), (_ts, path) in latest.items():
-        p = _KEY_PARAM.get(alg)
-        if not p:
+        ps_ = _KEY_PARAM.get(alg)
+        if not ps_:
             continue
         rec = records.get(path)
         if rec is None:
             continue
-        v = rec.get(p)
+        v = ", ".join(f"{p}={rec.get(p)}" for p in ps_)
         # A method-configuration sweep varies exactly the parameter this check
         # polices, so each label is its own scope: "LA/S25H12" must not be
         # reported as disagreeing with the base "LA/base" on n_scenarios.
@@ -312,13 +325,12 @@ def main() -> None:
     print("\nH  parameter consistency of surviving runs:")
     for (alg, scope), vals in sorted(params.items()):
         flag = "  <-- INCONSISTENT" if len(vals) > 1 else ""
-        print(f"     {alg:<7} {scope:<12} {_KEY_PARAM[alg]} = "
-              f"{sorted(vals)}{flag}")
+        print(f"     {alg:<7} {scope:<14} {sorted(vals)}{flag}")
 
     for key, label in order:
         ex = buckets.get(key, [])[:3]
         if ex:
-            print(f"\n   e.g. {label.split('  ',1)[1]}:")
+            print(f"\n   e.g. {label.split(None, 1)[-1]}:")
             for p in ex:
                 print(f"     {os.path.basename(p)}")
 

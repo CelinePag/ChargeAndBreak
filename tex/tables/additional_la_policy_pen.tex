@@ -1,5 +1,5 @@
 \begin{table}[htbp]\centering
-\caption{Look-ahead POLICY variants, against the base cell ($|\Xi| = 25$, $L = 24$\,h).  TB0 removes the 5-minute tie-break that buys opportunistic charging; MIPTAIL solves the look-ahead tail as a MIP instead of an LP relaxation.  Gap is the median gap to the hindsight optimum, $\Delta$ the median paired change in penalised objective (arrival $+\ \beta\times$ misses) (positive = worse), $t_{\text{dec}}$ the median decision time per stop.}
+\caption{Look-ahead POLICY variants, against the base cell ($|\Xi| = 25$, $L = 24$\,h).  TB0 removes the 5-minute tie-break that buys opportunistic charging; LPTAIL solves the look-ahead tail as an LP relaxation instead of the MIP the base cell uses.  Gap is the median gap to the hindsight optimum, $\Delta$ the median paired change in penalised objective (arrival $+\ \beta\times$ misses) (positive = worse), $t_{\text{dec}}$ the median decision time per stop.}
 \label{tab:la_policy_pen}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{llrrrrrrrrr}
@@ -8,18 +8,16 @@ Config & Windows & \multicolumn{3}{c}{Short route} & \multicolumn{3}{c}{Medium r
 \midrule
  &  & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) \\
 \midrule
-base & None & 4.3 & -- & 4 & 4.6 & -- & 18 & 4.2 & -- & 20 \\
-base & Tight & 7.6 & -- & 4 & 6.8 & -- & 19 & 5.7 & -- & 21 \\
-MIPTAIL & None & 2.1 & -2.44 & 48 & 2.3 & -1.97 & 84 & 2.7 & -1.19 & 97 \\
-MIPTAIL & Tight & 2.9 & -3.52 & 61 & 3.9 & -3.25 & 111 & 2.7 & -2.29 & 99 \\
-GREEDY & None & 5.3 & +1.22 & 0 & 4.8 & +0.49 & 0 & 4.1 & +0.09 & 0 \\
-GREEDY & Tight & 9.3 & +2.60 & 0 & 8.3 & +0.71 & 0 & 6.1 & +0.52 & 0 \\
-LOCAL_MIPTAIL & None & -- & -- & -- & -- & -- & -- & 1.5 & -- & 59 \\
-LOCAL_MIPTAIL & Tight & -- & -- & -- & -- & -- & -- & 2.7 & -2.35 & 92 \\
-MIPTAIL+NOSPLIT & None & 2.1 & -2.36 & 31 & 1.9 & -1.97 & 59 & 2.5 & -0.64 & 64 \\
-MIPTAIL+NOSPLIT & Tight & 2.9 & -3.65 & 41 & 2.7 & -2.14 & 67 & 3.4 & -0.80 & 74 \\
-NOSPLIT & None & 4.4 & +0.00 & 10 & 4.3 & +0.00 & 13 & 3.1 & +0.00 & 15 \\
-NOSPLIT & Tight & 7.1 & +0.00 & 10 & 7.4 & +0.00 & 14 & 4.2 & +0.00 & 16 \\
+base & None & 2.0 & -- & 42 & 2.2 & -- & 78 & 2.4 & -- & 91 \\
+base & Tight & 2.8 & -- & 51 & 3.6 & -- & 103 & 3.3 & -- & 100 \\
+LPTAIL & None & 4.3 & +2.18 & 4 & 4.6 & +1.98 & 18 & 3.9 & +1.41 & 20 \\
+LPTAIL & Tight & 7.6 & +4.24 & 4 & 6.8 & +3.39 & 18 & 5.3 & +1.41 & 21 \\
+GREEDY & None & 5.3 & +3.20 & 0 & 4.7 & +2.49 & 0 & 4.1 & +1.45 & 0 \\
+GREEDY & Tight & 9.3 & +6.84 & 0 & 8.7 & +4.07 & 0 & 6.2 & +2.29 & 0 \\
+LPTAIL+NOSPLIT & None & 4.4 & +2.42 & 10 & 4.3 & +2.01 & 13 & 3.1 & +0.65 & 15 \\
+LPTAIL+NOSPLIT & Tight & 7.1 & +3.79 & 10 & 7.4 & +2.27 & 14 & 4.2 & +0.81 & 16 \\
+NOSPLIT & None & 2.1 & +0.00 & 31 & 1.9 & +0.00 & 59 & 2.5 & +0.00 & 64 \\
+NOSPLIT & Tight & 2.9 & +0.00 & 41 & 3.0 & +0.00 & 70 & 3.4 & +0.00 & 74 \\
 \bottomrule
 \end{tabular}%
 }

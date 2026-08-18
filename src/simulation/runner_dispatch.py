@@ -184,7 +184,10 @@ def run_algorithm(
     horizon_hours: float   = 12.0,
     time_limit: int        = 300,
     n_workers              = None,
-    solve_mode: str        = "lp",
+    # The standard LA configuration solves its look-ahead tail as a MIP (the
+    # runs stored under the historic "MIPTAIL" tag); "lp" is the superseded
+    # default and now produces a variant — see paths.effective_variant.
+    solve_mode: str        = "mip",
     charge_only: bool      = False,
     criterion: str         = "mean",
     tiebreak_min: float    = 5.0,
@@ -906,8 +909,11 @@ if __name__ == "__main__":
     parser.add_argument("--horizon",     type=float, default=12.0)
     parser.add_argument("--time_limit",  type=int,   default=300)
     parser.add_argument("--n_workers",   type=int,   default=8)
-    parser.add_argument("--solve_mode",  type=str,   default="lp",
-                        choices=["lp", "mip", "both"])
+    parser.add_argument("--solve_mode",  type=str,   default="mip",
+                        choices=["lp", "mip", "both"],
+                        help="LA look-ahead tail: mip is the standard "
+                             "configuration; lp is the superseded default and "
+                             "is reported as the LPTAIL variant")
     parser.add_argument("--charge_only", action="store_true", default=False)
     parser.add_argument("--criterion",   type=str,   default="mean",
                         choices=["mean", "worst", "best", "cvar_0.8"],

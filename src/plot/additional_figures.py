@@ -108,8 +108,8 @@ def _dir_index(directory: str) -> list[str]:
     return names
 
 
-def _latest(pattern: str) -> str | None:
-    """Newest file matching ``pattern`` (lexicographic, i.e. by run timestamp).
+def _matches(pattern: str) -> list[str]:
+    """Every file matching ``pattern``, oldest first (lexicographic = by run ts).
 
     NOT glob.glob: every call re-scanned the whole directory, and solutions/ now
     holds >10k files at ~54 ms a scan.  §8.3 alone makes ~14 400 of these calls
@@ -134,7 +134,13 @@ def _latest(pattern: str) -> str | None:
         lo = bisect.bisect_left(names, prefix)
         hi = bisect.bisect_left(names, prefix + "￿")
         block = [n for n in names[lo:hi] if fnmatch.fnmatchcase(n, pat)]
-    return os.path.join(directory, block[-1]) if block else None
+    return [os.path.join(directory, n) for n in block]
+
+
+def _latest(pattern: str) -> str | None:
+    """Newest file matching ``pattern``, or None."""
+    block = _matches(pattern)
+    return block[-1] if block else None
 
 
 _DIR_SETS: dict[str, set[str]] = {}
@@ -184,26 +190,93 @@ def _load_oracle(path: str) -> dict | None:
     return _ORACLE_JSON[path]
 
 
-def _policy(stem: str, alg: str, tag: str | None = None) -> dict | None:
-    """Latest simulated-policy solution for a (possibly tagged) instance.
+# Preference order among the runs of one (instance, method).  The glob cannot
+# express it: "<stem>_LA_*.json" also matches every --variant run of that
+# instance, and since the sort is lexicographic a tag beats the bare timestamp
+# ("S50H24…" > "MIPTAIL…" > "2026…"), so the newest match was routinely a sweep
+# cell rather than the run the section means.  These sections report the METHOD,
+# so they must take the method's standard configuration and never a sweep point.
+#
+# The LP tail is kept as a fallback because the §8.4/§8.5 batches predate the
+# switch to the MIP tail and ran the policy under the old default: on those
+# instances it is the only LA run there is, and dropping it would silently empty
+# the LA series instead of reporting the runs that exist.
+_POLICY_PREF = (None, _paths.LA_LEGACY_VARIANT)
+
+# Policy parameters the variant tag does NOT capture, per method.  A paired
+# delta divides two runs of "the same policy", and the tag alone does not
+# establish that: LA's committed-charge energy guard is stored as a plain field
+# and the base corpus holds both 0.5 and None runs, so an EV leg guarded at 0.5
+# could be divided by an unguarded diesel one and the ratio would carry the
+# guard as well as the drivetrain.  audit_runs polices the same parameters
+# WITHIN a scope; this polices them ACROSS the two legs of a pair.
+_PAIR_PARAMS = {"LA": ("la_energy_quantile",)}
+
+
+def _policy(stem: str, alg: str, tag: str | None = None,
+            cfg: str | None = ...) -> dict | None:
+    """Standard-configuration simulated-policy solution for one instance.
 
     ``alg`` is the run-id algorithm token (GREEDY, LA, 2SP, RO, ROBU).  Accepts
     both the '__tag' stem (orchestrator batch) and the runner-normalised
-    '_tag'.
+    '_tag'.  Newest run wins within a configuration; configurations are ranked
+    by _POLICY_PREF, and a run of any other one is not a candidate at all.
+
+    ``cfg`` pins the configuration instead of ranking them — the ellipsis
+    default means "rank", since None is itself a configuration (the standard
+    one).  _policy_pair uses it to hold both legs of a paired delta on one
+    configuration; nothing else should need it.
     """
     pats = ([_paths.solutions(f"{stem}_{alg}_*.json")] if tag is None else
             [_paths.solutions(f"{stem}__{tag}_{alg}_*.json"),
              _paths.solutions(f"{stem}_{tag}_{alg}_*.json")])
+    order = _POLICY_PREF if cfg is ... else (cfg,)
     for p in pats:
-        f = _latest(p)
-        if f:
+        best = {}
+        for f in _matches(p):
             # duration_h + metrics only, so the stripped run_cache record is
             # enough and the trajectory arrays are never read off disk.
             d = _RUNS_BY_NAME().get(os.path.basename(f))
-            if d and d.get("duration_h") is not None:
+            if not d or d.get("duration_h") is None:
+                continue
+            got = _paths.effective_variant(d.get("method"), d.get("variant"),
+                                           d.get("solve_mode"))
+            if got in order:
+                best[got] = d           # matches are ordered, so the last wins
+        for want in order:
+            d = best.get(want)
+            if d is not None:
                 infeas = bool((d.get("metrics") or {}).get("run_infeasible"))
-                return dict(duration=float(d["duration_h"]), infeasible=infeas)
+                return dict(duration=float(d["duration_h"]), infeasible=infeas,
+                            params=tuple(d.get(k) for k in
+                                         _PAIR_PARAMS.get(alg.upper(), ())))
     return None
+
+
+def _policy_pair(stem: str, alg: str, tag: str | None):
+    """(base run, variant run) for one instance, under ONE configuration.
+
+    A paired delta divides two runs of the same policy, so both legs have to be
+    the same configuration of it or the ratio carries the configuration as well
+    as the perturbation.  Two independent _policy calls cannot guarantee that
+    since the swap: the base instances hold both tails (the MILP one is
+    standard, the LP one is the LPTAIL variant) while the §8.4/§8.5 variant
+    instances were run under the old default and hold only the LP tail, so
+    ranking each leg on its own pairs a MILP base against an LP variant.
+
+    So: take the most-preferred configuration that BOTH legs have, and if there
+    is none, report no pair at all.  A missing pair reads as pending, which the
+    callers already handle; a mixed one would read as a measurement.
+
+    The same rule covers the parameters no tag records (_PAIR_PARAMS): legs that
+    disagree on one are not a pair either, however well their tags match.
+    """
+    for cfg in _POLICY_PREF:
+        base = _policy(stem, alg, None, cfg=cfg)
+        var  = _policy(stem, alg, tag, cfg=cfg)
+        if base and var and base["params"] == var["params"]:
+            return base, var
+    return None, None
 
 
 def _greedy(stem: str, tag: str | None = None) -> dict | None:
@@ -387,17 +460,21 @@ def section_diesel():
                 st       = _stem(route, cust, tw, seed)
                 ev_o     = _oracle(st)
                 di_o     = _oracle(st, "diesel")
-                ev_g     = _greedy(st)
-                di_g     = _greedy(st, "diesel")
+                # Paired, so each policy is compared against ITSELF across the
+                # two drivetrains: _policy_pair holds both legs on one
+                # configuration, which for LA is what keeps a MILP-tail EV run
+                # from being divided by an LP-tail diesel one.
+                ev_g, di_g = _policy_pair(st, "GREEDY", "diesel")
+                ev_l, di_l = _policy_pair(st, "LA", "diesel")
 
                 fuel  = _refuel_h(route)         # post-hoc diesel fuel stop(s)
                 dur_d = (di_o["duration"] + fuel) if di_o else None
 
-                pen_o = pen_g = coup = None
+                pen_o = pen_g = pen_l = coup = None
                 # Absolute counterpart of the percentage: the same difference
                 # in hours, so the figure states the penalty in the unit the
                 # operator actually plans in.
-                dt_o = dt_g = None
+                dt_o = dt_g = dt_l = None
                 if ev_o and dur_d and dur_d > 0:
                     pen_o = 100 * (ev_o["duration"] / dur_d - 1)
                     dt_o  = ev_o["duration"] - dur_d
@@ -408,6 +485,12 @@ def section_diesel():
                         and not di_g["infeasible"] and di_g["duration"] > 0):
                     pen_g = 100 * (ev_g["duration"] / (di_g["duration"] + fuel) - 1)
                     dt_g  = ev_g["duration"] - (di_g["duration"] + fuel)
+                # LA exactly as greedy: both legs present, both feasible, so a
+                # run that stranded on one drivetrain only never enters the mean.
+                if (ev_l and di_l and not ev_l["infeasible"]
+                        and not di_l["infeasible"] and di_l["duration"] > 0):
+                    pen_l = 100 * (ev_l["duration"] / (di_l["duration"] + fuel) - 1)
+                    dt_l  = ev_l["duration"] - (di_l["duration"] + fuel)
 
                 # The EV oracle is only an incumbent where the solve hit its
                 # wall budget (long routes stall on the DUAL bound), so the
@@ -418,15 +501,19 @@ def section_diesel():
                                _fmt(dur_d, ".3f", ""),
                                _fmt(ev_o and ev_o["duration"], ".3f", ""),
                                _fmt(pen_o, ".2f", ""), _fmt(pen_g, ".2f", ""),
+                               _fmt(pen_l, ".2f", ""),
                                _fmt(coup, ".1f", ""),
                                _fmt(fuel, ".3f", ""), _fmt(ev_gap, ".2f", "")])
                 d = per_class.setdefault(route, dict(pen_o=[], pen_g=[],
-                                                     dt_o=[], dt_g=[],
+                                                     pen_l=[],
+                                                     dt_o=[], dt_g=[], dt_l=[],
                                                      coup=[],
                                                      dur_d=[], dur_e=[],
                                                      ev_gap=[]))
                 d["pen_o"].append(pen_o); d["pen_g"].append(pen_g)
+                d["pen_l"].append(pen_l)
                 d["dt_o"].append(dt_o);   d["dt_g"].append(dt_g)
+                d["dt_l"].append(dt_l)
                 d["coup"].append(coup)
                 d["dur_d"].append(dur_d)
                 d["dur_e"].append(ev_o and ev_o["duration"])
@@ -434,7 +521,7 @@ def section_diesel():
 
     _write_csv("additional_diesel_stats.csv",
                ["route", "cust", "tw", "seed", "diesel_oracle_h",
-                "ev_oracle_h", "pen_oracle_%", "pen_greedy_%",
+                "ev_oracle_h", "pen_oracle_%", "pen_greedy_%", "pen_la_%",
                 "coupling_%", "refuel_h",
                 "ev_oracle_gap_%"], detail)
 
@@ -448,6 +535,7 @@ def section_diesel():
     # figure annotates "n = have/want" and the table caption names the
     # incomplete classes.  Per-instance values remain in the CSV above.
     coverage = {}
+    la_cover = {}
     for r, d in per_class.items():
         have = sum(1 for v in d["pen_o"] if v is not None)
         want = len(tws_d) * len(seeds_d) * sum(1 for rr, _ in combos_d
@@ -456,9 +544,19 @@ def section_diesel():
         if have < want:
             print(f"  Oracle coverage {r}: {have}/{want} — partial average, "
                   f"reported with its n")
+        # The LA leg needs a standard-configuration run on BOTH drivetrains, so
+        # it fills in as the diesel batch lands and as the base-case MILP-tail
+        # runs reach these instances.  Same treatment as the oracle: report the
+        # partial mean and state what it rests on, never a silent average.
+        have_l = sum(1 for v in d["pen_l"] if v is not None)
+        la_cover[r] = (have_l, want)
+        if have_l < want:
+            print(f"  LA coverage     {r}: {have_l}/{want} — "
+                  + ("partial average, reported with its n" if have_l
+                     else "no paired LA runs yet, bar left empty"))
     oracle_ok = [r for r, (have, _w) in coverage.items() if have]
 
-    # ── figure: greedy vs oracle penalty, per route class ────────────────────
+    # ── figure: policy vs oracle penalty, per route class ────────────────────
     # Two units on one mark: the percentage sits above the bar (it is what the
     # axis measures) and its absolute-hours counterpart sits inside the bar in
     # reversed-out type, so the two never read as a single stacked number.
@@ -468,16 +566,23 @@ def section_diesel():
     # edge, major+minor grid on the response axis, one in-axes legend, and NO
     # title of any kind — the LaTeX \caption carries it (see results_section).
     routes = [r for r in DIESEL_ROUTES if r in per_class]
-    fig, ax = plt.subplots(figsize=(5.2, 2.9))
-    w, x = 0.32, np.arange(len(routes), dtype=float)
-    # Colour follows the entity (paper_style): the same blue as Greedy and the
-    # same neutral grey as the oracle everywhere else in the paper.
-    series = [("Greedy policy", "pen_g", "dt_g", BLUE),
-              ("Hindsight optimum", "pen_o", "dt_o", ps.METHOD_COLOR["oracle"])]
+    fig, ax = plt.subplots(figsize=(5.8, 2.9))
+    x = np.arange(len(routes), dtype=float)
+    # Colour follows the entity (paper_style): the same neutral grey as the
+    # oracle, the same green as LA and the same blue as Greedy everywhere else
+    # in the paper.  Benchmark first, then the policies in decreasing
+    # sophistication (oracle -> LA -> greedy) — the same order as the §8.3
+    # sensitivity figure (_SENS_METHODS).
+    series = [("Oracle", "pen_o", "dt_o", ps.METHOD_COLOR["oracle"]),
+              ("LA", "pen_l", "dt_l", GREEN),
+              ("Greedy", "pen_g", "dt_g", BLUE)]
+    # Width from the series count, so the group re-packs instead of overflowing
+    # into its neighbour when a series is added.
+    w = 0.94 / len(series) - 0.035
     for k, (lbl, key, dkey, col) in enumerate(series):
         vals = [_mean(per_class[r][key]) for r in routes]
         hrs  = [_mean(per_class[r][dkey]) for r in routes]
-        pos  = x + (k - 0.5) * (w + 0.035)      # hairline gap between the pair
+        pos  = x + (k - (len(series) - 1) / 2) * (w + 0.035)
         # nan, not 0: a suppressed class must leave a gap, not draw a bar at
         # zero that reads as "no penalty".
         ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
@@ -488,25 +593,15 @@ def section_diesel():
                 continue
             ax.annotate(f"{v:.1f}%", (p, v), textcoords="offset points",
                         xytext=(0, 3), ha="center", va="bottom",
-                        fontsize=7.5, color=INK, zorder=4)
+                        fontsize=7.0, color=INK, zorder=4)
             if h is not None:
                 ax.annotate(f"{h:+.1f} h", (p, v), textcoords="offset points",
                             xytext=(0, -6), ha="center", va="top",
-                            fontsize=6.5, color="white", zorder=4)
-    # Coupling share only.  The sample size is not annotated here: it is the
-    # same n for every bar in the base sweep, and where a class IS a partial
-    # average the table caption names it (coverage is printed above and kept
-    # per instance in the CSV), so the figure does not repeat it.
-    span = ax.get_xaxis_transform()   # x in data coords, y in axes fraction
-    for xi, r in enumerate(routes):
-        c = _mean(per_class[r]["coup"])
-        have = sum(1 for v in per_class[r]["pen_o"] if v is not None)
-        note = f"{_fmt(c, '.0f')}% coupled" if have else "greedy only"
-        # Fixed point offset, not an axes fraction, so the note clears the tick
-        # labels by the same margin whatever the figure height ends up being.
-        ax.annotate(note, xy=(float(xi), 0), xycoords=span,
-                    xytext=(0, -18), textcoords="offset points",
-                    ha="center", va="top", fontsize=7, color=MUT)
+                            fontsize=6.0, color="white", zorder=4)
+    # Nothing is annotated under the groups: the coupling share is an
+    # oracle-side quantity that the table already reports, and the per-class n
+    # travels with the table too (it is printed above and kept per instance in
+    # the CSV).  The figure carries the three penalties and nothing else.
     ax.set_xticks(x, [ps.ROUTE_LBL[r] for r in routes])
     ax.set_xlim(-0.6, len(routes) - 0.4)
     ax.set_ylabel("Route duration vs. diesel (%)")
@@ -527,11 +622,10 @@ def section_diesel():
                 if v is not None), default=1.0)
     ax.set_ylim(0, _top * 1.32)
     ax.legend(frameon=True, framealpha=0.92, edgecolor="none",
-              facecolor="white", fontsize=7.5, ncol=2, loc="upper center",
-              handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
-    # Bottom reserve: the coupling notes hang below the axes and tight_layout
-    # does not measure annotations drawn outside them.
-    fig.tight_layout(rect=(0, 0.06, 1, 1))
+              facecolor="white", fontsize=7.5, ncol=len(series),
+              loc="upper center", handlelength=1.1, handletextpad=0.4,
+              columnspacing=1.0)
+    fig.tight_layout()
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
@@ -565,6 +659,16 @@ def section_diesel():
         cov_note += (r"  The certification shown is the worst gap among the "
                      r"instances that recorded one; no bound was recorded "
                      r"for " + ", ".join(nb) + r".")
+    # The LA column pairs two policy runs, so it has a coverage of its own and
+    # states it separately from the oracle's n; the sentence goes away when the
+    # pairing is complete.
+    la_part = [f"{r} ({h}/{w})" for r in routes
+               for h, w in [la_cover.get(r, (0, 0))] if h < w]
+    if la_part:
+        cov_note += (r"  The LA column rests on the instances where the "
+                     r"look-ahead has been run under its standard "
+                     r"configuration on both drivetrains: " +
+                     ", ".join(la_part) + r".")
 
     lines = [
         r"\begin{table}[ht]\centering",
@@ -576,9 +680,9 @@ def section_diesel():
         r"incumbent, not a proven optimum, so the penalty is an upper bound "
         r"on the true optimal one." + cov_note + r"}",
         r"\label{tab:diesel}",
-        r"\begin{tabular}{lrrrrrrr}",
+        r"\begin{tabular}{lrrrrrrrr}",
         r"\hline",
-        r"Route & Diesel (h) & EV (h) & Greedy (\%) & "
+        r"Route & Diesel (h) & EV (h) & Greedy (\%) & LA (\%) & "
         r"Oracle (\%) & Coupling (\%) & EV cert. (\%) & $n$ \\",
         r"\hline",
     ]
@@ -588,7 +692,8 @@ def section_diesel():
         lines.append(
             f"{r.capitalize()} & {_fmt(_mean(d['dur_d']))} & "
             f"{_fmt(_mean(d['dur_e']))} & "
-            f"{_fmt(_mean(d['pen_g']))} & {_fmt(_mean(d['pen_o']))} & "
+            f"{_fmt(_mean(d['pen_g']))} & {_fmt(_mean(d['pen_l']))} & "
+            f"{_fmt(_mean(d['pen_o']))} & "
             f"{_fmt(_mean(d['coup']), '.0f')} & "
             f"{_fmt(_maxgap(r), '.1f')} & "
             f"{have}/{want} \\\\")
@@ -625,14 +730,20 @@ def _diesel_by_tw(routes, oracle_ok, scope) -> None:
             for seed in (scope["seeds"] or SEEDS):
                 st  = _stem(route, cust, tw, seed)
                 key = (route, tw)
-                d   = per.setdefault(key, dict(pen_o=[], pen_g=[], obj_o=[],
+                d   = per.setdefault(key, dict(pen_o=[], pen_g=[], pen_l=[],
+                                               obj_o=[],
                                                d_ev=[], d_di=[], brk_di=[]))
                 fuel = _refuel_h(route)
-                ev_g, di_g = _greedy(st), _greedy(st, "diesel")
+                ev_g, di_g = _policy_pair(st, "GREEDY", "diesel")
                 if (ev_g and di_g and not ev_g["infeasible"]
                         and not di_g["infeasible"] and di_g["duration"] > 0):
                     d["pen_g"].append(
                         100 * (ev_g["duration"] / (di_g["duration"] + fuel) - 1))
+                ev_l, di_l = _policy_pair(st, "LA", "diesel")
+                if (ev_l and di_l and not ev_l["infeasible"]
+                        and not di_l["infeasible"] and di_l["duration"] > 0):
+                    d["pen_l"].append(
+                        100 * (ev_l["duration"] / (di_l["duration"] + fuel) - 1))
                 if route not in oracle_ok:
                     continue
                 ev, di = _oracle(st), _oracle(st, "diesel")
@@ -659,15 +770,17 @@ def _diesel_by_tw(routes, oracle_ok, scope) -> None:
     fig, axes = plt.subplots(1, len(routes), figsize=(2.3 * len(routes) + 0.9,
                                                       2.9), sharey=True)
     axes = np.atleast_1d(axes)
-    x, w = np.arange(len(tw_order)), 0.34
-    series = [("Greedy", "pen_g", BLUE), ("Oracle", "pen_o", INK)]
+    x = np.arange(len(tw_order))
+    series = [("Oracle", "pen_o", INK), ("LA", "pen_l", GREEN),
+              ("Greedy", "pen_g", BLUE)]
+    w = 0.90 / len(series)
     top = 0.0
     for ax, route in zip(axes, routes):
         for k, (lbl, key, col) in enumerate(series):
             vals = [_mean(per[(route, tw)][key]) if (route, tw) in per else None
                     for tw in tw_order]
             top  = max([top] + [v for v in vals if v is not None])
-            ax.bar(x + (k - 0.5) * w,
+            ax.bar(x + (k - (len(series) - 1) / 2) * w,
                    [np.nan if v is None else v for v in vals], w,
                    color=col, edgecolor="white", linewidth=0.8,
                    label=lbl if ax is axes[0] else None)
@@ -692,14 +805,17 @@ def _diesel_by_tw(routes, oracle_ok, scope) -> None:
             if not d:
                 continue
             rows.append([route, tw, len(d["pen_o"]), len(d["pen_g"]),
+                         len(d["pen_l"]),
                          _fmt(_mean(d["pen_g"]), ".2f", ""),
+                         _fmt(_mean(d["pen_l"]), ".2f", ""),
                          _fmt(_mean(d["pen_o"]), ".2f", ""),
                          _fmt(_mean(d["obj_o"]), ".2f", ""),
                          _fmt(_mean(d["d_ev"]), ".2f", ""),
                          _fmt(_mean(d["d_di"]), ".2f", ""),
                          _fmt(_mean(d["brk_di"]), ".2f", "")])
     _write_csv("additional_diesel_tw.csv",
-               ["route", "tw", "n_oracle", "n_greedy", "pen_greedy_%",
+               ["route", "tw", "n_oracle", "n_greedy", "n_la",
+                "pen_greedy_%", "pen_la_%",
                 "pen_oracle_%", "pen_oracle_objective_%", "delta_ev",
                 "delta_diesel", "diesel_break_h"], rows)
 
@@ -714,19 +830,25 @@ def _diesel_by_tw(routes, oracle_ok, scope) -> None:
         r"which is what drives the trend: the electric truck takes none in "
         r"any cell, charging through every break it needs.}",
         r"\label{tab:diesel-tw}",
-        r"\begin{tabular}{llrrrrrrr}",
+        r"\begin{tabular}{llrrrrrrrrr}",
         r"\hline",
-        r"Route & Window & $n_G$ & Greedy (\%) & $n_O$ & Duration (\%) & "
+        r"Route & Window & $n_G$ & Greedy (\%) & $n_{LA}$ & LA (\%) & "
+        r"$n_O$ & Duration (\%) & "
         r"Objective (\%) & $\delta_{EV}$ & $\delta_{diesel}$ \\",
         r"\hline",
     ]
+    # Column order of `rows`, which this indexes positionally:
+    #   0 route  1 tw  2 n_O  3 n_G  4 n_LA  5 greedy  6 la  7 duration
+    #   8 objective  9 delta_ev  10 delta_diesel  11 diesel_break_h
     for r in rows:
-        # n differs by column: Greedy drops instances it cannot schedule
-        # feasibly, the oracle drops classes with incomplete coverage.
+        # n differs by column: Greedy and LA drop instances they cannot
+        # schedule feasibly (LA also the ones not yet paired on both
+        # drivetrains), the oracle drops classes with incomplete coverage.
         tex.append(f"{r[0].capitalize()} & {r[1].capitalize()} & "
-                   f"{r[3]} & {r[4] or '--'} & "
-                   f"{r[2] or '--'} & {r[5] or '--'} & {r[6] or '--'} & "
-                   f"{r[7] or '--'} & {r[8] or '--'} \\\\")
+                   f"{r[3]} & {r[5] or '--'} & "
+                   f"{r[4]} & {r[6] or '--'} & "
+                   f"{r[2] or '--'} & {r[7] or '--'} & {r[8] or '--'} & "
+                   f"{r[9] or '--'} & {r[10] or '--'} \\\\")
     tex += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
     _write_tex("additional_diesel_tw.tex", "\n".join(tex))
 
@@ -1087,15 +1209,16 @@ def section_sensitivity():
             for tw in tws_s:
                 for seed in seeds_s:
                     st = _stem(route, cust, tw, seed)
-                    bg, vg = _greedy(st), _greedy(st, tag)
+                    bg, vg = _policy_pair(st, "GREEDY", tag)
                     if (bg and vg and not bg["infeasible"]
                             and not vg["infeasible"] and bg["duration"] > 0):
                         dg[route].append(
                             100 * (vg["duration"] / bg["duration"] - 1))
                     # LA is paired exactly like greedy: both legs must exist and
                     # both must be feasible, so the delta is never contaminated
-                    # by a run that stranded on one side only.
-                    bl, vl = _la(st), _la(st, tag)
+                    # by a run that stranded on one side only — and both must be
+                    # the same configuration, which is what _policy_pair adds.
+                    bl, vl = _policy_pair(st, "LA", tag)
                     if (bl and vl and not bl["infeasible"]
                             and not vl["infeasible"] and bl["duration"] > 0):
                         dl[route].append(
@@ -1336,10 +1459,10 @@ _INFEAS_CMAP = _LSC.from_list("infeas", ["#009E73", "#F0E442", "#D55E00"])
 # has no position on a scenario/horizon ladder.  Listing the expected ones here
 # means a variant that has not been run yet still draws a labelled empty slot,
 # the same convention the rest of this module uses.
-_LA_POLICY_ORDER = ["TB0", "MIPTAIL"]
+_LA_POLICY_ORDER = ["TB0", "LPTAIL"]
 _LA_POLICY_LBL = {
-    "TB0":     "TB0 (no 5-min tie-break)",
-    "MIPTAIL": "MIPTAIL (MIP look-ahead)",
+    "TB0":    "TB0 (no 5-min tie-break)",
+    "LPTAIL": "LPTAIL (LP look-ahead)",
 }
 
 
@@ -1813,7 +1936,7 @@ _LA_EFFECT = {
 
 
 def section_la_policy(effect: str = "dur"):
-    """§8.3 — LA POLICY variants (TB0, MIPTAIL), one figure + one table.
+    """§8.3 — LA POLICY variants (TB0, LPTAIL), one figure + one table.
 
     Separate from section_la on purpose.  The S/H sweep asks "how much compute
     should LA get?" and its cells sit on two ladders; these variants ask "what
@@ -2018,9 +2141,10 @@ def section_la_policy(effect: str = "dur"):
         r"\begin{table}[htbp]\centering",
         r"\caption{Look-ahead POLICY variants, against the base cell "
         r"($|\Xi| = 25$, $L = 24$\,h).  TB0 removes the 5-minute tie-break that "
-        r"buys opportunistic charging; MIPTAIL solves the look-ahead tail as a "
-        r"MIP instead of an LP relaxation.  Gap is the median gap to the "
-        r"hindsight optimum, $\Delta$ the median paired change in "
+        r"buys opportunistic charging; LPTAIL solves the look-ahead tail as an "
+        r"LP relaxation instead of the MIP the base cell uses.  Gap is the "
+        r"median gap to the hindsight optimum, $\Delta$ the median paired "
+        r"change in "
         + eff["tex"] +
         r" (positive = worse), $t_{\text{dec}}$ the median decision "
         r"time per stop.}",
@@ -2096,7 +2220,7 @@ _LA_HUE_SCEN    = "#C2007A"    # magenta  — scenario ladder |Xi|
 # so the solver and the regime both move to the MARKER instead, where four
 # shapes separate cleanly, and the ink stays at full strength for all of them.
 _LA_HUE_CELL    = "#1A1A1A"
-_LA_POLICY_MARK = {"MIPTAIL": "D", "TB0": "v"}
+_LA_POLICY_MARK = {"LPTAIL": "D", "TB0": "v"}
 
 # ── the non-ladder cells ─────────────────────────────────────────────────────
 # Everything that is not a rung on the horizon or scenario ladder, declared in
@@ -2128,8 +2252,8 @@ _LA_POLICY_MARK = {"MIPTAIL": "D", "TB0": "v"}
 # their tags would collide on every panel unless the members of each pair are
 # pushed to opposite sides once, here, instead of being nudged per panel.
 #
-# The CSV keys these by the launcher's tags (MIPTAIL, NOSPLIT, and the crossed
-# MIPTAIL+NOSPLIT written by la-report); the reader sees the model names.  The
+# The CSV keys these by the report's tags (LPTAIL, NOSPLIT, and the crossed
+# LPTAIL+NOSPLIT written by la-report); the reader sees the model names.  The
 # base cells drop a ($|\Xi| = 25$, $L = 24$ h) qualifier: both ladder entries
 # already state that centre point, so repeating it three times padded the legend
 # without adding anything.
@@ -2137,11 +2261,11 @@ _LA_ALL_CELLS = [
     # cfg key         panel tag        legend label            mark colour   above leader
     ("base",            "base",          r"base case",
      "o", _LA_HUE_CELL, True,  False),
-    ("MIPTAIL",         "MILP",          r"MILP subpr.",
+    ("LPTAIL",         "LP",            r"LP subpr.",
      "D", _LA_HUE_CELL, True,  True),
-    ("NOSPLIT",         "LP no-split",   r"base case, no split break",
+    ("NOSPLIT",        "no-split",      r"base case, no split break",
      "^", _LA_HUE_CELL, True,  True),
-    ("MIPTAIL+NOSPLIT", "MILP no-split", r"MILP subpr., no split break",
+    ("LPTAIL+NOSPLIT", "LP no-split",   r"LP subpr., no split break",
      "v", _LA_HUE_CELL, False, True),
 ]
 _LA_ALL_BY_CFG = {c[0]: c for c in _LA_ALL_CELLS}
@@ -2289,10 +2413,11 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
     fmax = max([p[7] for p in allpts if p[7]]
                + [a[2] for a in anch if a[2]] or [1.0])
     # Room for the tags, which are drawn OUTSIDE the data range: the costliest
-    # cell (MIPTAIL on the medium routes, ~95 s) is a wide label anchored to the
-    # right of its marker, and autoscale would clip it against the spine.
+    # cell (the base MIP tail on the medium routes, ~95 s) is a wide label
+    # anchored to the right of its marker, and autoscale would clip it against
+    # the spine.
     # The axis is LINEAR: a log axis puts equal ratios at equal distances, which
-    # flatters the cheap end and makes the base->MIPTAIL leader look like a
+    # flatters the cheap end and makes the base->LPTAIL leader look like a
     # gentle slope instead of the 5-20x jump in compute it actually is.  Cost
     # here is a budget the reader spends in seconds, not a scale-free quantity,
     # so distance on the page should be seconds.
@@ -2339,7 +2464,7 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
                 ax.plot([p[5] for p in pts], [p[6] for p in pts], "-",
                         color=col, lw=1.2, zorder=2)
             elif kind == "cell" and anchor:
-                # A variant is a DISPLACEMENT from its regime's LP arm, not a
+                # A variant is a DISPLACEMENT from its regime's base arm, not a
                 # rung on a ladder, so it is joined to that arm by a dotted
                 # leader which cannot be mistaken for a sampled path.  Drawn
                 # only when the arm exists: without it the displacement has no
@@ -2366,7 +2491,7 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
                                     and c <= _hi)
                 # White stroke under the glyphs: S10 sits a hair below the base
                 # cell on the short routes, which is exactly where the
-                # base->MIPTAIL leader leaves the anchor, and a tag printed
+                # base->LPTAIL leader leaves the anchor, and a tag printed
                 # straight onto a dotted line is unreadable.
                 if not tag:
                     continue                     # keyed by the legend alone

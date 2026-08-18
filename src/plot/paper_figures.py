@@ -153,7 +153,9 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
     # Method-configuration sweeps (--variant) run on the BASE instances, so they
     # carry a valid route/customers/window class and would pool straight into
     # the published figures.  Unlike the "__tag" instance variants, nothing else
-    # filters them out — this line is the only thing that does.
+    # filters them out — this line is the only thing that does.  The LA runs that
+    # ARE the standard configuration reach this point with no variant whichever
+    # tag they were launched under; see paths.effective_variant.
     n_var = sum(1 for r in rows if r.get("variant"))
     if n_var:
         rows = [r for r in rows if not r.get("variant")]

@@ -236,6 +236,7 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
               guard: float | None = None,
               n_scenarios: int | None = None,
               horizon: float | None = None,
+              la_energy_quantile: float | None = None,
               resume: bool = True) -> None:
     """Launch runner_dispatch for one instance pattern.
 
@@ -262,6 +263,13 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
     with other values — the sweep delta would then blend the axis change with
     a scenario-count/horizon change.  Both are forwarded unconditionally:
     greedy, RO and ORACLE accept and ignore them.
+
+    ``la_energy_quantile`` is the same kind of trap and is left unset by
+    default, matching settings.LA_ENERGY_QUANTILE: it sizes LA's committed
+    charge to cover the legs to the next CS at a quantile of CONSUMPTION rather
+    than at nominal, so a sweep run without it is a different policy from a
+    base run made with it.  Forwarded only to a batch containing LA, where it
+    has an effect — the flag is LA-only downstream.
     """
     def _go(alg_spec: str, guarded: bool) -> None:
         cmd = [sys.executable, "-m", "src.simulation.runner_dispatch", pattern, alg_spec,
@@ -279,6 +287,9 @@ def _dispatch(pattern: str, algos: str, jobs: int, dry: bool,
             cmd += ["--n_scenarios", str(int(n_scenarios))]
         if horizon is not None:
             cmd += ["--horizon", str(float(horizon))]
+        if la_energy_quantile is not None and any(
+                a.strip().upper() == "LA" for a in alg_spec.split(",")):
+            cmd += ["--la_energy_quantile", str(float(la_energy_quantile))]
         if extra:
             cmd += extra
         _run(cmd, dry)
@@ -524,7 +535,8 @@ def cmd_sensitivity(args) -> None:
                                          out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
                   guard=args.prune_quantile, resume=args.resume,
-                  n_scenarios=args.n_scenarios, horizon=args.horizon)
+                  n_scenarios=args.n_scenarios, horizon=args.horizon,
+                  la_energy_quantile=args.la_energy_quantile)
 
 
 def _grid_values(spec: dict, raw: str | None) -> list:
@@ -610,7 +622,8 @@ def cmd_grid(args) -> None:
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
                   guard=args.prune_quantile, resume=args.resume,
-                  n_scenarios=args.n_scenarios, horizon=args.horizon)
+                  n_scenarios=args.n_scenarios, horizon=args.horizon,
+                  la_energy_quantile=args.la_energy_quantile)
 
 
 def cmd_diesel(args) -> None:
@@ -625,7 +638,8 @@ def cmd_diesel(args) -> None:
     _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
               extra=["--diesel"], guard=args.prune_quantile,
               resume=args.resume,
-              n_scenarios=args.n_scenarios, horizon=args.horizon)
+              n_scenarios=args.n_scenarios, horizon=args.horizon,
+              la_energy_quantile=args.la_energy_quantile)
 
 
 # The ROBU price-of-robustness (Gamma) frontier was removed in August 2026 —
@@ -713,7 +727,12 @@ def cmd_la(args) -> None:
     run from the oracle cache that is already solved for it.  The compile dedup
     is keyed on (instance, method, supervised, variant), so these runs sit
     alongside the base LA runs instead of displacing them, and the base cell of
-    the sweep IS those unlabelled runs.
+    the sweep IS the standard-configuration runs of those instances.
+
+    Each cell inherits the runner's default tail solver, which since the
+    2026-08-18 swap is the MIP: a ladder launched before that ran the LP tail
+    and its rungs are no longer the same configuration as the cell they are
+    read against, so it has to be re-run to be comparable.
     """
     seeds  = _expand_seeds(args.seeds)
     combos = args.combos.split(",")
@@ -722,8 +741,8 @@ def cmd_la(args) -> None:
     for cfg in [c.strip() for c in args.configs.split(",") if c.strip()]:
         n_scen, horizon = _parse_la_config(cfg)
         if (n_scen, horizon) == (LA_BASE_SCEN, LA_BASE_HORIZON):
-            print(f"skip     {cfg}: that is the base case — the unlabelled "
-                  f"runs already in solutions/ are this cell")
+            print(f"skip     {cfg}: that is the base case — the standard-"
+                  f"configuration runs already in solutions/ are this cell")
             continue
         files = []
         for combo in combos:
@@ -747,7 +766,8 @@ def cmd_la(args) -> None:
                   extra=["--variant", cfg,
                          "--n_scenarios", str(n_scen),
                          "--horizon", f"{horizon:g}"],
-                  guard=None, resume=args.resume)
+                  guard=None, la_energy_quantile=args.la_energy_quantile,
+                  resume=args.resume)
 
 
 def _fmt_seeds(seeds: list) -> str:
@@ -828,18 +848,22 @@ def _la_cell_tag(variant: str | None, regime: str | None,
     """Config label for one cell: the tail solver crossed with the regime.
 
     Two orthogonal things pick out an LA cell.  The VARIANT says what the
-    policy does (absent = the LP tail at the base configuration, MIPTAIL = the
-    MIP tail), and the instance TAG says which regime it runs under (absent =
-    the base instances, nosplit = Art. 7 split break forbidden).  They are
-    crossed rather than merged so that, e.g., MIPTAIL+NOSPLIT can never be
-    silently pooled into MIPTAIL — the collision that cost us a batch once
-    already.  A cell run with an explicit S25H24 tag is the base cell written
-    the long way, so it normalises onto it.
+    policy does (absent = the standard configuration, which since the 2026-08-18
+    swap is the MIP tail; LPTAIL = the superseded LP tail), and the instance TAG
+    says which regime it runs under (absent = the base instances, nosplit =
+    Art. 7 split break forbidden).  They are crossed rather than merged so that,
+    e.g., LPTAIL+NOSPLIT can never be silently pooled into LPTAIL — the
+    collision that cost us a batch once already.  A cell run with an explicit
+    S25H24 tag is the base cell written the long way, so it normalises onto it.
+
+    The variant it reads has already been through paths.effective_variant, so
+    "absent" means the standard configuration whichever tag the run was launched
+    under — the MIP-tail runs are stored under the historic "MIPTAIL" label.
     """
     # Greedy is carried alongside the LA cells as the do-nothing reference —
     # the policy the look-ahead has to beat to justify its compute — so it takes
     # a cell of its own rather than being folded into the base cell, which is
-    # LA's own LP configuration.
+    # LA's own standard configuration.
     cfg = (_norm_la_tag(variant or "base") if method == "LA"
            else method.upper())
     if cfg == f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g}":
@@ -913,9 +937,9 @@ def _la_discover(rows, cs) -> dict:
     to prevent.
 
     A sweep row is one carrying a --variant OR one running under a regime tag
-    (…__nosplit): the regime cell has no variant of its own — its LP arm is an
-    ordinary unlabelled run — but it is still a sweep cell rather than the base,
-    and leaving it out of discovery would filter its own runs away.
+    (…__nosplit): the regime cell has no variant of its own — its standard arm
+    is an ordinary unlabelled run — but it is still a sweep cell rather than the
+    base, and leaving it out of discovery would filter its own runs away.
     """
     cfgs, combos, tws, seeds = set(), set(), set(), set()
     for r in rows:
@@ -926,7 +950,13 @@ def _la_discover(rows, cs) -> dict:
             continue                              # ad-hoc run, not a cell
         if regime and regime not in _LA_REGIMES:  # another axis's sweep
             continue
-        if not r.get("variant") and not regime:   # base cell — not evidence
+        # Neither the base cell nor the LP-tail one is evidence of the sweep's
+        # footprint: LPTAIL is the FORMER base (every seed and combo ever run,
+        # under the old default), so discovering from it would widen the scope
+        # to instances no sweep cell has and set the level column comparing a
+        # full-design average against ten-seed ones.  Both are still reported —
+        # cmd_la_report adds them to wanted_cfg by name.
+        if r.get("variant") in (None, _paths.LA_LEGACY_VARIANT) and not regime:
             continue
         if not route or not cust or seed is None:
             continue
@@ -1049,9 +1079,13 @@ def cmd_la_report(args) -> None:
                   if args.configs else set(found["configs"]))
     wanted_cfg.add("base")
     wanted_cfg.add("GREEDY")      # the do-nothing reference, never swept
-    # A regime cell needs its own LP arm as the reference the MIP arm is read
-    # against, and that arm carries no --variant, so asking for MIPTAIL+NOSPLIT
-    # has to pull NOSPLIT in with it.
+    # The superseded LP tail: reported like any other cell, but excluded from
+    # scope discovery for the reason given in _la_discover, so it has to be
+    # named here or it would never be asked for.
+    wanted_cfg.add(_paths.LA_LEGACY_VARIANT)
+    # A regime cell needs its own standard arm as the reference the variant arm
+    # is read against, and that arm carries no --variant, so asking for
+    # LPTAIL+NOSPLIT has to pull NOSPLIT in with it.
     wanted_cfg |= {c.split("+", 1)[1] for c in list(wanted_cfg) if "+" in c}
     combos = set(args.combos.split(",")) if args.combos else found["combos"]
     tws    = set(args.tw.split(","))     if args.tw     else found["tws"]
@@ -1123,15 +1157,16 @@ def cmd_la_report(args) -> None:
         vals = [v for v in vals if v is not None]
         return (stat.median(vals) if vals else None), len(vals)
 
-    # Paired reference: the LP arm's duration per instance, keyed the same way
-    # the variant rows are, so a missing reference run drops the pair instead of
-    # silently comparing against a different instance.
+    # Paired reference: the standard arm's duration per instance, keyed the same
+    # way the variant rows are, so a missing reference run drops the pair
+    # instead of silently comparing against a different instance.
     #
     # Selected on "carries no --variant" rather than on cfg == 'base', because
-    # a regime cell has its own LP arm and must be read against THAT, not
+    # a regime cell has its own standard arm and must be read against THAT, not
     # against the split-break base: the key already carries the instance id, and
-    # a nosplit copy has a different one, so keying this way pairs each MIP arm
-    # with the LP arm on its own instance and can never cross the two regimes.
+    # a nosplit copy has a different one, so keying this way pairs each variant
+    # arm with the standard arm on its own instance and can never cross the two
+    # regimes.
     # Restricted to LA: greedy also carries no variant, and since the key is
     # (instance, window) a greedy run would otherwise overwrite the LA arm on
     # the same instance and every delta in the table would silently become a
@@ -1260,7 +1295,8 @@ def cmd_guard(args) -> None:
                                     out_dir, args.dry_run)
         _dispatch(pattern, args.algorithms, args.jobs, args.dry_run,
                   guard=q, resume=args.resume,
-                  n_scenarios=args.n_scenarios, horizon=args.horizon)
+                  n_scenarios=args.n_scenarios, horizon=args.horizon,
+                  la_energy_quantile=args.la_energy_quantile)
 
 
 def cmd_vss(args) -> None:
@@ -1340,6 +1376,14 @@ def _add_common(p: argparse.ArgumentParser, algos_default: str) -> None:
                    help="LA look-ahead horizon (h) forwarded to runner_dispatch. "
                         "Match the base case for the same reason as "
                         "--n_scenarios.  Unset = runner_dispatch's default (12).")
+    p.add_argument("--la_energy_quantile", type=float, default=None,
+                   help="LA energy guard forwarded to runner_dispatch: size "
+                        "the committed charge to cover the legs to the next CS "
+                        "at this quantile of consumption instead of at "
+                        "nominal.  Match the base case for the same reason as "
+                        "--n_scenarios.  Unset = off "
+                        "(settings.LA_ENERGY_QUANTILE), which is NOT what the "
+                        "current base LA batch uses.")
     p.add_argument("--no-resume", dest="resume", action="store_false",
                    default=True,
                    help="Disable LA checkpoint/resume (on by default): every "
@@ -1403,7 +1447,8 @@ def main() -> None:
                         help="Comma-separated S<scenarios>H<horizon> cells "
                              f"(default: {LA_DEFAULT_CONFIGS}).  The base case "
                              f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g} is skipped: "
-                             f"the existing unlabelled runs ARE that cell.")
+                             f"the standard-configuration runs already in "
+                             f"solutions/ ARE that cell.")
         pp.add_argument("--combos", default=",".join(LA_COMBOS),
                         help=f"Route+customer combos (default: "
                              f"{','.join(LA_COMBOS)})")
@@ -1414,6 +1459,17 @@ def main() -> None:
 
     p = sub.add_parser("la", help="8.3 LA horizon / scenario-count sweep")
     _add_la_common(p)
+    # Carried for the same reason as --no-resume below: this subcommand
+    # launches LA without taking _add_common's block, and a cell run at a
+    # different energy guard from the base cell is a different policy, not a
+    # point on the horizon/scenario ladder.
+    p.add_argument("--la_energy_quantile", type=float, default=None,
+                   help="LA energy guard forwarded to runner_dispatch (size "
+                        "the committed charge to cover the legs to the next CS "
+                        "at this quantile of consumption instead of at "
+                        "nominal).  Match the base cell, or the ladder mixes "
+                        "the guard with the configuration.  Unset = off "
+                        "(settings.LA_ENERGY_QUANTILE).")
     p.add_argument("--jobs", type=int, default=8,
                    help="Concurrent runs (default: 8, matching the base LA "
                         "batch).  Keep it identical across every cell or the "

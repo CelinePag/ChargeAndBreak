@@ -146,3 +146,57 @@ def make_run_id(instance: str, algo: str, ts: str,
     if idx is not None:
         parts.append(f"{int(idx):03d}")
     return "_".join(parts)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# THE STANDARD LA CONFIGURATION
+# ══════════════════════════════════════════════════════════════════════════════
+# Since 2026-08-18 the standard look-ahead policy solves its tail subproblem as
+# a MILP.  The LP relaxation it used to run is now a VARIANT of it, the exact
+# inverse of the earlier arrangement, and the corpus on disk still carries the
+# old spelling: the MILP runs are tagged "MIPTAIL" in their run_id and the LP
+# runs carry no tag at all.
+#
+# Rather than rewrite ~13 000 file names, the reporting layer maps a stored
+# (variant, solve_mode) pair onto the EFFECTIVE variant every consumer keys on,
+# so "no variant" means "the standard configuration" throughout, whichever
+# spelling produced the run.  Everything downstream — the dedup key, the
+# base-case figures and tables, the coverage and audit inventories, the LA
+# sweep cells — then needs no knowledge of the swap.
+#
+# It lives here, next to the run-id vocabulary it belongs to, because the
+# consumers span reporting modules that do not otherwise import one another.
+LA_STD_VARIANT    = "MIPTAIL"   # historic tag of the runs that are now standard
+LA_LEGACY_VARIANT = "LPTAIL"    # synthetic tag for the superseded LP tail
+
+
+def effective_variant(method: str | None, variant: str | None,
+                      solve_mode: str | None = None) -> str | None:
+    """Stored (variant, solve_mode) -> the variant reporting should key on.
+
+    For every method but LA this is the stored variant unchanged.  For LA:
+
+      untagged or MIPTAIL, solved as a MIP   -> None    (the standard)
+      untagged or MIPTAIL, solved as an LP   -> LPTAIL  (the superseded default)
+      any other tag (S25H12, TB0, LOCAL, …)  -> unchanged
+
+    ``solve_mode`` is what the run actually did and therefore outranks the tag,
+    so a run launched after the default flipped needs no tag to be recognised as
+    standard, and one launched with the wrong pair of flags is filed by what it
+    did rather than by what it was called.  Where the mode is unknown — the rows
+    compile_solutions reconstructs from the log of a run that never finished —
+    the tag decides, and its absence reads as the old LP default, which is what
+    the whole stored corpus is; such rows are unfinished and never reach an
+    aggregate either way.
+    """
+    if (method or "").upper() != "LA":
+        return variant or None
+    tagged_std = variant in (None, "", LA_STD_VARIANT)
+    mode = (solve_mode or "").lower()
+    if mode == "mip":
+        return None if tagged_std else variant
+    if mode == "lp":
+        return LA_LEGACY_VARIANT if tagged_std else variant
+    if variant == LA_STD_VARIANT:        # mode unknown: the tag decides
+        return None
+    return variant or LA_LEGACY_VARIANT

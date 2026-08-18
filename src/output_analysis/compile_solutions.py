@@ -250,6 +250,31 @@ def _pct(x, nd=1):
 # LOADING
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _normalise_la_config(rows: list[dict]) -> int:
+    """Re-file every row onto its EFFECTIVE variant; -> number of rows moved.
+
+    The standard LA configuration solves its look-ahead tail as a MILP, but the
+    stored corpus predates that decision: those runs carry the tag "MIPTAIL"
+    and the superseded LP-tail runs carry no tag at all.  This maps both onto
+    the convention the whole reporting layer already keys on — no variant means
+    the standard configuration — so the base-case figures, the LaTeX tables, the
+    dedup and the LA sweep cells all follow the swap without any of them knowing
+    it happened.  See paths.effective_variant for the mapping.
+
+    Applied at LOAD time, on the row dicts this module hands out, so no consumer
+    can read a raw variant by accident and no file on disk is rewritten: the
+    run_id remains the record of how the run was actually launched.
+    """
+    n = 0
+    for r in rows:
+        eff = _paths.effective_variant(r.get("method"), r.get("variant"),
+                                       r.get("solve_mode"))
+        if eff != (r.get("variant") or None):
+            r["variant"] = eff
+            n += 1
+    return n
+
+
 def load_solutions(solutions_dir: str) -> list[dict]:
     """Load all *.json solution files from solutions_dir (skips oracle caches).
 
@@ -278,6 +303,10 @@ def load_solutions(solutions_dir: str) -> list[dict]:
     if not rows:
         print(f"  WARNING: no run .json files found in '{solutions_dir}/'")
     print(f"  Loaded {len(rows)} finished run(s) from '{solutions_dir}/'")
+    n_la = _normalise_la_config(rows)
+    if n_la:
+        print(f"  Re-filed {n_la} LA run(s) onto the standard configuration "
+              f"(MILP tail) / the '{_paths.LA_LEGACY_VARIANT}' variant (LP tail)")
     return rows
 
 
@@ -363,6 +392,11 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
             wall_clock_s=elapsed,
             oracle={}, metrics={},
         ))
+
+    # Same re-filing as the finished runs get, so an unfinished MILP-tail run
+    # is not counted as an unfinished variant.  These rows carry no solve_mode
+    # (there is no solution file to read it from), so the run-id tag decides.
+    _normalise_la_config(rows)
 
     print(f"  Found {len(rows)} unfinished run(s) referenced in '{logs_dir}/' "
           f"with no matching solution file")

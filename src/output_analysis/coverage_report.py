@@ -44,8 +44,12 @@ TWS     = ["tight", "medium", "large", "none"]
 # tables (the dedup key does not include it)
 # ROBU's gamma is eps-derived and legitimately varies with N, so it is NOT
 # checked.  Only parameters that are supposed to be constant across a class.
-_KEY_PARAM = {"GREEDY": "prune_quantile", "LA": "n_scenarios",
-              "2SP": "n_scenarios", "ROBU": None, "RO": None}
+# Several per method: see the same table in audit_runs — LA's energy guard
+# defines the policy just as its scenario count does, so a class whose runs
+# disagree on it must raise the same "(!)" as one that disagrees on scenarios.
+_KEY_PARAM = {"GREEDY": ("prune_quantile",),
+              "LA": ("n_scenarios", "la_energy_quantile"),
+              "2SP": ("n_scenarios",), "ROBU": (), "RO": ()}
 
 _RUN_RE = re.compile(
     r"^(?P<inst>R[a-z]+C[a-z]+T[a-z]+_\d+)_(?P<alg>GREEDY|ROBU|RO|LA|2SP)_"
@@ -62,10 +66,18 @@ def _variant_of(rec: dict, stem: str) -> str | None:
     The label counts only when the run actually recorded it — a handful of
     legacy manual run_ids look labelled but predate the flag entirely — so the
     name is screened first and the stored field decides.
+
+    Passed through paths.effective_variant last, so LA coverage is counted for
+    the STANDARD configuration (the MILP tail, stored under the historic
+    "MIPTAIL" label) and the superseded LP-tail runs inventory as a variant.
+    Without it this report would answer "how much of the base grid is covered?"
+    with the coverage of a configuration the paper no longer reports.
     """
-    if not (_paths.parse_run_id(stem) or {}).get("variant"):
-        return None
-    return rec.get("variant") or None
+    named = (_paths.parse_run_id(stem) or {}).get("variant")
+    return _paths.effective_variant(rec.get("method"),
+                                    (rec.get("variant") or None) if named
+                                    else None,
+                                    rec.get("solve_mode"))
 
 
 def scan(sol_dir: str, variants: bool):
@@ -85,6 +97,11 @@ def scan(sol_dir: str, variants: bool):
         # legacy run_ids that merely look labelled (…_RO_box_…) keep counting as
         # base coverage exactly as before.
         labelled = _variant_of(d, stem)
+        # What the file NAME carries, which is what has to be stripped below to
+        # re-parse the class and seed.  It is not the same thing as `labelled`
+        # since the swap: a "_LA_MIPTAIL_" run is the standard configuration
+        # (labelled None) but its id still carries the segment.
+        named = (_paths.parse_run_id(stem) or {}).get("variant")
         tagged = ("__" in stem) or ("_diesel_" in base) or bool(labelled)
         if tagged != variants:
             continue
@@ -93,8 +110,8 @@ def scan(sol_dir: str, variants: bool):
         if not m:
             # a labelled run on a base instance: strip the label so the
             # class/seed still parse out of the remaining id
-            if labelled:
-                m = _RUN_RE.match(stem.replace(f"_{labelled}_", "_", 1))
+            if named:
+                m = _RUN_RE.match(stem.replace(f"_{named}_", "_", 1))
             if not m:
                 continue
         cls  = re.match(r"(R[a-z]+C[a-z]+T[a-z]+)_", m.group("inst")).group(1)
@@ -107,12 +124,12 @@ def scan(sol_dir: str, variants: bool):
         if d.get("sim_arrival_h") is None:      # started but never finished
             continue
         runs[key][seed] += 1
-        p = _KEY_PARAM.get(alg)
-        if p:
+        ps_ = _KEY_PARAM.get(alg)
+        if ps_:
             lk = (cls, alg, seed)
             ts = m.group("ts")
             if lk not in latest or ts > latest[lk][0]:
-                latest[lk] = (ts, str(d.get(p)))
+                latest[lk] = (ts, ", ".join(f"{p}={d.get(p)}" for p in ps_))
     for (cls, alg, _seed), (_ts, val) in latest.items():
         params[(cls, alg)].add(val)
     return runs, params, bad
@@ -190,7 +207,7 @@ def main() -> None:
           "brackets belong to THAT cell:\n"
           "        (+k) k superseded duplicate files, (!) runs of this method "
           "disagree on\n"
-          f"        { {k: v for k, v in _KEY_PARAM.items() if v} }, "
+          f"        { {k: list(v) for k, v in _KEY_PARAM.items() if v} }, "
           "(x) corrupt file")
 
     if args.csv:
