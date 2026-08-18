@@ -162,6 +162,16 @@ def _apply_diesel_mode(full_data: dict, D_real: list, E_real: list) -> tuple:
     data["Q"]     = {k: 0.0 for k in data["K"]}
     data["M_seq"] = {k: 0.0 for k in data["K"]}
 
+    # Stated, not left to be inferred.  Zeroing E already makes y=1 INFEASIBLE
+    # in the sub-problem (SOC is pinned at Ecap, so the PWL forces tauc=0 while
+    # chg_act2 requires tauc >= 0.25*y), which is why the diesel results were
+    # right — but LA enumerates its candidate actions before it knows that, so
+    # it was scoring a charge action against all 25 scenarios at every K stop
+    # only to have every one of them come back infeasible.  Simulation.
+    # enumerate_actions reads this flag and stops emitting them.  This module
+    # is its only producer.
+    data["no_charging"] = True
+
     # Distinct title so the oracle cache is separate from the EV version.
     # Idempotent: the diesel instance COPIES are already named "..__diesel",
     # and since the title is now derived from the file stem, appending again

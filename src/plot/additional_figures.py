@@ -566,7 +566,10 @@ def section_diesel():
     # edge, major+minor grid on the response axis, one in-axes legend, and NO
     # title of any kind — the LaTeX \caption carries it (see results_section).
     routes = [r for r in DIESEL_ROUTES if r in per_class]
-    fig, ax = plt.subplots(figsize=(5.8, 2.9))
+    # Wide and low: three route groups of three bars read as a single band
+    # across the text width, and the vertical axis spans ~15 pp, which needs no
+    # height to be legible.  7.0 in is \textwidth in the paper's layout.
+    fig, ax = plt.subplots(figsize=(7.0, 2.4))
     x = np.arange(len(routes), dtype=float)
     # Colour follows the entity (paper_style): the same neutral grey as the
     # oracle, the same green as LA and the same blue as Greedy everywhere else
@@ -577,12 +580,18 @@ def section_diesel():
               ("LA", "pen_l", "dt_l", GREEN),
               ("Greedy", "pen_g", "dt_g", BLUE)]
     # Width from the series count, so the group re-packs instead of overflowing
-    # into its neighbour when a series is added.
-    w = 0.94 / len(series) - 0.035
+    # into its neighbour when a series is added.  The group is sized to a
+    # FRACTION of the unit stride, not to fill it: at 0.94 the three bars left
+    # a 0.06 gap between route classes, narrower than the gaps inside a group,
+    # and the eye then grouped a bar with its neighbour's group instead of its
+    # own.  0.72 keeps the between-group gap (0.31) wider than the within-group
+    # one (0.03), which is what makes the grouping readable.
+    _GROUP, _PAD = 0.72, 0.03
+    w = _GROUP / len(series) - _PAD
     for k, (lbl, key, dkey, col) in enumerate(series):
         vals = [_mean(per_class[r][key]) for r in routes]
         hrs  = [_mean(per_class[r][dkey]) for r in routes]
-        pos  = x + (k - (len(series) - 1) / 2) * (w + 0.035)
+        pos  = x + (k - (len(series) - 1) / 2) * (w + _PAD)
         # nan, not 0: a suppressed class must leave a gap, not draw a bar at
         # zero that reads as "no penalty".
         ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
@@ -773,7 +782,9 @@ def _diesel_by_tw(routes, oracle_ok, scope) -> None:
     x = np.arange(len(tw_order))
     series = [("Oracle", "pen_o", INK), ("LA", "pen_l", GREEN),
               ("Greedy", "pen_g", BLUE)]
-    w = 0.90 / len(series)
+    # As in the headline figure: the group takes 0.72 of the unit stride so the
+    # window classes stay visually separate as series are added.
+    w = 0.72 / len(series)
     top = 0.0
     for ax, route in zip(axes, routes):
         for k, (lbl, key, col) in enumerate(series):

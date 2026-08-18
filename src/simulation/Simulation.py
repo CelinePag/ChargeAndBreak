@@ -202,6 +202,9 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
     Action dict keys: y (0/1), break_type (None/"b45"/"b15"/"b30"),
                       rest_type (None/"r1"/"r2").
 
+    A vehicle with no charging (full_data["no_charging"], the §8.4 diesel
+    transform) enumerates y=0 only, in both modes below.
+
     charge_only=True  (recommended for large instances)
     ────────────────
     Only the charge binary y is enumerated; break_type and rest_type are set
@@ -219,7 +222,10 @@ def enumerate_actions(stop: int, state, full_data: dict, delta_rng: float = 0.0,
     Here None means "no break/rest" (an explicit decision), not "free choice".
     """
     K_set     = set(full_data["K"])
-    is_CS     = stop in K_set
+    # A vehicle that cannot take energy has no charge decision to make: the K
+    # stops remain break-eligible, but y is fixed at 0 rather than enumerated
+    # and scored.  Set by runner_dispatch._apply_diesel_mode (§8.4).
+    is_CS     = stop in K_set and not full_data.get("no_charging")
     batt_full = state.e_arr > 0.98 * full_data["Ecap"] or stop >= full_data["N"]
 
     # Sea crossing: the vehicle is aboard for a known duration, so there is
