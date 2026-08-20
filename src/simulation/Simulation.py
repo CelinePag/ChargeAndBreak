@@ -1346,6 +1346,8 @@ def run_simulation_precomputed(
     prune_quantile: float | None = GUARD_QUANTILE,
     tiebreak_min: float          = 5.0,
     resume: bool                 = False,
+    external_policy              = None,
+    alg_label: str               = "LA",
 ) -> dict:
     """
     Run the rolling-horizon look-ahead (LA) simulation using a precomputed
@@ -1376,6 +1378,13 @@ def run_simulation_precomputed(
     include_worst      : append worst-case scenario
     run_id             : override auto-generated run_id
     oracle_tee         : show HiGHS output in oracle solve
+    external_policy    : optional callable (full_data, stop, vehicle) ->
+                         (action, score_list, nom_sol).  When given, it
+                         replaces select_best_action at every stop>0 and the
+                         run is labelled alg_label; execution, metrics and
+                         saving are byte-identical to an LA run (used by
+                         ML/code/rollout.py to evaluate learned policies).
+    alg_label          : method name recorded in run_id / metadata
 
     Returns
     -------
@@ -1399,7 +1408,7 @@ def run_simulation_precomputed(
     _paths.ensure_dirs()
     ts    = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     title = full_data.get("title", "run")
-    alg   = "LA"
+    alg   = alg_label
     rid   = run_id or f"{title}_{alg}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths = dict(
         log = _paths.logs(f"{rid}.txt"),
@@ -1479,6 +1488,11 @@ def run_simulation_precomputed(
             action     = dict(y=0, break_type=None, rest_type=None)
             nom_sol    = None
             score_list = [(action, 0.0, 0.0, 0, [])]
+        elif external_policy is not None:
+            # Learned/externally supplied policy: one function call replaces
+            # the whole scenario-lookahead machinery.  decision_times below
+            # therefore measures the policy's true online latency.
+            action, score_list, nom_sol = external_policy(full_data, stop, vehicle)
         else:
             # Scenarios are generated live inside select_best_action (no
             # precomputed pool): it draws n_scenarios over [stop, horizon_end)

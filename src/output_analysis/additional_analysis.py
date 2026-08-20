@@ -925,6 +925,41 @@ def _la_local_tag(rec, regime: str | None) -> str:
     return tag + ("+NOSPLIT" if regime == "nosplit" else "")
 
 
+def _prefer_energy_guard(rows, cs):
+    """Where one instance has both a guarded and an unguarded LA MILP run of the
+    same cell, keep the guarded one.
+
+    effective_variant merges the two into a single MILP cell, because the
+    committed-charge guard is being adopted as part of the standard rather than
+    studied as a variant.  Merging alone would AVERAGE them, which is the one
+    thing a cell must not do: it would report a number no configuration
+    produces.  Preferring the higher quantile makes the merged cell mean "the
+    configuration we are going forward with, on every instance that has it, and
+    the older run only where it does not."
+
+    Runs at the same quantile are left alone for _dedup_latest to resolve on
+    timestamp, which is the existing rule for genuine repeats.
+    """
+    best = {}
+    for r in rows:
+        if r.get("method") != "LA" or (r.get("solve_mode") or "").lower() != "mip":
+            continue
+        key = (r.get("instance"), r.get("variant"), bool(r.get("supervised")))
+        q = float(r.get("la_energy_quantile") or 0.0)
+        if key not in best or q > best[key][0]:
+            best[key] = (q, id(r))
+    out, dropped = [], 0
+    for r in rows:
+        if r.get("method") == "LA" and (r.get("solve_mode") or "").lower() == "mip":
+            key = (r.get("instance"), r.get("variant"), bool(r.get("supervised")))
+            hit = best.get(key)
+            if hit and hit[1] != id(r) and                     float(r.get("la_energy_quantile") or 0.0) < hit[0]:
+                dropped += 1
+                continue
+        out.append(r)
+    return out, dropped
+
+
 def _la_discover(rows, cs) -> dict:
     """Footprint of the LA sweep as ACTUALLY RUN: configs, combos, TW classes
     and seeds read off the stored variant runs.
@@ -1063,6 +1098,10 @@ def cmd_la_report(args) -> None:
     rows = cs.load_solutions(_paths.solutions())
     cs._annotate_instance_tags(rows)
     cs._annotate_gap_to_oracle(rows, _paths.solutions())
+    rows, n_pref = _prefer_energy_guard(rows, cs)
+    if n_pref:
+        print(f"  MILP runs superseded by a guarded run on the same instance: "
+              f"{n_pref} dropped")
     n_regap = _regap_regimes_to_base_oracle(rows, cs)
     if n_regap:
         print(f"  regime runs re-scored against the base-case oracle: {n_regap}")

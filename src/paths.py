@@ -77,6 +77,34 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
+def redirect_outputs(root: str | os.PathLike) -> None:
+    """Send every OUTPUT tree under ``root`` instead of the repo root.
+
+    Inputs (instances/, data/) are deliberately untouched — a side experiment
+    reads the same instances but must never scatter its runs among the
+    manuscript's.  Used by ML/code/rollout.py so that learned-policy runs,
+    logs and figures stay inside ML/ and can never contaminate the reporting
+    pipeline, which globs solutions/ by method name.
+
+    Rebinds the module-level constants AND the str accessors, so callers that
+    did ``from src import paths`` and call ``paths.solutions(...)`` at run
+    time pick the change up; call it before the first write.
+    """
+    global SOLUTIONS, LOGS, FIGURES, DATA_OUTPUT, _WRITABLE
+    global solutions, logs, figures, data_output
+    base = Path(root).resolve()
+    SOLUTIONS   = base / "solutions"
+    LOGS        = base / "logs"
+    FIGURES     = base / "figures"
+    DATA_OUTPUT = base / "data_output"
+    _WRITABLE   = (SOLUTIONS, LOGS, FIGURES, DATA_OUTPUT)
+    solutions   = _joiner(SOLUTIONS)
+    logs        = _joiner(LOGS)
+    figures     = _joiner(FIGURES)
+    data_output = _joiner(DATA_OUTPUT)
+    ensure_dirs()
+
+
 # ── str accessors ────────────────────────────────────────────────────────────
 # `paths.solutions()` -> "<ROOT>/solutions"
 # `paths.solutions("x.json")` -> "<ROOT>/solutions/x.json"
@@ -171,7 +199,8 @@ LA_LEGACY_VARIANT = "LPTAIL"    # synthetic tag for the superseded LP tail
 
 
 def effective_variant(method: str | None, variant: str | None,
-                      solve_mode: str | None = None) -> str | None:
+                      solve_mode: str | None = None,
+                      energy_q: float | None = None) -> str | None:
     """Stored (variant, solve_mode) -> the variant reporting should key on.
 
     For every method but LA this is the stored variant unchanged.  For LA:
@@ -194,9 +223,26 @@ def effective_variant(method: str | None, variant: str | None,
     tagged_std = variant in (None, "", LA_STD_VARIANT)
     mode = (solve_mode or "").lower()
     if mode == "mip":
-        return None if tagged_std else variant
-    if mode == "lp":
-        return LA_LEGACY_VARIANT if tagged_std else variant
-    if variant == LA_STD_VARIANT:        # mode unknown: the tag decides
-        return None
-    return variant or LA_LEGACY_VARIANT
+        eff = None if tagged_std else variant
+    elif mode == "lp":
+        # A TAGGED cell keeps its tag and gains the solver: S25H12 solved as an
+        # LP and S25H12 solved as a MIP are different configurations and must
+        # not share a cell.  Without this the two pool together and the newer
+        # one silently wins the dedup, which is how a completed LP ladder rung
+        # turned into a half-MIP one.
+        eff = (LA_LEGACY_VARIANT if tagged_std
+               else f"{variant}+{LA_LEGACY_VARIANT}")
+    elif variant == LA_STD_VARIANT:      # mode unknown: the tag decides
+        eff = None
+    else:
+        eff = variant or LA_LEGACY_VARIANT
+    # The committed-charge energy guard splits the cell only on the SUPERSEDED
+    # LP side.  On the MILP side it is being adopted as part of the standard
+    # configuration, so a guarded and an unguarded MILP run are two samples of
+    # one cell rather than two cells — and where an instance has both, the
+    # report keeps the guarded one (see _prefer_energy_guard).  Leaving the tag
+    # off here is what merges them; the preference rule is what stops the pair
+    # being averaged.
+    if energy_q and (mode == "lp" or (eff or "").endswith(LA_LEGACY_VARIANT)):
+        eff = f"{eff}+EQ{int(round(float(energy_q) * 100))}" if eff               else f"EQ{int(round(float(energy_q) * 100))}"
+    return eff

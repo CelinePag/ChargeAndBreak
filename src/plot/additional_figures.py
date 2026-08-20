@@ -232,29 +232,197 @@ def _policy(stem: str, alg: str, tag: str | None = None,
              _paths.solutions(f"{stem}_{tag}_{alg}_*.json")])
     order = _POLICY_PREF if cfg is ... else (cfg,)
     for p in pats:
-        best = {}
+        best, best_name = {}, {}
         for f in _matches(p):
             # duration_h + metrics only, so the stripped run_cache record is
             # enough and the trajectory arrays are never read off disk.
-            d = _RUNS_BY_NAME().get(os.path.basename(f))
+            name = os.path.basename(f)
+            d = _RUNS_BY_NAME().get(name)
             if not d or d.get("duration_h") is None:
                 continue
             got = _paths.effective_variant(d.get("method"), d.get("variant"),
                                            d.get("solve_mode"))
             if got in order:
                 best[got] = d           # matches are ordered, so the last wins
+                best_name[got] = name
         for want in order:
             d = best.get(want)
             if d is not None:
                 infeas = bool((d.get("metrics") or {}).get("run_infeasible"))
+                # A parameter that cannot affect a leg must not disqualify the
+                # pair.  LA's energy guard sizes the committed charge against
+                # predicted CONSUMPTION, and a diesel leg consumes nothing and
+                # charges nothing, so the flag is inert there — None marks the
+                # tuple "not applicable" rather than "set to nothing".
+                inert = "diesel" in str(d.get("instance") or "").lower()
                 return dict(duration=float(d["duration_h"]), infeasible=infeas,
-                            params=tuple(d.get(k) for k in
-                                         _PAIR_PARAMS.get(alg.upper(), ())))
+                            file=best_name[want],
+                            params=None if inert else
+                            tuple(d.get(k) for k in
+                                  _PAIR_PARAMS.get(alg.upper(), ())))
     return None
 
 
+# Nominal length of each break block (h), for recovering the masked charge of a
+# simulated run.  "0"/None is "no break" and is deliberately absent.
+_BREAK_BLOCK_H = {"b45": 0.75, "b30": 0.5, "b15": 0.25}
+
+_RUN_DWELL: dict = {}
+
+
+def _run_dwell(fname: str | None) -> dict | None:
+    """Per-component dwell totals (h) of a simulated run, from its own file.
+
+    The same components _oracle_dwell reads off the hindsight schedule, taken
+    from the run's per-stop durations_list: driving and customer service are
+    identical within an EV/diesel pair, so differencing these accounts for the
+    whole makespan gap — verified at 0.0000 h residual on every pair sampled.
+
+    Read from the FILE, not from run_cache: durations_list is one of the arrays
+    the cache drops (it is ~30 % of the corpus by bytes and nothing else needs
+    it).  Memoised per process, since each run is asked for once per section.
+    """
+    if fname is None:
+        return None
+    if fname not in _RUN_DWELL:
+        d = _load(_paths.solutions(fname))
+        if not d:
+            _RUN_DWELL[fname] = None
+        else:
+            out = {k: 0.0 for k in _DWELL_ROWS}
+            for e in (d.get("durations_list") or []):
+                out["charging"]   += float(e.get("tauc") or 0.0)
+                out["queue"]      += float(e.get("tauq") or 0.0)
+                out["break"]      += float(e.get("taub") or 0.0)
+                out["rest"]       += float(e.get("taur") or 0.0)
+                out["manoeuvre"]  += (float(e.get("mstop") or 0.0)
+                                      + float(e.get("mlay") or 0.0))
+                out["reposition"] += float(e.get("mseq") or 0.0)
+            # g is not stored for a simulated run, but it is recoverable by
+            # the rule the MILP uses for it: at a stop that takes a break while
+            # charging, the credited time is the charge capped at the break
+            # block (g_i <= tauc_i, g_i <= the break's duration).  A policy
+            # books concurrent break+charge as tauc with taub = 0, so without
+            # this the run would look as if it masked nothing.
+            acts = d.get("actions") or []
+            out["_g"] = sum(
+                min(float(e.get("tauc") or 0.0), _BREAK_BLOCK_H[bt])
+                for e, a in zip(d.get("durations_list") or [], acts)
+                for bt in [str(a.get("break_type") or "0")]
+                if bt in _BREAK_BLOCK_H)
+            out["_duration"] = float(d.get("duration_h") or 0.0)
+            _RUN_DWELL[fname] = out
+    return _RUN_DWELL[fname]
+
+
+# The stack the §8.4 figure draws: where the electrification penalty goes, in
+# terms that are each a positive cost rather than a signed accounting.
+#
+# Two hue families, because the components answer two different questions and
+# the split is the point: WARM is time the charger costs (charging that no break
+# was running to hide, queueing for the plug, repositioning off the bay); COOL
+# is time that stopping more often costs (the breaks and rests the EV takes
+# beyond the diesel's legal minimum, and the manoeuvring into those stops).
+# Within a family the step is lightness, ordered by size, so the two blocks read
+# as blocks.  Checked, not eyeballed: worst pair over all 15 is dE 16.5 in
+# normal vision and 13.3 under simulated deuteranopia/protanopia.
+_GAP_STACK = [
+    ("charge_open", "Charging outside breaks",  "#A6461D"),
+    ("queue",       "Charger queueing",         "#DE9350"),
+    ("reposition",  "Bay repositioning",        "#F7DCC0"),
+    ("extra_break", "Extra break",              "#1F4E6B"),
+    ("manoeuvre",   "Extra stop manoeuvring",   "#3E7FA3"),
+    ("rest",        "Extra rest",               "#86B6D0"),
+]
+
+
+# Which term absorbs a negative, per family: the charger-side costs collapse
+# into the charging they are incurred for, the stopping-side ones into the extra
+# break time they are part of.
+_STACK_FAMILY = {"queue": "charge_open", "reposition": "charge_open",
+                 "manoeuvre": "extra_break", "rest": "extra_break"}
+
+
+def _stack_drawable(cell):
+    """Cell means as a NON-NEGATIVE composition, summing to the same total.
+
+    The components are EV-minus-diesel differences, so any one of them can come
+    out negative in a cell -- most often `rest`, where the EV happens to take
+    less rest than the diesel, occasionally `extra_break` or `charge_open`.  A
+    stacked bar cannot draw that: matplotlib lays the negative segment ABOVE the
+    running total, outside the outline, which reads as a floating block rather
+    than as a credit.
+
+    So each negative is netted into the principal term of its own family, and a
+    principal that is itself negative into the largest term left.  Every drawn
+    segment is then >= 0 and the bar height is still exactly the penalty.  The
+    signed per-component values are what the CSV carries -- this is a drawing
+    rule, not a change to the decomposition.
+    """
+    vals = {k: (_mean(cell[k]) or 0.0) for k, _l, _c in _GAP_STACK}
+    for member, principal in _STACK_FAMILY.items():
+        if vals.get(member, 0.0) < 0:
+            vals[principal] += vals[member]
+            vals[member] = 0.0
+    for principal in ("charge_open", "extra_break"):
+        if vals.get(principal, 0.0) < 0:
+            target = max(vals, key=lambda k: vals[k])
+            if target != principal:
+                vals[target] += vals[principal]
+                vals[principal] = 0.0
+    return vals
+
+
+def _gap_components(ev: dict | None, di: dict | None, fuel: float) -> dict | None:
+    """EV-minus-diesel dwell components as a % of the diesel route duration.
+
+    The split of the EV's charging is the model's own: `g` is the part credited
+    inside a mandatory break, so it costs no makespan beyond the break that was
+    running anyway, and the remainder is charging with nothing to hide behind.
+    The break term is then everything the EV spends on breaks — the credited
+    charge plus any standalone break — LESS the break time the diesel is legally
+    obliged to take, i.e. the breaks it takes over and above the minimum.
+
+    Why not (extra stops) x 45 min, which is the same idea with an assumed
+    constant: a charge stop shorter than the block gets charged the whole block,
+    which over-attributes.  Measured on the oracle it pushed the charging
+    remainder negative in a quarter to a third of instances, and lifted the
+    long-route break share from 41 % to 63 % — the headline would then rest on
+    the constant rather than on the schedule.
+
+    The percentages sum to exactly the penalty the run pair produces, so the
+    stack height is the number the un-decomposed figure drew as a single bar.
+    """
+    if not (ev and di):
+        return None
+    base = di["_duration"] + fuel
+    if base <= 0:
+        return None
+    pct = lambda h: 100.0 * h / base
+    g = ev.get("_g") or 0.0
+    d = {k: pct(ev[k] - di[k]) for k in _DWELL_ROWS}
+    # charging with no break running to hide it; the diesel's post-hoc fuel stop
+    # is credited here, being the one term that is not a dwell difference
+    d["charge_open"] = pct(ev["charging"] - g - fuel)
+    # break time over the diesel's legal minimum: the charge credited to a break
+    # plus any break taken on its own, against what the diesel must take anyway
+    d["extra_break"] = pct(g + ev["break"] - di["break"])
+    # Coupling: the share of the EV charging that ran inside a mandatory break,
+    # i.e. cost no makespan beyond the break that was happening anyway.  It is
+    # an EV-side quantity and not part of the stack, but it comes off the same
+    # dwell, and it is what says WHY the charging split falls where it does.
+    d["_coupling"] = (100.0 * g / ev["charging"]
+                      if ev["charging"] > 1e-9 else None)
+    return d
+
+
 def _policy_pair(stem: str, alg: str, tag: str | None):
-    """(base run, variant run) for one instance, under ONE configuration.
+    """(base run, tagged run) of one instance -- see _policy_pair_tags."""
+    return _policy_pair_tags(stem, alg, None, tag)
+
+
+def _policy_pair_tags(stem: str, alg: str, ev_tag, di_tag):
+    """Two runs of one instance to divide, under ONE configuration.
 
     A paired delta divides two runs of the same policy, so both legs have to be
     the same configuration of it or the ratio carries the configuration as well
@@ -270,11 +438,21 @@ def _policy_pair(stem: str, alg: str, tag: str | None):
 
     The same rule covers the parameters no tag records (_PAIR_PARAMS): legs that
     disagree on one are not a pair either, however well their tags match.
+
+    Both tags are arguments because the two figures pair different things: the
+    headline 8.4 figure divides a base EV run by the diesel copy of the same
+    instance, the OAT figure divides an axis-level EV run by that same diesel.
+    They must nonetheless agree run for run, so they share this one rule -- when
+    they did not, the two figures reported different numbers for the same cell.
     """
     for cfg in _POLICY_PREF:
-        base = _policy(stem, alg, None, cfg=cfg)
-        var  = _policy(stem, alg, tag, cfg=cfg)
-        if base and var and base["params"] == var["params"]:
+        base = _policy(stem, alg, ev_tag, cfg=cfg)
+        var  = _policy(stem, alg, di_tag, cfg=cfg)
+        if not (base and var):
+            continue
+        # None on either side = the parameters do not apply to that leg
+        if (base["params"] is None or var["params"] is None
+                or base["params"] == var["params"]):
             return base, var
     return None, None
 
@@ -396,6 +574,9 @@ def _oracle_dwell(stem: str, tag: str | None = None) -> dict | None:
             elif i in L_set and (brk or rst):
                 out["manoeuvre"] += M_lay.get(i, 0.0)
 
+    # g = the charging time the model credits INSIDE a mandatory break, i.e.
+    # charging that costs no extra makespan because a break was running anyway.
+    out["_g"]        = sum(float(s.get("g") or 0.0) for s in sol)
     out["_drive"]    = sum(float(s.get("D_nom") or 0.0) for s in sol)
     out["_duration"] = float(sol[-1]["ta"]) - T_START
     return out
@@ -412,7 +593,8 @@ def _mean(vals):
 
 def _save(fig, name):
     for ext in ("png", "pdf"):
-        fig.savefig(_paths.figures(f"{name}.{ext}"))
+        fig.savefig(_paths.figures(f"{name}.{ext}"),
+                    dpi=300 if ext == "png" else None)
     plt.close(fig)
     print(f"  Figure    : figures/{name}.png|pdf")
 
@@ -453,6 +635,7 @@ def section_diesel():
           f"seeds {min(seeds_d)}-{max(seeds_d)} (n={len(seeds_d)})")
 
     per_class: dict[str, dict[str, list]] = {}
+    stack: dict[tuple, dict[str, list]] = {}
     detail = []
     for route, cust in combos_d:
         for tw in tws_d:
@@ -514,6 +697,33 @@ def section_diesel():
                 d["pen_l"].append(pen_l)
                 d["dt_o"].append(dt_o);   d["dt_g"].append(dt_g)
                 d["dt_l"].append(dt_l)
+
+                # Same three methods, decomposed.  The oracle reads its cached
+                # schedule; the policies read the very run the penalty above was
+                # computed from, so a bar and its decomposition can never come
+                # from different runs.
+                #
+                # Gated on the penalty being defined, not merely on the two runs
+                # existing: the penalties above drop a pair where either leg was
+                # infeasible, and a stack built over a wider set would total to
+                # something other than the penalty it is supposed to decompose
+                # (greedy on the long routes: 13.2 % against a 13.5 % penalty).
+                for meth, pen, legs in (
+                        ("oracle", pen_o, (_oracle_dwell(st),
+                                           _oracle_dwell(st, "diesel"))),
+                        ("LA", pen_l, (_run_dwell(ev_l and ev_l["file"]),
+                                       _run_dwell(di_l and di_l["file"]))),
+                        ("greedy", pen_g, (_run_dwell(ev_g and ev_g["file"]),
+                                           _run_dwell(di_g and di_g["file"])))):
+                    if pen is None:
+                        continue
+                    comp = _gap_components(legs[0], legs[1], fuel)
+                    if comp is None:
+                        continue
+                    cell = stack.setdefault((route, meth),
+                                            {k: [] for k, _l, _c in _GAP_STACK})
+                    for k, _l, _c in _GAP_STACK:
+                        cell[k].append(comp[k])
                 d["coup"].append(coup)
                 d["dur_d"].append(dur_d)
                 d["dur_e"].append(ev_o and ev_o["duration"])
@@ -556,63 +766,106 @@ def section_diesel():
                      else "no paired LA runs yet, bar left empty"))
     oracle_ok = [r for r, (have, _w) in coverage.items() if have]
 
-    # ── figure: policy vs oracle penalty, per route class ────────────────────
-    # Two units on one mark: the percentage sits above the bar (it is what the
-    # axis measures) and its absolute-hours counterpart sits inside the bar in
-    # reversed-out type, so the two never read as a single stacked number.
+    # ── figure: what the penalty is MADE OF, per method and route class ──────
+    # One stacked bar per (route class, method): the height is the same penalty
+    # the bar used to carry on its own, and the segments say where it comes
+    # from.  Colour is the COMPONENT (checked for CVD separation, see
+    # _GAP_STACK); the method is read from the label under each bar, and the
+    # route class from the label under each group.
+    #
+    # Every segment is non-negative by construction — the credits are netted
+    # into "charging outside breaks", see _gap_components — so the bar is a
+    # composition, never a signed accounting.  The signed version, with the
+    # break and refuelling credits on their own rows, is tab:diesel-decomp.
     #
     # Chrome follows the same grammar as §8.3 (additional_sens_effects) and the
-    # base-case box plots: default frame, entity colour with a darker hairline
-    # edge, major+minor grid on the response axis, one in-axes legend, and NO
-    # title of any kind — the LaTeX \caption carries it (see results_section).
-    routes = [r for r in DIESEL_ROUTES if r in per_class]
-    # Wide and low: three route groups of three bars read as a single band
-    # across the text width, and the vertical axis spans ~15 pp, which needs no
-    # height to be legible.  7.0 in is \textwidth in the paper's layout.
-    fig, ax = plt.subplots(figsize=(7.0, 2.4))
+    # base-case box plots: default frame, major+minor grid on the response axis,
+    # one legend, and NO title of any kind — the LaTeX \caption carries it.
+    routes  = [r for r in DIESEL_ROUTES if r in per_class]
+    # (method key, label, the per-class hour-difference series it is drawn from)
+    methods = [("oracle", "Oracle", "dt_o"), ("LA", "LA", "dt_l"),
+               ("greedy", "Greedy", "dt_g")]
+    fig, ax = plt.subplots(figsize=(7.0, 3.0))
     x = np.arange(len(routes), dtype=float)
-    # Colour follows the entity (paper_style): the same neutral grey as the
-    # oracle, the same green as LA and the same blue as Greedy everywhere else
-    # in the paper.  Benchmark first, then the policies in decreasing
-    # sophistication (oracle -> LA -> greedy) — the same order as the §8.3
-    # sensitivity figure (_SENS_METHODS).
-    series = [("Oracle", "pen_o", "dt_o", ps.METHOD_COLOR["oracle"]),
-              ("LA", "pen_l", "dt_l", GREEN),
-              ("Greedy", "pen_g", "dt_g", BLUE)]
-    # Width from the series count, so the group re-packs instead of overflowing
-    # into its neighbour when a series is added.  The group is sized to a
-    # FRACTION of the unit stride, not to fill it: at 0.94 the three bars left
-    # a 0.06 gap between route classes, narrower than the gaps inside a group,
-    # and the eye then grouped a bar with its neighbour's group instead of its
-    # own.  0.72 keeps the between-group gap (0.31) wider than the within-group
-    # one (0.03), which is what makes the grouping readable.
+    # The group is sized to a FRACTION of the unit stride, not to fill it, so
+    # the gap between route classes stays wider than the gaps inside a group.
     _GROUP, _PAD = 0.72, 0.03
-    w = _GROUP / len(series) - _PAD
-    for k, (lbl, key, dkey, col) in enumerate(series):
-        vals = [_mean(per_class[r][key]) for r in routes]
-        hrs  = [_mean(per_class[r][dkey]) for r in routes]
-        pos  = x + (k - (len(series) - 1) / 2) * (w + _PAD)
-        # nan, not 0: a suppressed class must leave a gap, not draw a bar at
-        # zero that reads as "no penalty".
-        ax.bar(pos, [np.nan if v is None else v for v in vals], w, color=col,
-               edgecolor=ps.shade(col, 0.35), linewidth=0.4, zorder=3,
-               label=lbl)
-        for p, v, h in zip(pos, vals, hrs):
-            if v is None:
+    w = _GROUP / len(methods) - _PAD
+    pos = {(r, m): x[ri] + (mi - (len(methods) - 1) / 2) * (w + _PAD)
+           for ri, r in enumerate(routes)
+           for mi, (m, _lbl, _dk) in enumerate(methods)}
+
+    drawable = {k: _stack_drawable(c) for k, c in stack.items()}
+    for key, lbl, col in _GAP_STACK:
+        heights, bottoms, xs = [], [], []
+        for r in routes:
+            for m, _mlbl, _dk in methods:
+                cell = stack.get((r, m))
+                if not cell or not cell[key]:
+                    continue
+                vals = drawable[(r, m)]
+                xs.append(pos[(r, m)])
+                heights.append(vals[key])
+                bottoms.append(sum(vals[k] for k, _l, _c in _GAP_STACK
+                                   if _GAP_STACK.index((k, _l, _c))
+                                   < _GAP_STACK.index((key, lbl, col))))
+        if xs:
+            # edgecolor="none": a stroke paints the left and right edges too,
+            # which left a white halo between the fill and the method ring.  The
+            # separators are drawn as lines across the bar below.
+            ax.bar(xs, heights, w, bottom=bottoms, color=col, label=lbl,
+                   edgecolor="none", zorder=3)
+            for _x, _b, _h in zip(xs, bottoms, heights):
+                if _b > 1e-9 and _h > 1e-9:
+                    ax.plot([_x - w / 2, _x + w / 2], [_b, _b], color="white",
+                            lw=0.7, solid_capstyle="butt", zorder=3.5)
+
+    # Method identity is a SECOND encoding, kept off the fills: each bar is
+    # ringed in its method's colour from paper_style (oracle grey, LA green,
+    # greedy blue) and its label under the axis is printed in the same colour.
+    # Without it the method was legible only from 6 pt grey text, and the figure
+    # read as nine anonymous bars — the components are what the fills say, and
+    # they are identical across the three, so the fills cannot carry it.
+    from matplotlib.patches import Rectangle as _Rect
+    for r in routes:
+        for m, mlbl, dkey in methods:
+            cell = stack.get((r, m))
+            if not cell:
                 continue
-            ax.annotate(f"{v:.1f}%", (p, v), textcoords="offset points",
-                        xytext=(0, 3), ha="center", va="bottom",
-                        fontsize=7.0, color=INK, zorder=4)
-            if h is not None:
-                ax.annotate(f"{h:+.1f} h", (p, v), textcoords="offset points",
-                            xytext=(0, -6), ha="center", va="top",
-                            fontsize=6.0, color="white", zorder=4)
-    # Nothing is annotated under the groups: the coupling share is an
-    # oracle-side quantity that the table already reports, and the per-class n
-    # travels with the table too (it is printed above and kept per instance in
-    # the CSV).  The figure carries the three penalties and nothing else.
-    ax.set_xticks(x, [ps.ROUTE_LBL[r] for r in routes])
-    ax.set_xlim(-0.6, len(routes) - 0.4)
+            tot = sum(_mean(cell[k]) or 0.0 for k, _l, _c in _GAP_STACK)
+            mcol = ps.METHOD_COLOR["oracle" if m == "oracle" else m]
+            ax.add_patch(_Rect((pos[(r, m)] - w / 2, 0), w, tot,
+                               facecolor="none", edgecolor=mcol, lw=1.1,
+                               zorder=4, joinstyle="miter"))
+            # Both units on the mark: the percentage is what the axis measures,
+            # and the hours underneath are what an operator actually plans in.
+            # They come from the same pairs — dt_* is appended beside pen_* — so
+            # the two lines can never describe different run sets.
+            hrs = _mean(per_class[r][dkey])
+            ax.annotate(f"{tot:.1f}%", (pos[(r, m)], tot),
+                        textcoords="offset points", xytext=(0, 9.5),
+                        ha="center", va="bottom", fontsize=6.8, color=mcol,
+                        zorder=5)
+            if hrs is not None:
+                ax.annotate(f"{hrs:+.1f} h", (pos[(r, m)], tot),
+                            textcoords="offset points", xytext=(0, 2.5),
+                            ha="center", va="bottom", fontsize=6.0,
+                            color=MUT, zorder=5)
+
+    # Two label levels: the method under its own bar, the route class under the
+    # group, so neither is inferred from the legend.
+    ax.set_xticks([pos[(r, m)] for r in routes for m, _l, _d in methods],
+                  [lbl for _r in routes for _m, lbl, _d in methods], fontsize=7)
+    ax.tick_params(axis="x", length=0, pad=2.5)
+    for lab, (m, _l, _d) in zip(ax.get_xticklabels(),
+                                [mm for _r in routes for mm in methods]):
+        lab.set_color(ps.METHOD_COLOR["oracle" if m == "oracle" else m])
+    span = ax.get_xaxis_transform()
+    for ri, r in enumerate(routes):
+        ax.annotate(ps.ROUTE_LBL[r], xy=(x[ri], 0), xycoords=span,
+                    xytext=(0, -14), textcoords="offset points",
+                    ha="center", va="top", fontsize=7.5, color=INK)
+    ax.set_xlim(-0.55, len(routes) - 0.45)
     ax.set_ylabel("Route duration vs. diesel (%)")
     # Major + minor grid on the response axis only, as in §8.3: the reader
     # compares bar heights across groups, and the minor lines make the ~1 pp
@@ -624,17 +877,25 @@ def section_diesel():
     ax.yaxis.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
     ax.tick_params(axis="y", which="minor", length=2)
     ax.set_axisbelow(True)
-    ax.tick_params(axis="x", length=0, colors=INK)
-    # Headroom so the legend row clears the tallest bar's value label.
-    _top = max((v for s in series for v in
-                (_mean(per_class[r][s[1]]) for r in routes)
-                if v is not None), default=1.0)
-    ax.set_ylim(0, _top * 1.32)
-    ax.legend(frameon=True, framealpha=0.92, edgecolor="none",
-              facecolor="white", fontsize=7.5, ncol=len(series),
-              loc="upper center", handlelength=1.1, handletextpad=0.4,
-              columnspacing=1.0)
-    fig.tight_layout()
+    # Headroom so the legend row clears the tallest bar's total label.
+    _top = max((sum(_mean(c[k]) or 0.0 for k, _l, _cl in _GAP_STACK)
+                for c in stack.values()), default=1.0)
+    # Headroom for the legend block, which sits INSIDE the axes: the tallest bar
+    # plus its two label lines has to clear the bottom of it.
+    ax.set_ylim(0, _top * 1.42)
+    # Two columns, which is also the two families: matplotlib fills column-major
+    # and _GAP_STACK is ordered warm-then-cool, so the left column is everything
+    # the charger costs and the right everything stopping more often costs.
+    # Small type and a white ground: it shares the panel with the bars, so it has
+    # to stay out of their way and stay readable if a taller class ever reaches
+    # it.
+    ax.legend(frameon=True, framealpha=0.9, edgecolor="none",
+              facecolor="white", fontsize=5.8, ncol=2, loc="upper left",
+              handlelength=0.9, handletextpad=0.35, columnspacing=0.9,
+              labelspacing=0.35, borderpad=0.35)
+    # Bottom reserve: the route labels hang below the axes and tight_layout does
+    # not measure annotations drawn outside them.
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     _save(fig, "additional_diesel_gap")
 
     # ── LaTeX table ──────────────────────────────────────────────────────────
@@ -899,6 +1160,328 @@ _REFUEL_STOPS = {"short": 0, "medium": 1, "long": 2}
 def _refuel_h(route: str) -> float:
     """Post-hoc diesel refuelling time (h) credited to a route class."""
     return _REFUEL_STOPS.get(route, 0) * _REFUEL_EVENT_H
+
+
+# ---- 8.4 crossed with the one-at-a-time axes -------------------------------
+# One figure for the whole design: the base case and every OAT level side by
+# side, each drawn as the same stack section_diesel draws, so a column is read
+# against the diesel of its own instance rather than against the base case.
+# That is the difference from additional_sens_effects, which reports a paired
+# delta off the base case; here every column is an absolute penalty and the base
+# case is simply one of the columns.
+#
+# The EV leg carries the axis tag and the diesel leg never does.  That is only
+# legitimate where the axis leaves the instance untouched: charger power and
+# pack size regenerate the same corridor (identical N, K, C, L, km and D_real)
+# and neither quantity exists for a diesel, so the base diesel IS the same
+# route.  CS SPACING re-lays the stops -- N, K and the total distance all move,
+# and with them the driving time the decomposition relies on cancelling -- so
+# pairing a cs30 EV against a base diesel would book a ~0.5 h driving difference
+# as electrification cost.  That axis is excluded until it has diesel runs of
+# its own.
+_OAT_LEVELS = [
+    (None,     "base",    "Base"),
+    ("kw150",  "power",   "150"),
+    ("kw700",  "power",   "700"),
+    ("kw1000", "power",   "1000"),
+    ("kwh300", "battery", "300"),
+    ("kwh700", "battery", "700"),
+    ("kwh900", "battery", "900"),
+]
+_OAT_BLOCKS = [("base", ""), ("power", "Charger power (kW)"),
+               ("battery", "Battery capacity (kWh)")]
+_OAT_EXCLUDED = ("CS spacing is excluded: it re-generates the corridor, so the "
+                 "base diesel is not the same route")
+
+
+def _oat_components(stem, tag, meth, fuel):
+    """One instance stack at one axis level, EV(level) against diesel(base).
+
+    Goes through the SAME pairing rule as the headline figure, with the axis tag
+    on the EV leg: pairing each leg independently accepted runs the other figure
+    refuses (a leg on the LP tail against one on the MILP tail, or two different
+    energy guards), so the two figures disagreed on the base level, which is a
+    cell they share and must report identically.
+    """
+    if meth == "oracle":
+        ev, di = _oracle_dwell(stem, tag), _oracle_dwell(stem, "diesel")
+        if not (ev and di):
+            return None
+        return _gap_components(ev, di, fuel)
+    ev, di = _policy_pair_tags(stem, meth.upper(), tag, "diesel")
+    if not (ev and di) or ev["infeasible"] or di["infeasible"]:
+        return None
+    return _gap_components(_run_dwell(ev["file"]), _run_dwell(di["file"]), fuel)
+
+
+def _tot(cell):
+    """Stack height of one cell (%), i.e. the penalty it decomposes."""
+    return sum(_mean(cell[k]) or 0.0 for k, _l, _c in _GAP_STACK)
+
+
+def section_diesel_oat():
+    """8.4 x 8.3 -- how the electrification penalty RECOMPOSES along the axes.
+
+    One bar per (design point, method), each the same composition
+    section_diesel draws.  It answers what the paired-delta sensitivity figure
+    cannot: not merely that a bigger pack or a faster charger shrinks the gap,
+    but WHICH part of it shrinks.
+
+    Route classes are POOLED.  They differ in level -- a long route pays more
+    than a short one at every design point -- but the composition and the way it
+    moves along an axis are the same in all three, so splitting them tripled the
+    bar count to say one thing three times.  The per-route numbers stay in the
+    CSV for anyone who wants to check that.
+    """
+    from matplotlib.patches import Patch as _Patch, Rectangle as _Rect
+    print("== Sec 8.4 x one-at-a-time axes ==")
+    print(f"  {_OAT_EXCLUDED}")
+    scope  = _discover_scope(["diesel"])
+    combos = scope["combos"] or DIESEL_COMBOS
+    tws    = scope["tws"]    or TWS
+    seeds  = scope["seeds"]  or list(SEEDS)
+
+    methods = [("oracle", "Oracle"), ("LA", "LA"), ("greedy", "Greedy")]
+    cells, hours, per_route, coup = {}, {}, {}, {}
+    for route, cust in combos:
+        for tw in tws:
+            for seed in seeds:
+                st, fuel = _stem(route, cust, tw, seed), _refuel_h(route)
+                di = _oracle_dwell(st, "diesel")
+                base_h = (di["_duration"] + fuel) if di else None
+                for tag, _blk, _lbl in _OAT_LEVELS:
+                    for meth, _m in methods:
+                        c = _oat_components(st, tag, meth, fuel)
+                        if c is None:
+                            continue
+                        if c.get("_coupling") is not None:
+                            coup.setdefault((tag, meth), []).append(
+                                c["_coupling"])
+                            coup.setdefault((tag, meth, route), []).append(
+                                c["_coupling"])
+                        for key in ((tag, meth), (tag, meth, route)):
+                            store = cells if len(key) == 2 else per_route
+                            cell = store.setdefault(
+                                key, {k: [] for k, _l, _c in _GAP_STACK})
+                            for k, _l, _c in _GAP_STACK:
+                                cell[k].append(c[k])
+                        if base_h:
+                            # the same total in hours, per instance, so the
+                            # pooled mean is a mean of hours and not a
+                            # percentage re-scaled by an average duration
+                            hours.setdefault((tag, meth), []).append(
+                                base_h * sum(c[k] for k, _l, _c in _GAP_STACK)
+                                / 100.0)
+    if not cells:
+        print("  no paired runs yet -- nothing drawn")
+        return
+    for meth, _m in methods:
+        got = sum(len(c["queue"]) for (t, m), c in cells.items() if m == meth)
+        nc = len([1 for k in cells if k[1] == meth])
+        per = "  ".join(
+            f"{lbl}={len(cells[(tag, meth)]['queue'])}"
+            for tag, _b, lbl in _OAT_LEVELS if (tag, meth) in cells)
+        print(f"  {meth:<7}: {got:>5} paired instance(s) over {nc} level(s)"
+              f"   [{per}]")
+
+    x = np.arange(len(_OAT_LEVELS), dtype=float)
+    # A gap between the experiment blocks, so "base" reads as the reference and
+    # the two axes read as two experiments rather than one seven-point ladder.
+    for i, (_t, blk, _l) in enumerate(_OAT_LEVELS):
+        x[i] += 0.55 * sum(1 for j in range(i)
+                           if _OAT_LEVELS[j][1] != _OAT_LEVELS[j + 1][1])
+    # The two gaps have to be tellable apart or the hierarchy inverts: at
+    # 0.82/0.30 the space between two methods was a third of the space between
+    # two design points, close enough that the eye grouped a method with its
+    # neighbour's level.  Methods now sit a hairline apart inside a group that
+    # leaves a clear quarter-unit between design points -- roughly nine times
+    # the within-group gap.
+    _GROUP, _MGAP = 0.76, 0.10
+    w = _GROUP / (len(methods) + _MGAP * (len(methods) - 1))
+    _total = len(methods) * w + (len(methods) - 1) * _MGAP * w
+    offs = [-_total / 2 + (k + 0.5) * w + k * _MGAP * w
+            for k in range(len(methods))]
+
+    fig, ax = plt.subplots(figsize=(7.4, 3.6))
+    half = 0.5 + 0.55 / 2
+    for blk, _name in _OAT_BLOCKS[1::2]:
+        xs = [x[i] for i, (_t, b, _l) in enumerate(_OAT_LEVELS) if b == blk]
+        if xs:
+            ax.axvspan(min(xs) - half, max(xs) + half, facecolor="#F5F5F5",
+                       edgecolor="none", zorder=0)
+
+    span = ax.get_xaxis_transform()
+    for li, (tag, _blk, _lbl) in enumerate(_OAT_LEVELS):
+        for mi, (meth, mlbl) in enumerate(methods):
+            cell = cells.get((tag, meth))
+            mcol = ps.METHOD_COLOR["oracle" if meth == "oracle" else meth]
+            px = x[li] + offs[mi]
+            # The method label goes under every bar, present or not: a missing
+            # method then reads as a gap in a named slot rather than as a wider
+            # space between the two that did run.
+            # Sized to the bar pitch, which the tighter grouping shortened:
+            # the colour already says which method this is, so the word only has
+            # to confirm it, not carry it.
+            ax.annotate(mlbl, xy=(px, 0), xycoords=span, xytext=(0, -4),
+                        textcoords="offset points", ha="center", va="top",
+                        fontsize=5.2, color=mcol)
+            if not cell:
+                continue
+            vals = _stack_drawable(cell)
+            bottom, seams = 0.0, []
+            for key, _l, col in _GAP_STACK:
+                hgt = vals[key]
+                ax.bar(px, hgt, width=w, bottom=bottom, color=col,
+                       edgecolor="none", zorder=3)
+                bottom += hgt
+                if hgt > 1e-9:
+                    seams.append(bottom)
+            # Separators as lines ACROSS the bar, not as a stroke around each
+            # segment: a stroke also paints the left and right edges, which is
+            # what left a white halo inside the method ring.
+            for yv in seams[:-1]:
+                ax.plot([px - w / 2, px + w / 2], [yv, yv], color="white",
+                        lw=0.3, solid_capstyle="butt", zorder=3.5)
+            ax.add_patch(_Rect((px - w / 2, 0), w, bottom, facecolor="none",
+                               edgecolor=mcol, lw=0.8, zorder=4,
+                               joinstyle="miter"))
+            # Hours only.  The axis already carries the percentage, and two
+            # label lines per bar were wider than the bar pitch: wherever two
+            # bars of a group landed within a point or two of each other the
+            # lines of one ran into the next.
+            # No value label.  Three per design point are each wider than the
+            # bar they sit on, so wherever two bars of a group land within a
+            # point or two of each other -- which is most of the low levels --
+            # one label runs into the next.  The axis carries the percentage and
+            # the CSV carries both it and the hours.
+    ax.axhline(0, color=INK, lw=0.9)
+
+    ax.set_xticks(x, [l for _t, _b, l in _OAT_LEVELS], fontsize=8)
+    ax.tick_params(axis="x", length=0, pad=13)
+    ax.set_xlim(x[0] - 0.75, x[-1] + 0.75)
+    for blk, name in _OAT_BLOCKS:
+        if not name:
+            continue
+        xs = [x[i] for i, (_t, b, _l) in enumerate(_OAT_LEVELS) if b == blk]
+        ax.annotate(name, xy=(sum(xs) / len(xs), 0), xycoords=span,
+                    xytext=(0, -33), textcoords="offset points", ha="center",
+                    va="top", fontsize=8.5, color=ps.INK_PRIMARY)
+    ax.set_ylabel("Route duration vs. diesel (%)", fontsize=8.5)
+    # Labelled every 5 points and ruled every 1, with real ticks on both: the
+    # differences the figure is read for are one to two points wide, but nine
+    # unlabelled lines between majors is a haze rather than a scale.
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(5))
+    ax.yaxis.set_minor_locator(mticker.MultipleLocator(1))
+    ax.yaxis.grid(True, which="major", color=GRID, lw=0.6)
+    ax.yaxis.grid(True, which="minor", color="#F0F0F0", lw=0.4)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="y", which="major", length=3.2, width=0.7,
+                   labelsize=8, color=ps.BASELINE)
+    ax.tick_params(axis="y", which="minor", length=1.8, width=0.5,
+                   color=ps.BASELINE)
+    # Full frame, as the headline 8.4 figure has: this one sits beside it in the
+    # same section, and a half-open panel next to a closed one reads as an
+    # accident rather than a choice.
+    for sp in ax.spines.values():
+        sp.set_edgecolor(ps.BASELINE)
+        sp.set_linewidth(0.7)
+
+    handles = [_Patch(facecolor=c, edgecolor="white", lw=0.5, label=l)
+               for _k, l, c in _GAP_STACK]
+    # Rounded up to the next 10 rather than scaled off the tallest stack: a
+    # fixed ceiling keeps the panel comparable when a level is re-run and the
+    # tallest bar moves.
+    ax.set_ylim(0, 40)
+    ax.legend(handles=handles, frameon=True, framealpha=0.95,
+              edgecolor="none", facecolor="white", fontsize=6.4, ncol=2,
+              loc="upper right", handlelength=1.0, handletextpad=0.4,
+              columnspacing=1.0, labelspacing=0.35, borderpad=0.45)
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    _save(fig, "additional_diesel_oat")
+
+    # Pooled rows first, then the per-route detail the pooling hides.
+    rows = []
+    for tag, _blk, lbl in _OAT_LEVELS:
+        for meth, _m in methods:
+            if (tag, meth) not in cells:
+                continue
+            c = cells[(tag, meth)]
+            rows.append(["all", lbl, meth, len(c["queue"])]
+                        + [_fmt(_mean(c[k]), ".3f", "")
+                           for k, _l, _c in _GAP_STACK]
+                        + [_fmt(_tot(c), ".3f", ""),
+                           _fmt(_mean(hours.get((tag, meth), [])), ".3f", "")])
+    for route in [r for r in DIESEL_ROUTES
+                  if any(k[2] == r for k in per_route)]:
+        for tag, _blk, lbl in _OAT_LEVELS:
+            for meth, _m in methods:
+                c = per_route.get((tag, meth, route))
+                if not c:
+                    continue
+                rows.append([route, lbl, meth, len(c["queue"])]
+                            + [_fmt(_mean(c[k]), ".3f", "")
+                               for k, _l, _c in _GAP_STACK]
+                            + [_fmt(_tot(c), ".3f", ""), ""])
+    _write_csv("additional_diesel_oat.csv",
+               ["route", "level", "method", "n"]
+               + [f"{k}_pct" for k, _l, _c in _GAP_STACK]
+               + ["total_pct", "total_h"], rows)
+    _diesel_oat_coupling(coup, methods)
+
+
+def _diesel_oat_coupling(coup, methods) -> None:
+    """Mean coupling per design point: how much charging hides inside a break.
+
+    Read beside the stack, it says why the charging split moves: a level whose
+    coupling falls is one where the charger can no longer be fed into the breaks
+    the route already has, so the charging surfaces as makespan.
+
+    Computed over the same paired instances the figure draws, so the two agree
+    run for run.  The oracle's g is the model's own; a policy has no g in its
+    record, so it is recovered by the rule the MILP uses for it (the charge at a
+    stop, capped at the break block taken there).
+    """
+    print("  mean coupling, share of charging inside a mandatory break (%)")
+    hdr = f"  {'level':<10}" + "".join(f"{lbl:>16}" for _m, lbl in methods)
+    print(hdr)
+    # The figure disambiguates the levels with the block label underneath it;
+    # a table row has no such context, and "700" is both a charger power and a
+    # pack size, so the unit travels with the level here.
+    unit = {"power": " kW", "battery": " kWh", "base": ""}
+    rows_csv, body = [], []
+    for tag, _blk, lbl in _OAT_LEVELS:
+        lbl = lbl + unit.get(_blk, "")
+        line = f"  {lbl:<10}"
+        tex_cells = []
+        for meth, _mlbl in methods:
+            v = coup.get((tag, meth), [])
+            mv = _mean(v)
+            line += (f"{mv:>11.1f} ({len(v):>3})" if mv is not None
+                     else f"{'--':>16}")
+            tex_cells.append(f"{mv:.1f}" if mv is not None else "--")
+            rows_csv.append([lbl, meth, len(v), _fmt(mv, ".2f", "")])
+        print(line)
+        body.append(f"{lbl} & " + " & ".join(tex_cells) + r" \\")
+
+    _write_csv("additional_diesel_oat_coupling.csv",
+               ["level", "method", "n", "coupling_pct"], rows_csv)
+    tex = [
+        r"\begin{table}[ht]\centering",
+        r"\caption{Coupling by design point: the share of electric charging "
+        r"time that runs inside a mandatory break, and so costs no makespan "
+        r"beyond the break itself ($\Sigma g_i / \Sigma \tau^c_i$).  Averaged "
+        r"over the same paired instances as Figure~\ref{fig:diesel-oat}, route "
+        r"classes pooled.  For the hindsight optimum $g$ is the model's own; a "
+        r"simulated policy records none, so it is recovered by the rule the "
+        r"model uses for it, the charge at a stop capped at the break taken "
+        r"there.}",
+        r"\label{tab:diesel-oat-coupling}",
+        r"\begin{tabular}{l" + "r" * len(methods) + r"}",
+        r"\hline",
+        r"Design point & " + " & ".join(lbl for _m, lbl in methods) + r" \\",
+        r"\hline",
+    ] + body + [r"\hline", r"\end{tabular}", r"\end{table}", ""]
+    _write_tex("additional_diesel_oat_coupling.tex", "\n".join(tex))
 
 
 def _refuel_sensitivity(routes, scope) -> None:
@@ -2233,310 +2816,193 @@ _LA_HUE_SCEN    = "#C2007A"    # magenta  — scenario ladder |Xi|
 _LA_HUE_CELL    = "#1A1A1A"
 _LA_POLICY_MARK = {"LPTAIL": "D", "TB0": "v"}
 
-# ── the non-ladder cells ─────────────────────────────────────────────────────
-# Everything that is not a rung on the horizon or scenario ladder, declared in
-# one place so a cell that has not been run yet still has a name and a legend
-# entry, and appears as a labelled absence rather than vanishing.
+# ── the cost/quality plane, organised as SOLVER CLUSTERS ─────────────────────
+# A cell id from la-report is a set of "+"-joined tokens: an optional ladder rung
+# (S<n>H<h>), and flags for the subproblem solver (LPTAIL = the superseded LP
+# tail; its absence = the MILP standard), the committed-charge energy guard
+# (EQ<pp>), and the break regime (NOSPLIT).  Parsing the id rather than matching
+# whole strings is what lets a cell nobody declared still land in the right
+# place: a new flag opens a new cluster, a new rung joins an existing one, and
+# nothing has to be enumerated here in advance.
 #
-# The MARKER carries both distinctions among the LA cells: round/diamond for the
-# split break as Art. 7 permits it, triangles for the regime that forbids it;
-# circle/triangle-up for the LP subproblem, diamond/triangle-down for the MILP.
+# CLUSTER = the flags other than NOSPLIT.  Each cluster is one configuration
+# family with its own base cell, and every variant in it — both ladders and the
+# no-split regime — is drawn as a leader from THAT base, never across families.
+# That is the point of the split: a horizon change measured against the LP base
+# and one measured against the MILP base are different quantities, and a single
+# shared anchor silently equated them.
 #
-# Only LA configurations are plotted.  Other METHODS are deliberately absent:
-# this figure answers "how should the look-ahead be configured", and a method
-# that is not a configuration of it has no position on either ladder and no
-# leader to the base cell.  Greedy in particular was tried here and removed —
-# it lands at 0.0 s hard against the left spine, in the busiest corner of every
-# panel.  la-report still writes its row, so the section text can quote it.
-#
-# Every LA variant is drawn as a displacement from the BASE cell — one leader
-# each, all sharing a tail, so the panel reads as a fan out of the reference
-# rather than a chain.  That reading is honest on the y-axis because la-report
-# scores the no-split cells against the BASE-CASE oracle rather than the one
-# that was itself denied the split break (see _regap_regimes_to_base_oracle):
-# every point is a distance to the same unrestricted optimum, and a regime that
-# removes an option can only move away from it.
-#
-# `above` sends the tag over or under its marker.  It is declared rather than
-# derived because the two regimes land on top of each other by construction:
-# the whole point of the no-split pair is that it sits beside the split pair, so
-# their tags would collide on every panel unless the members of each pair are
-# pushed to opposite sides once, here, instead of being nudged per panel.
-#
-# The CSV keys these by the report's tags (LPTAIL, NOSPLIT, and the crossed
-# LPTAIL+NOSPLIT written by la-report); the reader sees the model names.  The
-# base cells drop a ($|\Xi| = 25$, $L = 24$ h) qualifier: both ladder entries
-# already state that centre point, so repeating it three times padded the legend
-# without adding anything.
-_LA_ALL_CELLS = [
-    # cfg key         panel tag        legend label            mark colour   above leader
-    ("base",            "base",          r"base case",
-     "o", _LA_HUE_CELL, True,  False),
-    ("LPTAIL",         "LP",            r"LP subpr.",
-     "D", _LA_HUE_CELL, True,  True),
-    ("NOSPLIT",        "no-split",      r"base case, no split break",
-     "^", _LA_HUE_CELL, True,  True),
-    ("LPTAIL+NOSPLIT", "LP no-split",   r"LP subpr., no split break",
-     "v", _LA_HUE_CELL, False, True),
+# COLOUR distinguishes clusters; MARKER distinguishes the variant within one.
+_LA_LADDER_RE = re.compile(r"^S(\d+)H(\d+(?:\.\d+)?)$", re.I)
+_LA_VARIANTS = [
+    (None,      "base",     "o"),
+    ("S25H12",  "L12",      "v"),
+    ("S25H48",  "L48",      "^"),
+    ("S10H24",  "S10",      "<"),
+    ("S50H24",  "S50",      ">"),
+    ("NOSPLIT", "no split", "D"),
 ]
-_LA_ALL_BY_CFG = {c[0]: c for c in _LA_ALL_CELLS}
-# Configs the CSV may carry that must never become a cell here: other methods,
-# ad-hoc timing probes, and variants that were never launched.  Anything else
-# unrecognised still draws, so a genuinely new cell is not silently dropped.
+# Assigned in the order clusters are first seen.  Kept clear of every method hue
+# (blue, vermillion, orange, green, reddish purple, grey) and of the
+# green/yellow/vermillion the infeasibility fills run through.
+_LA_CLUSTER_HUES = ["#1A1A1A", "#6A3D9A", "#C2007A", "#00688B", "#8C6D31"]
+# Cell ids the CSV may carry that must never become a configuration cell here:
+# other methods, and ad-hoc probes.  Prefix-matched for the LOCAL family, whose
+# tags arrive under several spellings (LOCAL, LOCAL_MIPTAIL, LOCAL+LPTAIL, ...);
+# an exact-match list let each new one through as a spurious cell.
 _LA_ALL_SKIP = {"GREEDY", "TB0"}
-# Prefix-matched, for the same reason la-report matches variants that way: the
-# LOCAL family arrives under several spellings (LOCAL, LOCAL_MIPTAIL, ...) and
-# an exact-match list lets each new one through as a spurious cell.
 _LA_ALL_SKIP_PREFIX = ("LOCAL",)
 
 
-def section_la_all(csv_name: str = "additional_la_stats.csv",
-                   cell_decl: list | None = None,
-                   ladders: bool = True,
-                   anchor: str = "base",
-                   outname: str = "additional_la_all",
-                   banner: str = "combined cost/quality plane",
-                   min_n: int = 5):
-    """§8.3 — one figure for the entire LA study (horizon, scenarios, policy).
+def _la_parse_cell(cfg):
+    """'S25H12+LPTAIL' -> (cluster key, variant key).
 
-    Reads the same data_output/additional_la_stats.csv as section_la and
-    section_la_policy; it replaces neither, it re-reads both onto shared axes.
-    Needs the pooled window_class = 'all' rows, so re-run
-    `additional_analysis.py la-report` if the CSV predates them.
-
-    Parameterised so a second experiment can reuse the whole plane rather than
-    fork it: section_la_local draws the cab-hardware runs with the same axes,
-    encoding and pending conventions, differing only in which CSV it reads, its
-    cell list, the absence of the two ladders, and which cell is the anchor.
+    cluster : frozenset of flags that are neither a ladder rung nor the break
+              regime — i.e. what makes this a separate configuration family.
+    variant : the ladder rung, or "NOSPLIT", or None for the family's base.
     """
-    print(f"== Sec 8.3 look-ahead — {banner} ==")
-    cells_all = cell_decl or _LA_ALL_CELLS
+    ladder, flags = None, []
+    for tok in (cfg or "").split("+"):
+        if not tok or tok == "base":
+            continue
+        if _LA_LADDER_RE.match(tok):
+            ladder = tok.upper()
+        else:
+            flags.append(tok.upper())
+    nosplit = "NOSPLIT" in flags
+    cluster = frozenset(f for f in flags if f != "NOSPLIT")
+    return cluster, ("NOSPLIT" if (nosplit and ladder is None) else ladder)
+
+
+def _la_cell_id(cluster, variant):
+    """Inverse of _la_parse_cell: the CSV key for one (cluster, variant)."""
+    toks = ([] if variant in (None, "NOSPLIT") else [variant])
+    toks += sorted(cluster)
+    if variant == "NOSPLIT":
+        toks.append("NOSPLIT")
+    return "+".join(toks) or "base"
+
+
+def _la_cluster_label(cluster):
+    """Reader-facing name for a configuration family."""
+    solver = "LP subpr." if "LPTAIL" in cluster else "MILP subpr."
+    extra = []
+    for f in sorted(cluster):
+        if f == "LPTAIL":
+            continue
+        if f.startswith("EQ"):
+            extra.append(f"energy guard {int(f[2:]) / 100:g}")
+        else:
+            extra.append(f.title())
+    return solver + (", " + ", ".join(extra) if extra else "")
+
+
+def section_la_all(csv_name="additional_la_stats.csv",
+                   outname="additional_la_all",
+                   banner="cost/quality plane by solver cluster",
+                   min_n=5, skip=None, skip_prefix=None):
+    """8.3 - every LA configuration on one cost/quality plane, in solver clusters.
+
+    One panel per route class, window classes pooled.  Each configuration family
+    (LP subproblem, MILP subproblem, MILP + energy guard, ...) forms a cluster:
+    its own base cell, with the two ladders and the no-split regime drawn as
+    leaders out of it.  Cluster membership is PARSED from the cell ids that
+    la-report writes, so a family nobody anticipated appears on its own.
+    """
+    print(f"== Sec 8.3 look-ahead - {banner} ==")
     stats = _la_stats(csv_name)
     if not stats:
-        print("  additional_la_stats.csv missing — nothing drawn")
+        print(f"  data_output/{csv_name} missing - nothing drawn")
         return
-    routes = ps.ROUTE_ORDER
-    TW = "all"                       # pooled over window classes — see above
-    if stats and not any(t == TW for (_c, _r, t) in stats):
-        print("  additional_la_stats.csv has no pooled 'all' window rows — "
-              "re-run: python -m src.output_analysis.additional_analysis "
-              "la-report")
+    routes, TW = ps.ROUTE_ORDER, "all"
+    if not any(t == TW for (_c, _r, t) in stats):
+        print("  no pooled 'all' window rows - re-run: python -m "
+              "src.output_analysis.additional_analysis la-report")
         return
 
-    # The non-ladder cells: the declared ones first, in the order they are meant
-    # to be read, then anything else the CSV happens to carry so a variant run
-    # under a tag nobody added here still shows up.  TB0 stays excluded by name
-    # — it is the one variant whose runs were never launched, and a permanent
-    # "pending" note is noise, not information.  section_la_policy still has it.
-    have = {c for (c, _r, _t) in stats}
-    by_cfg = {c[0]: c for c in cells_all}
-    extra = sorted(c for c in have
-                   if c not in by_cfg and c not in _LA_ALL_SKIP
-                   and not c.upper().startswith(_LA_ALL_SKIP_PREFIX)
-                   and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
-    cells = ([c for c in cells_all if c[0] != anchor]
-             + [(c, c, c, "*", _LA_HUE_CELL, True, True) for c in extra])
-
-    # Below this a "median" is not an estimate of anything, and one such cell
-    # can wreck the figure for every other: a 2-run long-route MILP no-split
-    # cell landed at 13.8 % mid-sweep and stretched the shared y-axis to 15 %,
-    # compressing the 2-6 % band where the entire study lives.  Such a cell is
-    # reported as still pending, with its count, rather than plotted.  The
-    # threshold is a parameter because it is a judgement about the experiment,
-    # not a constant: the cab-hardware runs are a handful of instances BY
-    # DESIGN, so there the same floor would hide the entire figure.
-    _MIN_N = min_n
-
-    def cell(cfg, route, tw=TW):
-        """(cost, quality, infeasibility rate) for one cell, or None."""
-        row = stats.get((cfg, route, tw))
+    def cell(cfg, route):
+        row = stats.get((cfg, route, TW))
         c = _la_num(row, "decision_cs_mean_s_median")
         q = _la_num(row, "gap_pen_median_pct")
         if c is None or q is None:
             return None
         n, i = _la_num(row, "n_runs"), _la_num(row, "n_infeasible")
-        if (n or 0) < _MIN_N:
+        if (n or 0) < min_n:        # a median over a handful is not an estimate
             return None
         return c, q, ((i / n) if (n and i is not None) else None)
 
-    def n_runs(cfg, route, tw=TW):
-        return _la_num(stats.get((cfg, route, tw)), "n_runs") or 0
+    # discover the configuration families actually present
+    # The LOCAL figure reads a corpus whose cells all start with LOCAL, so the
+    # exclusions are a parameter: what is noise in the sweep is the subject
+    # there.
+    _skip = _LA_ALL_SKIP if skip is None else set(skip)
+    _pre = _LA_ALL_SKIP_PREFIX if skip_prefix is None else tuple(skip_prefix)
+    have = {c for (c, _r, _t) in stats
+            if c not in _skip
+            and not (_pre and c.upper().startswith(_pre))}
+    clusters = {}
+    for cfg in have:
+        cl, var = _la_parse_cell(cfg)
+        clusters.setdefault(cl, {})[var] = cfg
+    if not clusters:
+        print("  no LA configuration cells found - nothing drawn")
+        return
+    # MILP standard first (no flags), then LP, then the rest by label, so the
+    # colour a family gets does not shuffle when another one appears later.
+    order = sorted(clusters, key=lambda c: (bool(c), "LPTAIL" not in c,
+                                            _la_cluster_label(c)))
+    hue = {cl: _LA_CLUSTER_HUES[i % len(_LA_CLUSTER_HUES)]
+           for i, cl in enumerate(order)}
+    mark = {v: m for v, _lbl, m in _LA_VARIANTS}
 
-    # A cell still filling up is not just noisier than the base cell, it is a
-    # different POPULATION: the sweeps land combo by combo, so a half-finished
-    # cell is typically all-Tnone or all-Cfew while the base cell it is read
-    # against is pooled over every combo and window.  Tnone is the easy half, so
-    # such a cell can plot BELOW the base cell while being WORSE than it on the
-    # instances they share — which is exactly what the no-split arms did at
-    # ~12 % coverage.  Rather than let the figure state that, an under-covered
-    # cell carries its run count in its tag, so the reader sees the sample it is
-    # looking at and the mark disappears by itself once the runs land.
-    _PARTIAL_AT = 0.60
+    vals = [got for cl, mem in clusters.items() for cfg in mem.values()
+            for r in routes for got in [cell(cfg, r)] if got]
+    if not vals:
+        print("  every cell is below the minimum sample - nothing drawn")
+        return
+    costs = [v[0] for v in vals]
+    quals = [v[1] for v in vals]
+    fmax = max([v[2] for v in vals if v[2]] or [1.0])
+    # Markers are drawn at the data point but have width, and on a LINEAR axis
+    # the cheapest cell sits within a few seconds of the origin, so the left
+    # margin goes slightly negative rather than clipping it against the spine.
+    xlim = (-0.055 * max(costs), max(costs) * 1.16)
+    span = max(max(quals) - min(quals), 2.0)   # floor: don't magnify rounding
+    mid = 0.5 * (max(quals) + min(quals))
+    ylim = (mid - 0.66 * span, mid + 0.66 * span)
 
-    def partial(cfg, route, tw=TW):
-        base_n = n_runs(anchor, route, tw)
-        n = n_runs(cfg, route, tw)
-        return bool(base_n and n and n < _PARTIAL_AT * base_n)
-
-    # A point is (tag, is_base, colour, marker, below, cost, gap, infeas).
-    # The base cell is the last element of no ladder and the middle of two — it
-    # is what both pivot on, so it is skipped inside the ladders and drawn once,
-    # on top, together with the variants that fan out of it.
-    def paths(route):
-        out = []
-        for ladder, is_h, col, pfx in ((
-                (_LA_HORIZONS, True,  _LA_HUE_HORIZON, "L"),
-                (_LA_SCENARIOS, False, _LA_HUE_SCEN, "S")) if ladders else ()):
-            pts = []
-            for v in ladder:
-                cfg = (anchor if (v == _LA_BASE[1] if is_h else v == _LA_BASE[0])
-                       else _la_cfg(_LA_BASE[0], float(v)) if is_h
-                       else _la_cfg(int(v), _LA_BASE[1]))
-                got = cell(cfg, route)
-                if got:
-                    # Scenario rungs label below, horizon rungs above: on the
-                    # long routes the two ladders end within a marker's width of
-                    # each other, and the vertical split is what stops those
-                    # tags overprinting.
-                    pts.append((f"{pfx}{v:g}", cfg == anchor, col,
-                                "o" if is_h else "s", not is_h, *got))
-            if pts:
-                out.append(("ladder", None, pts))
-        for cfg, tag, _lbl, mk, col, above, leader in cells:
-            got = cell(cfg, route)
-            if got:
-                # Nothing printed on the point at all: the legend already binds
-                # marker to cell, and the ladders are the only series whose
-                # labels carry a VALUE the legend cannot state — it names the
-                # ladder, not which rung is which.  Run counts belong in the
-                # table, not scattered over the panels.
-                out.append(("cell", anchor if leader else None,
-                            [("", False, col, mk, not above, *got)]))
-        return out
-
-    allpts = [p for r in routes for _k, _a, pts in paths(r) for p in pts]
-    # The anchor sits in no series — it is drawn on its own — so it has to be
-    # added by hand here or it takes no part in the scaling.  In the sweep
-    # figure that was invisible because the base cell is also a rung on both
-    # ladders; strip the ladders and the anchor is the ONLY point, and the axes
-    # would be computed from an empty list and place it off-panel.
-    anch = [a for a in (cell(anchor, r) for r in routes) if a]
-    fmax = max([p[7] for p in allpts if p[7]]
-               + [a[2] for a in anch if a[2]] or [1.0])
-    # Room for the tags, which are drawn OUTSIDE the data range: the costliest
-    # cell (the base MIP tail on the medium routes, ~95 s) is a wide label
-    # anchored to the right of its marker, and autoscale would clip it against
-    # the spine.
-    # The axis is LINEAR: a log axis puts equal ratios at equal distances, which
-    # flatters the cheap end and makes the base->LPTAIL leader look like a
-    # gentle slope instead of the 5-20x jump in compute it actually is.  Cost
-    # here is a budget the reader spends in seconds, not a scale-free quantity,
-    # so distance on the page should be seconds.
-    # The left margin is negative on purpose: the cheapest rung of each ladder
-    # labels to the LEFT of its marker, and on a linear axis that rung sits
-    # within a few seconds of the origin, so a hard zero clips the tag.
-    costs = [p[5] for p in allpts] + [a[0] for a in anch] or [1.0, 10.0]
-    xlim  = (-0.055 * max(costs), max(costs) * 1.16)
-    # Same reason on y: the tallest rung (L12 on the medium routes) carries its
-    # tag ABOVE the marker, and matplotlib's autoscale margin is not deep enough
-    # to hold it under the spine.
-    quals = [p[6] for p in allpts] + [a[1] for a in anch] or [0.0, 1.0]
-    # Floor on the span: early in an experiment one or two cells can sit within
-    # a tenth of a point of each other, and an axis autoscaled to that reports
-    # a rounding difference as if it were the finding.
-    span  = max(max(quals) - min(quals), 2.0)
-    mid   = 0.5 * (max(quals) + min(quals))
-    ylim  = (mid - 0.66 * span, mid + 0.66 * span)
-
-    fig, axs = plt.subplots(1, len(routes), figsize=(7.2, 2.9),
+    fig, axs = plt.subplots(1, len(routes), figsize=(7.2, 3.3),
                             sharex=True, sharey=True)
     axs = np.atleast_1d(axs)
 
-    # Tags are drawn outside their marker, so a cell close to either spine has
-    # to lean inwards or it prints off the panel.  These two bands are where
-    # that happens; everything between them keeps the side it asked for.
-    _lo = xlim[0] + 0.10 * (xlim[1] - xlim[0])
-    _hi = xlim[0] + 0.80 * (xlim[1] - xlim[0])
-
     for ri, route in enumerate(routes):
         ax = axs[ri]
-        got = paths(route)
-        base = cell(anchor, route)
-        # A cell that exists but is under _MIN_N is reported here WITH its count,
-        # so "too few runs to plot" is visibly different from "not launched".
-        missing = [f"{tag or lbl} (n={n_runs(cfg, route):.0f})"
-                   if n_runs(cfg, route) else (tag or lbl)
-                   for cfg, tag, lbl, _m, _c, _b, _ld in cells
-                   if not cell(cfg, route)]
-
-        for kind, anchor, pts in got:
-            col = pts[0][2]
-            if kind == "ladder" and len(pts) > 1:
-                ax.plot([p[5] for p in pts], [p[6] for p in pts], "-",
-                        color=col, lw=1.2, zorder=2)
-            elif kind == "cell" and anchor:
-                # A variant is a DISPLACEMENT from its regime's base arm, not a
-                # rung on a ladder, so it is joined to that arm by a dotted
-                # leader which cannot be mistaken for a sampled path.  Drawn
-                # only when the arm exists: without it the displacement has no
-                # meaning and a line to the wrong regime would invent one.
-                a = cell(anchor, route)
-                if a:
-                    ax.plot([a[0], pts[0][5]], [a[1], pts[0][6]], ":",
-                            color=col, lw=1.0, zorder=2)
-            for tag, is_base, col, mk, below, c, q, f in pts:
-                if is_base:
-                    continue                     # drawn once, below
-                ax.plot(c, q, mk, ms=5.6,
+        drew = False
+        for cl in order:
+            col, mem = hue[cl], clusters[cl]
+            base = cell(mem[None], route) if None in mem else None
+            # Leaders first, under the markers: every variant is a displacement
+            # from its OWN family's base, so a family reads as a fan and two
+            # families never share a line.
+            if base:
+                for var, cfg in mem.items():
+                    got = cell(cfg, route) if var is not None else None
+                    if got:
+                        ax.plot([base[0], got[0]], [base[1], got[1]], ":",
+                                color=col, lw=1.0, zorder=2)
+            for var, cfg in mem.items():
+                got = cell(cfg, route)
+                if not got:
+                    continue
+                drew = True
+                c, q, f = got
+                ax.plot(c, q, mark.get(var, "*"), ms=6.0,
                         mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
-                        mec=col, mew=1.4, zorder=4)
-                # Two rules keep the tags apart without hand-placing them per
-                # panel: horizontally each tag hugs the side its cell sits on
-                # relative to base, and vertically it goes to the side its
-                # series declared (`below`, set where the series is built).
-                # Greedy sits at 0.0 s, hard against the left spine, so the
-                # "cheaper than base -> label on the left" rule would push its
-                # tag off the panel; inside either edge band the tag leans
-                # inwards regardless of which side of base the cell is on.
-                right = c < _lo or ((c >= (base[0] if base else c))
-                                    and c <= _hi)
-                # White stroke under the glyphs: S10 sits a hair below the base
-                # cell on the short routes, which is exactly where the
-                # base->LPTAIL leader leaves the anchor, and a tag printed
-                # straight onto a dotted line is unreadable.
-                if not tag:
-                    continue                     # keyed by the legend alone
-                ax.annotate(tag, (c, q),
-                            xytext=(4 if right else -4, -8 if below else 7),
-                            textcoords="offset points",
-                            ha="left" if right else "right",
-                            va="top" if below else "bottom",
-                            fontsize=5.4, color=ps.shade(col, 0.25),
-                            zorder=5,
-                            path_effects=[_pe.withStroke(linewidth=1.7,
-                                                         foreground="white")])
-        # The base cell last and on top: it is the reference every leader fans
-        # out of, and it is the one point two ladders and every variant all
-        # touch, so it must not be overdrawn by whichever series lands last.
-        # It carries no tag — the legend names it, and a label on the busiest
-        # point in the panel is where clutter starts.
-        if base:
-            c, q, f = base
-            ax.plot(c, q, by_cfg.get(anchor, (None, None, None, "o"))[3], ms=5.6,
-                    mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
-                    mec=_LA_HUE_CELL, mew=1.4, zorder=6)
-        if missing:
-            # Top-right, not bottom-right: the policy variants land in the
-            # cheap-and-good corner, so a note down there sits on the very
-            # markers it is describing the absence of.
-            ax.text(0.985, 0.965, "pending: " + ", ".join(missing),
-                    transform=ax.transAxes, ha="right", va="top",
-                    fontsize=5.8, color=MUT, style="italic")
-        if not got and not base:
+                        mec=col, mew=1.4, zorder=5 if var is None else 4)
+        if not drew:
             ax.text(0.5, 0.5, "pending", ha="center", va="center",
-                    fontsize=7.5, color=MUT, style="italic",
-                    transform=ax.transAxes)
-
+                    transform=ax.transAxes, fontsize=7.5, color=MUT,
+                    style="italic")
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
         ax.xaxis.set_major_locator(
@@ -2552,39 +3018,30 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
         if ri == 0:
             ax.set_ylabel("Gap to hindsight optimum (%)")
 
-    handles = [plt.Line2D([], [], color=_LA_HUE_HORIZON, lw=1.3, marker="o",
-                          ms=5.0, mfc="white", mec=_LA_HUE_HORIZON, mew=1.1),
-               plt.Line2D([], [], color=_LA_HUE_SCEN, lw=1.3, marker="s",
-                          ms=5.0, mfc="white", mec=_LA_HUE_SCEN, mew=1.1)]
-    labels  = [r"horizon ladder $L$ (h), $|\Xi| = 25$",
-               r"scenario ladder $|\Xi|$, $L = 24$ h"]
-    if not ladders:
-        handles, labels = [], []
-    # Every declared cell is listed whether or not it has runs yet, so the
-    # legend states the intended design and the panels say how much of it has
-    # landed.  The base cell shows as a bare marker, variants with their leader.
-    for _cfg, _tag, lbl, mk, col, _ab, leader in cells_all:
-        handles.append(plt.Line2D(
-            # Cells without a leader key as a bare marker.  ls must be "none"
-            # and not ":" at lw=0 — matplotlib rejects a dash pattern whose
-            # segments are all zero-length.
-            [], [], color=col, lw=1.0 if leader else 0,
-            ls=":" if leader else "none",
-            marker=mk, ms=5.2, mfc="white", mec=col, mew=1.4))
-        labels.append(lbl)
-    for cfg in extra:
-        handles.append(plt.Line2D([], [], color=_LA_HUE_CELL, lw=1.0, ls=":",
-                                  marker="*", ms=5.2, mfc="white",
-                                  mec=_LA_HUE_CELL, mew=1.4))
-        labels.append(_LA_POLICY_LBL.get(cfg, cfg))
-    fig.subplots_adjust(left=0.088, right=0.895, top=0.735, bottom=0.175,
+    # legend in two registers: colour = family, marker = variant within it
+    h1 = [plt.Line2D([], [], color=hue[cl], lw=1.3, ls=":", marker="o", ms=5.4,
+                     mfc="white", mec=hue[cl], mew=1.4) for cl in order]
+    l1 = [_la_cluster_label(cl) for cl in order]
+    seen = {v for cl in order for v in clusters[cl]}
+    h2, l2 = [], []
+    for var, lbl, mk in _LA_VARIANTS:
+        if var in seen:
+            h2.append(plt.Line2D([], [], color=MUT, lw=0, ls="none", marker=mk,
+                                 ms=5.4, mfc="white", mec=MUT, mew=1.2))
+            l2.append(lbl)
+    fig.subplots_adjust(left=0.088, right=0.895, top=0.755, bottom=0.145,
                         wspace=0.09)
-    fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
-               ncol=3, bbox_to_anchor=(0.5, 0.998), handlelength=1.8,
-               handletextpad=0.4, columnspacing=1.6)
+    leg1 = fig.legend(h1, l1, frameon=False, fontsize=6.6, loc="upper left",
+                      bbox_to_anchor=(0.085, 0.995), ncol=1, handlelength=1.8,
+                      handletextpad=0.4, labelspacing=0.22,
+                      title="configuration family", title_fontsize=6.6)
+    leg1._legend_box.align = "left"
+    leg2 = fig.legend(h2, l2, frameon=False, fontsize=6.6, loc="upper right",
+                      bbox_to_anchor=(0.895, 0.995), ncol=3, handlelength=1.0,
+                      handletextpad=0.4, columnspacing=1.1, labelspacing=0.22,
+                      title="variant", title_fontsize=6.6)
+    leg2._legend_box.align = "left"
 
-    # Marker-fill key, scaled to the worst cell in the figure (as everywhere
-    # else in this module) rather than to a hypothetical 100%.
     import matplotlib.cm as _cm
     from matplotlib.colors import Normalize as _Norm
     _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_INFEAS_CMAP)
@@ -2598,7 +3055,6 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
     _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
     _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
     _save(fig, outname)
-
 
 
 # ── the cab-hardware experiment (LOCAL) ──────────────────────────────────────
@@ -2615,19 +3071,6 @@ def section_la_all(csv_name: str = "additional_la_stats.csv",
 # regime, which is the 2x2 the operational claim rests on.  The LP arm is the
 # anchor the other three are read against, exactly as the base cell is in the
 # sweep figure.
-_LA_LOCAL_CELLS = [
-    # cfg key             panel tag        legend label            mark colour   above leader
-    ("LOCAL",             "LP",            r"LP subpr.",
-     "o", _LA_HUE_CELL, True,  False),
-    ("LOCAL+MIP",         "MILP",          r"MILP subpr.",
-     "D", _LA_HUE_CELL, True,  True),
-    ("LOCAL+NOSPLIT",     "LP no-split",   r"LP subpr., no split break",
-     "^", _LA_HUE_CELL, True,  True),
-    ("LOCAL+MIP+NOSPLIT", "MILP no-split", r"MILP subpr., no split break",
-     "v", _LA_HUE_CELL, False, True),
-]
-
-
 def section_la_local():
     """§8.3 — the same cost/quality plane for the cab-hardware (LOCAL) runs.
 
@@ -2636,11 +3079,9 @@ def section_la_local():
     states the intended 2x2 before the evidence for it exists.
     """
     section_la_all(csv_name="additional_la_local_stats.csv",
-                   cell_decl=_LA_LOCAL_CELLS,
-                   ladders=False,
-                   anchor="LOCAL",
                    outname="additional_la_local",
                    banner="cab-hardware cost/quality plane (LOCAL)",
+                   skip=(), skip_prefix=(),
                    # a timing probe is a few instances on purpose; one run is
                    # already the measurement, not a sample of one
                    min_n=1)
@@ -2975,6 +3416,7 @@ _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
                  # objective the model actually minimises
                  la_policy=lambda: (section_la_policy("dur"),
                                     section_la_policy("pen")),
+                 diesel_oat=section_diesel_oat,
                  vss=section_vss)
 
 if __name__ == "__main__":

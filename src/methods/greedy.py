@@ -108,26 +108,17 @@ from src.plot.plots      import plot_simulation_results   # re-exported for call
 from src import paths as _paths
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ENERGY LOOK-AHEAD HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _energy_to_next_cs(full_data: dict, stop_global: int) -> float:
     """
     Nominal energy (kWh) required to reach the next CS stop (or destination)
-    from ``stop_global``, driving non-stop.
-
-    Uses full_data["E"] (nominal per-leg energy).
     """
-    N     = full_data["N"]
-    K_set = set(full_data["K"])
-    E_nom = full_data["E"]
+    N, K_set, E_nom = full_data["N"], full_data["K"], full_data["E"]
 
     cum = 0.0
-    k   = stop_global
+    k = stop_global
     while k < N:
         cum += E_nom.get(k, 0.0)
-        if k + 1 in K_set or k + 1 == N:
+        if k + 1 in K_set or k + 1 == N: # next stop is a CS or the destination
             break
         k += 1
     return cum
@@ -189,10 +180,10 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
                     queue_threshold: Optional[float] = None,
                     verbose: bool = False) -> tuple[dict, str]:
     """
-    Make a greedy action decision at ``stop_global`` (paper §5.3).
+    Make a greedy action decision at ``stop_global``.
 
     Fixed priority rule, evaluated once per stop:
-      (i)   if the remaining SOC does not cover the WORST-CASE energy demand
+      (i)   if the remaining SOC does not cover the energy
             to the next charging station, charge to full;
       (ii)  if the consecutive-driving budget does not cover the next leg,
             take the cheapest qualifying break — in parallel with charging
@@ -201,24 +192,6 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
             leg, take a daily rest (reduced if the budget allows, regular
             otherwise);
       (iv)  otherwise, continue;
-      (v)   escalate to a daily rest whenever a legal rest would no longer be
-            possible at the next stop — the pre-rest spread cap is 13 h before
-            a regular rest and 15 h before a reduced one, and it applies to
-            h + o (spread at the instant the rest starts), not to the
-            post-reset value.
-
-    The greedy policy solves no optimization problem and uses the SAME
-    information as every other method: the vehicle state, the distribution
-    support (via supervisor.compute_flags), and the expected charger queue
-    delays Q_i.  Q_i is a shared MODEL parameter — it already enters the
-    departure-time and working-time constraints of the MILP used by every
-    method — so greedy consulting it is NOT privileged knowledge (C4).
-
-    Queue avoidance (C4): when a stop at a CS is discretionary (a break/rest
-    dwell rather than an energy-forced charge), the driver skips charging at a
-    station whose expected queue delay Q_i exceeds a threshold, preferring a
-    lower-queue station downstream.  An energy-forced charge (must_charge) is
-    never skipped.
 
     Parameters
     ----------
@@ -259,8 +232,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     usable = Ecap - Emin
     Tb45   = full_data["Tb45"]         # 0.75 h
     Tb30   = full_data["Tb30"]         # 0.50 h
-    # 8.3 no-split axis: without the Art. 7 split, phi can never leave 0, so
-    # every "b30 because a b15 is already banked" branch below is dead.
+
     allow_split = bool(full_data.get("allow_split", True))
     phi         = state.phi if allow_split else 0
 
@@ -277,9 +249,6 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
 
     batt_full = (state.e_arr >= Ecap - 1.0)
 
-    # ── C4: queue avoidance — skip a discretionary charge at a busy station ────
-    # Q_i is a shared model parameter (no information asymmetry); an
-    # energy-forced charge (must_charge) is never skipped.
     Q_all = full_data.get("Q", {})
     if queue_threshold is None:
         queue_threshold = 0.8 * max(Q_all.values()) if Q_all else float("inf")
@@ -327,23 +296,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     else:
         reason = "PASS"
 
-    # ── SP2: spread-aware escalation ───────────────────────────────────────────
-    # compute_flags' spread check uses o(a)=0, so `must_rest` misses the on-duty
-    # dwell (queue + charge + break + service + setup) that THIS action adds —
-    # all of which counts toward the 15 h spread ceiling (BEHDV: h_new = h +
-    # o_dwell + D_act).  A long dwell (e.g. a full charge with a parallel break)
-    # can therefore breach the ceiling before the next stop without any rest
-    # being triggered.  A daily rest is the only reset, so when the action we are
-    # about to execute would bust the ceiling, escalate it to a rest here (any
-    # planned charge still runs for free in parallel with the rest).
-    # SP2b: the cap depends on WHICH rest is taken.  Art. 8 gives 13 h of spread
-    # before a regular daily rest and 15 h before a reduced one (MILP eq. R24,
-    # spread_prerest) — and the cap applies to h + o, the spread at the instant
-    # the rest BEGINS, not to the post-reset value.  The old rule compared
-    # against a hardcoded 15 h and so under-rested by up to 2 h on every route
-    # whose reduced-rest budget was spent: 68% of greedy's r1 rests started
-    # after the 13 h deadline, and the simulator could not see it (BEHDV zeroes
-    # the spread at the rest, so its h > 15 test never fires at a rest stop).
+
     Tspr1_v  = full_data.get("Tspr1", 13.0)
     Tspr2_v  = flags.get("Tspr2", full_data.get("Tspr2", 15.0))
     rho_bar  = int(full_data.get("rho_bar", 3))
@@ -516,8 +469,6 @@ def run_greedy(full_data: dict,
 
     Travel times and energies are consumed from the precomputed realisation
     lists D_real and E_real (one entry per leg, leg i = stop i -> stop i+1).
-    These must come from the same precomputed JSON as those used by LA and RO,
-    ensuring fair comparison on identical uncertainty realisations.
 
     Parameters
     ----------
@@ -548,21 +499,8 @@ def run_greedy(full_data: dict,
     if run_id is None:
         ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"{full_data.get('title', 'inst')}_GREEDY_{ts}"
-    # persist=False -> an INTERNAL run (the ORACLE MIP warm start): write no
-    # solution/figure/scenario artefacts, so it can never be mistaken for a
-    # greedy method result by the dedup, the tables, or the figures.
-    #
-    # The log goes to logs/_internal/ rather than logs/.  Suppressing only the
-    # SOLUTION was not enough: compile_solutions.find_failed_runs synthesises a
-    # run row from any logs/*.txt that has no matching solution file, so each
-    # warm start produced a phantom INCOMPLETE row for (instance, greedy) whose
-    # timestamp — the oracle runs after the method batch — beat the real greedy
-    # run in the latest-run dedup and evicted it from every table and figure.
-    # 1163 real greedy runs were hidden that way, almost all of them on the
-    # __variant and __diesel instances of sections 8.3/8.4, which are exactly
-    # where ORACLE is run alongside greedy.  find_failed_runs scans only the top
-    # level of logs/, so a subdirectory keeps the traceability without the
-    # phantom.
+
+
     _int_dir = _paths.logs("_internal")
     if not persist:
         os.makedirs(_int_dir, exist_ok=True)
@@ -577,11 +515,6 @@ def run_greedy(full_data: dict,
     log = open(paths["log"], "w", encoding="utf-8")
 
     def _p(msg):
-        # The log handle is utf-8, but stdout is whatever the console/pipe
-        # gives us — cp1252 on a redirected Windows run, which cannot encode
-        # the "dwell~=" glyph below and killed EVERY run in a piped batch
-        # (3/3 failed with UnicodeEncodeError before this guard).  Same
-        # treatment as oracle._safe_print: degrade the glyph, never the run.
         if verbose:
             try:
                 print(msg)
@@ -599,9 +532,7 @@ def run_greedy(full_data: dict,
        f"safety={safety_buffer:.0%}  supervised={supervised}")
     _p("=" * 65)
 
-    # strict_spread: greedy is the one policy re-validated against the Art. 8
-    # pre-rest / terminal spread caps, so it is the only one that records them
-    # as violations.  LA and the rest keep their previous feasibility semantics.
+
     vehicle    = BEHDV(full_data, strict_spread=True)
     tracker    = ScenarioTracker(full_data)   # records realisations only
     scores_log = []                           # empty -- greedy has no look-ahead
@@ -620,9 +551,6 @@ def run_greedy(full_data: dict,
             safety_buffer_frac = safety_buffer,
         )
 
-        # S1: identical safety-supervisor layer as every other policy.
-        # greedy_decision already uses the same compute_flags checks, so
-        # interventions should be rare; the call keeps the guarantee uniform.
         if supervised and stop > 0:
             action, itv = supervise_action(full_data, stop, vehicle, action,
                                            cv=cv,

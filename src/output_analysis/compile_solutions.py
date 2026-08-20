@@ -268,7 +268,8 @@ def _normalise_la_config(rows: list[dict]) -> int:
     n = 0
     for r in rows:
         eff = _paths.effective_variant(r.get("method"), r.get("variant"),
-                                       r.get("solve_mode"))
+                                       r.get("solve_mode"),
+                                       r.get("la_energy_quantile"))
         if eff != (r.get("variant") or None):
             r["variant"] = eff
             n += 1
