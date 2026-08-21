@@ -46,9 +46,18 @@ ROOT     = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 DATA_DIR = os.path.join(ROOT, "ML", "data")
 RUN_DIR  = os.path.join(DATA_DIR, "miptail")
 INST_DIR = os.path.join(ROOT, "instances")
-K_LOOK   = 10          # how many upcoming nodes get detailed per-node features
+K_LOOK   = 10          # DEFAULT number of upcoming nodes given detailed
+                       # per-node features.  This is the one free knob of the
+                       # representation (total features = 21 + 6*K), and it is
+                       # an EXPERIMENT, not a setting: K=10 spans only ~2.7 h
+                       # of driving while the HoS break cycle is 4.5 h and the
+                       # MILP look-ahead needed 24 h, so how much detailed
+                       # foresight the learned policy needs is an open question
+                       # the ablation answers.  Pass --k to sweep it.
 SLACK_CAP = 48.0       # clip "hours until latest arrival" at 48 h (beyond that
                        # the exact value carries no decision information)
+N_BASE    = 21         # dashboard features, independent of K (the mask in
+                       # model.py indexes into this block only)
 
 # ── label helpers ────────────────────────────────────────────────────────────
 def _norm(v) -> str:
@@ -100,7 +109,7 @@ def build_instance_context(inst: dict):
                 Ecap=float(inst["Ecap"]), Emin=float(inst["Emin"]),
                 allow_split=float(bool(inst.get("allow_split", True))))
 
-def features_at(ctx: dict, st: dict) -> list:
+def features_at(ctx: dict, st: dict, k_look: int = K_LOOK) -> list:
     """One feature vector: current vehicle state + relative view of the future."""
     i, N = int(st["stop"]), ctx["N"]
     t    = float(st["t_arr"])
@@ -130,7 +139,7 @@ def features_at(ctx: dict, st: dict) -> list:
     f.append(min(float(slack.min()), SLACK_CAP) if len(slack) else SLACK_CAP)
     # -- detailed look at the next K nodes (zero-padded near route end);
     #    the network learns how far ahead actually matters (K is an ablation) --
-    for j in range(1, K_LOOK + 1):
+    for j in range(1, k_look + 1):
         n = i + j
         if n <= N:
             f += [ctx["D"][n - 1], ctx["E"][n - 1] / 100.0,
@@ -140,25 +149,59 @@ def features_at(ctx: dict, st: dict) -> list:
             f += [0.0, 0.0, 0.0, 0.0, 0.0, SLACK_CAP]
     return f
 
-FEATURE_NAMES = ([
+BASE_NAMES = [
     "soc", "soc_margin", "cd", "sd", "sw", "phi", "rho2_used", "ext_used",
     "at_cs", "at_cust", "at_lay", "queue_here", "e_to_next_cs", "km_to_next_cs",
     "stops_left", "driveh_left", "energy_left", "km_left", "cust_left",
     "allow_split", "min_slack"]
-    + [f"n{j}_{x}" for j in range(1, K_LOOK + 1)
-       for x in ("legD", "legE", "cs", "cust", "queue", "slack")])
+assert len(BASE_NAMES) == N_BASE
+
+def feature_names(k_look: int = K_LOOK) -> list:
+    return BASE_NAMES + [f"n{j}_{x}" for j in range(1, k_look + 1)
+                         for x in ("legD", "legE", "cs", "cust", "queue", "slack")]
 
 # ── split assignment ─────────────────────────────────────────────────────────
-def split_of(family: str, seed: int) -> str:
+def split_of(family: str, seed: int, mode: str = "family") -> str:
+    """Assign one (family, seed) to a split.
+
+    Two designs, answering two different questions — both legitimate, and we
+    run both because they are cheap and not interchangeable:
+
+    mode="family" (EXTRAPOLATION study)
+        Train only on short+medium routes with none/tight windows (12 of the
+        36 families).  Long routes and the medium/large window classes are
+        never trained on at all, so the held-out cells measure how far a
+        cloned policy TRAVELS to regimes it has not seen.  Costs training
+        data (14.4k rows) to buy a generalisation result.
+
+    mode="seed" (DEPLOYMENT study)
+        Train on ALL 36 families, holding out seeds only.  Every regime is
+        represented in training, so the held-out seeds measure how good the
+        policy can actually BE on the deployment distribution.  ~5x the
+        training data.  This is the standard supervised split; it says
+        nothing about extrapolation.
+
+    Seed boundaries are identical in both modes (1-17 / 18-21 / 22-25) so the
+    two studies are directly comparable on the seen families.
+    """
+    def by_seed(s):
+        return "train" if s <= 17 else ("val" if s <= 21 else "test_id")
+    if mode == "seed":
+        return by_seed(seed)
     m = re.match(r"(R[a-z]+)C([a-z]+)T([a-z]+)", family)
     r, tw = m.group(1), m.group(3)
     if r == "Rlong" and tw in ("none", "tight"):   return "ood_route"
     if r != "Rlong" and tw in ("medium", "large"): return "ood_tw"
     if r == "Rlong":                               return "ood_both"
-    return "train" if seed <= 17 else ("val" if seed <= 21 else "test_id")
+    return by_seed(seed)
 
 # ── main ─────────────────────────────────────────────────────────────────────
-def main():
+def tag_for(k_look: int, mode: str) -> str:
+    """Filename tag: family mode keeps the original names for continuity."""
+    return f"K{k_look}" + ("" if mode == "family" else f"_{mode}split")
+
+
+def main(k_look: int = K_LOOK, mode: str = "family"):
     infeasible = set()
     with open(os.path.join(DATA_DIR, "manifest.csv")) as fh:
         for row in csv.DictReader(fh):
@@ -184,11 +227,11 @@ def main():
                 raise RuntimeError(f"stop index mismatch in {f} @ {i}")
             key = action_key(acts[i])
             combo_count[key] = combo_count.get(key, 0) + 1
-            X.append(features_at(ctx, st))
+            X.append(features_at(ctx, st, k_look))
             y_cls.append(key)
             y_tauc.append(float(durs[i].get("tauc", 0.0)))
             rows_meta.append((inst_name, family, int(seed), i,
-                              split_of(family, int(seed))))
+                              split_of(family, int(seed), mode)))
 
     # stable class mapping: most frequent combo first (class 0 = usually "pass")
     combos = sorted(combo_count, key=lambda k: -combo_count[k])
@@ -199,20 +242,22 @@ def main():
     y_tauc = np.asarray(y_tauc, dtype=np.float32)
     splits = np.array([r[4] for r in rows_meta])
     np.savez_compressed(
-        os.path.join(DATA_DIR, "dataset.npz"),
+        os.path.join(DATA_DIR, f"dataset_{tag_for(k_look, mode)}.npz"),
         X=X, y=y, tauc=y_tauc, split=splits,
         instance=np.array([r[0] for r in rows_meta]),
         family=np.array([r[1] for r in rows_meta]),
         stop=np.array([r[3] for r in rows_meta], dtype=np.int32))
     meta = dict(
         n_rows=int(len(y)), n_features=X.shape[1],
-        feature_names=FEATURE_NAMES,
+        feature_names=feature_names(k_look),
         classes=[list(c) for c in combos],
         class_counts={str(c): combo_count[c] for c in combos},
         split_sizes={s: int((splits == s).sum()) for s in np.unique(splits)},
-        k_lookahead=K_LOOK, slack_cap_h=SLACK_CAP,
-        n_runs_used=len(files) - len(infeasible))
-    json.dump(meta, open(os.path.join(DATA_DIR, "meta.json"), "w"), indent=2)
+        k_lookahead=k_look, slack_cap_h=SLACK_CAP, n_base=N_BASE,
+        split_mode=mode, n_runs_used=len(files) - len(infeasible))
+    json.dump(meta,
+              open(os.path.join(DATA_DIR, f"meta_{tag_for(k_look, mode)}.json"), "w"),
+              indent=2)
 
     print(f"rows: {len(y)}   features: {X.shape[1]}   classes: {len(combos)}")
     for c in combos:
@@ -223,4 +268,16 @@ def main():
                                           y_tauc.max()))
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--k", type=int, nargs="+", default=[K_LOOK],
+                   help="lookahead node counts to extract (one dataset each)")
+    p.add_argument("--split-mode", dest="mode", default="family",
+                   choices=["family", "seed"],
+                   help="family = hold out whole regimes (extrapolation study); "
+                        "seed = all 36 families, hold out seeds (deployment study)")
+    _a = p.parse_args()
+    for _k in _a.k:
+        print(f"\n=== K = {_k}  ({N_BASE} + 6*{_k} = {N_BASE + 6*_k} features), "
+              f"split_mode = {_a.mode} ===")
+        main(_k, _a.mode)

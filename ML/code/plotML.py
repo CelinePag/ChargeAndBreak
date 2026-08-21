@@ -28,7 +28,7 @@ Figures are skipped with a message when their input data is not present yet,
 so the script is safe to run at any point in the project.
 """
 from __future__ import annotations
-import glob, json, os, sys
+import glob, json, os, re, sys
 import collections
 import numpy as np
 import matplotlib
@@ -63,21 +63,35 @@ def _latest(pattern: str):
     return sorted(fs)[-1] if fs else None
 
 
-def collect_runs() -> list[dict]:
+def collect_runs(method: str | None = None) -> list[dict]:
     """One record per student run, joined with the baselines for the same
-    instance (teacher = LA_MIPTAIL, LP tail = plain LA, greedy if present)."""
-    # Dedup to the LATEST run per instance, matching the reporting pipeline's
-    # convention: re-running an instance must update its result, not add a
-    # second sample that silently doubles its weight in every median.
-    latest_by_inst: dict[str, str] = {}
-    for f in sorted(glob.glob(os.path.join(SOLS, "*_STUDENT_*.json"))):
-        latest_by_inst[json.load(open(f))["instance"]] = f   # sorted => last wins
+    instance (teacher = LA_MIPTAIL, LP tail = plain LA, greedy if present).
+
+    `method` selects one student variant (e.g. STUDENTFK20); with several
+    present and none requested we take the one with the most runs, because
+    mixing variants in a single figure would silently average different
+    policies.  Dedups to the LATEST run per instance, matching the reporting
+    pipeline: a re-run updates a result, it does not add a second sample.
+    """
+    by_method: dict[str, dict[str, str]] = collections.defaultdict(dict)
+    for f in sorted(glob.glob(os.path.join(SOLS, "*.json"))):
+        mm = re.match(r".*_(STUDENT[A-Za-z0-9]*)_S\d", os.path.basename(f))
+        if mm:
+            by_method[mm.group(1)][json.load(open(f))["instance"]] = f
+    if not by_method:
+        return []
+    if method is None:
+        method = max(by_method, key=lambda k: len(by_method[k]))
+        if len(by_method) > 1:
+            print(f"note: {len(by_method)} student variants present "
+                  f"({', '.join(sorted(by_method))}); using {method}")
+    latest_by_inst = by_method.get(method, {})
 
     rows = []
     for inst, f in sorted(latest_by_inst.items()):
         d = json.load(open(f))
         m = d.get("metrics", {})
-        rec = dict(instance=inst,
+        rec = dict(instance=inst, _file=f,
                    family=inst.rsplit("_", 1)[0],
                    route=("long" if inst.startswith("Rlong") else
                           "medium" if inst.startswith("Rmedium") else "short"),
@@ -202,6 +216,121 @@ def fig_training(_rows=None):
     _save(fig, "ml_training")
 
 
+ACT_COLOR = {"charge": "#E69F00", "break": "#0072B2", "rest": "#661100",
+             "queue": "#999999"}
+
+
+def _schedule_segments(run: dict):
+    """Yield (t_start, duration, kind, absorbed) activity bars for one run.
+
+    Order follows BEHDV.advance: queue -> charge -> break -> rest.  Because
+    the model credits a break taken INSIDE a charging dwell (taub is only the
+    EXTRA time beyond tauc), a declared break with taub == 0 was fully
+    absorbed by the charge — we mark that charge bar as hatched rather than
+    drawing a zero-width break, since that absorption is the central
+    coupling this problem is about.
+    """
+    traj, acts, durs = run["sim_trajectory"], run["actions"], run["durations_list"]
+    for i, (a, d) in enumerate(zip(acts, durs)):
+        t = float(traj[i]["t_arr"])
+        brk, rst = a.get("break_type"), a.get("rest_type")
+        for kind, dur in (("queue", d.get("tauq", 0.0)),
+                          ("charge", d.get("tauc", 0.0)),
+                          ("break", d.get("taub", 0.0)),
+                          ("rest", d.get("taur", 0.0))):
+            dur = float(dur or 0.0)
+            if dur <= 1e-6:
+                continue
+            absorbed = (kind == "charge" and brk and float(d.get("taub", 0)) <= 1e-6)
+            yield t, dur, kind, bool(absorbed), i, brk, rst
+            t += dur
+
+
+def fig_schedule(rows, instance: str | None = None):
+    """Student vs. exact-tail teacher: the realised schedule along the route.
+
+    Two Gantt lanes on a shared clock plus the SoC traces, so the behavioural
+    difference (when each policy stops, how long it charges, whether it hides
+    the break inside the charge) is visible rather than inferred from a
+    duration delta.
+    """
+    cand = [r for r in rows if r.get("teacher") and r.get("student")]
+    if not cand:
+        print("[skip] schedule: need student and teacher runs for one instance")
+        return
+    if instance:
+        cand = [r for r in cand if r["instance"] == instance] or cand
+        pick = cand[0]
+    else:
+        # "representative" = the instance whose student/teacher gap is closest
+        # to the median, so the figure is typical rather than cherry-picked.
+        deltas = [(r, 100 * (r["student"] - r["teacher"]) / r["teacher"])
+                  for r in cand]
+        med = np.median([d for _, d in deltas])
+        pick = min(deltas, key=lambda kv: abs(kv[1] - med))[0]
+    inst = pick["instance"]
+    stu_f = pick.get("_file") or _latest(os.path.join(SOLS, f"{inst}_*STUDENT*.json"))
+    tea_f = _latest(os.path.join(REF_SOLS, f"{inst}_LA_MIPTAIL*.json"))
+    runs = [("STUDENT", json.load(open(stu_f))), ("LA-MIP (teacher)",
+                                                  json.load(open(tea_f)))]
+    raw = json.load(open(os.path.join(ROOT, "instances", f"{inst}.json")))["instance"]
+    Wha = {int(k): float(v) for k, v in (raw.get("Wha") or {}).items()}
+    Whf = {int(k): float(v) for k, v in (raw.get("Whf") or {}).items()}
+    Ecap = float(raw["Ecap"]); Emin = float(raw["Emin"])
+
+    fig, axes = plt.subplots(2, 1, figsize=(9.5, 4.6), sharex=True,
+                             gridspec_kw=dict(height_ratios=[1.15, 1]))
+    axg, axs = axes
+    tmax = max(float(r["sim_trajectory"][-1]["t_arr"]) for _, r in runs)
+
+    # customer windows as vertical spans (shared by both policies)
+    for c in sorted(set(Wha) | set(Whf)):
+        a, b = Wha.get(c), Whf.get(c)
+        if a is None or b is None or b > tmax * 5:
+            continue
+        axg.axvspan(a, min(b, tmax), color="#009E73", alpha=.10, zorder=0)
+
+    for lane, (label, run) in enumerate(runs):
+        y = 1 - lane
+        for t, dur, kind, absorbed, i, brk, rst in _schedule_segments(run):
+            axg.barh(y, dur, left=t, height=.42,
+                     color=ACT_COLOR[kind], alpha=.95, zorder=3,
+                     hatch="///" if absorbed else None,
+                     edgecolor="white" if absorbed else "none", linewidth=.4)
+        traj = run["sim_trajectory"]
+        axs.plot([s["t_arr"] for s in traj], [s["e_arr"] / Ecap * 100 for s in traj],
+                 lw=1.3, label=label,
+                 color=COLOR["STUDENT"] if lane == 0 else COLOR["LA-MIP"])
+        # missed windows: red ticks on the lane
+        miss = [c for c in Wha
+                if (traj[c]["t_arr"] > Whf.get(c, 1e9) + 1e-3
+                    or traj[c]["t_arr"] < Wha.get(c, -1e9) - 1e-3)] if Wha else []
+        if miss:
+            axg.plot([traj[c]["t_arr"] for c in miss], [y] * len(miss),
+                     "v", ms=5, color="#CC3311", zorder=5)
+
+    axg.set_yticks([1, 0]); axg.set_yticklabels([r[0] for r in runs], fontsize=8)
+    axg.set_ylim(-.55, 1.55)
+    axg.set_title(f"Realised schedule — {inst}   "
+                  f"(student {pick['student']:.1f} h vs teacher {pick['teacher']:.1f} h)",
+                  fontsize=9)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=ACT_COLOR[k]) for k in ACT_COLOR]
+    handles.append(plt.Rectangle((0, 0), 1, 1, facecolor=ACT_COLOR["charge"],
+                                 hatch="///", edgecolor="white"))
+    handles.append(plt.Line2D([], [], marker="v", ls="", color="#CC3311"))
+    axg.legend(handles, list(ACT_COLOR) + ["break inside charge", "window miss"],
+               ncol=6, fontsize=7, frameon=False,
+               loc="upper center", bbox_to_anchor=(.5, -.02))
+    axg.grid(axis="x", alpha=.25, lw=.4)
+
+    axs.axhline(Emin / Ecap * 100, ls="--", lw=.8, c="#CC3311")
+    axs.text(0, Emin / Ecap * 100 + 2, "$E_{min}$", fontsize=7, color="#CC3311")
+    axs.set_ylabel("state of charge (%)"); axs.set_xlabel("time (h)")
+    axs.set_xlim(0, tmax * 1.02)
+    axs.legend(fontsize=8, frameon=False); axs.grid(alpha=.25, lw=.4)
+    _save(fig, "ml_schedule")
+
+
 def _save(fig, stem):
     os.makedirs(FIGS, exist_ok=True)
     fig.tight_layout()
@@ -212,14 +341,22 @@ def _save(fig, stem):
 
 
 FIGURES = {"money": fig_money, "paired": fig_paired,
-           "failures": fig_failures, "training": fig_training}
+           "failures": fig_failures, "training": fig_training,
+           "schedule": fig_schedule}
 
 
 def main(argv):
+    inst = method = None
+    argv = list(argv)
+    for flag in list(argv):
+        if flag.startswith("--instance="):
+            inst = flag.split("=", 1)[1]; argv.remove(flag)
+        elif flag.startswith("--method="):
+            method = flag.split("=", 1)[1]; argv.remove(flag)
     want = argv or ["all"]
     if want == ["all"]:
         want = list(FIGURES)
-    rows = collect_runs()
+    rows = collect_runs(method)
     print(f"{len(rows)} student runs found in ML/solutions/")
     if not rows and want != ["training"]:
         print("nothing to plot yet — run ML/code/rollout.py first")
@@ -228,7 +365,7 @@ def main(argv):
             print(f"unknown figure '{w}'; choose from {list(FIGURES)} or 'all'")
             continue
         try:
-            FIGURES[w](rows)
+            FIGURES[w](rows, inst) if w == "schedule" else FIGURES[w](rows)
         except Exception as e:
             print(f"[skip] {w}: {type(e).__name__}: {e}")
 
