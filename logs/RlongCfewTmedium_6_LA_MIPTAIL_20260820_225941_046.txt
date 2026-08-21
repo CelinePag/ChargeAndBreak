@@ -1,0 +1,56 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-21 14:00:47)
+  Instance : RlongCfewTmedium_6   run_id=RlongCfewTmedium_6_LA_MIPTAIL_20260820_225941_046
+  Route    : 168 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=1  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 165/168 stops done, continuing from stop 165
+
+[LA] stop 165 (LAYBY)  t=121.255h  soc=222kWh  cd=3.34h  sd=7.33h  sw=8.05h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [165->168]  travel=0.96h  4 actions × 25 scen  1w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   122.213h (0.056h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (1.8s)
+  y=0  brk=0    rst=r1  133.379h (0.056h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=b45  rst=0   123.129h (0.056h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (1.7s)
+  y=0  brk=b30  rst=0   122.879h (0.056h)  ok=25/25  ws=0/25  tauc=0m  taub=30m  (1.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=121.255h  td=121.255h  (mean=122.213h)  6.9s
+
+[LA] stop 166 (LAYBY)  t=121.495h  soc=197kWh  cd=3.58h  sd=7.57h  sw=8.29h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [166->168]  travel=0.71h  4 actions × 25 scen  1w  [mean,mip]  pruned=1  ws=prev
+     [FREE-MIP]  obj=122.670h  0.1s  ws=no  87v/158c
+  y=0  brk=0    rst=0   122.200h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.7s)
+  y=0  brk=0    rst=r1  133.367h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.5s)
+  y=0  brk=b45  rst=0   123.117h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.6s)
+  y=0  brk=b30  rst=0   122.867h (0.052h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.7s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=121.495h  td=121.495h  (mean=122.200h)  6.6s
+
+[LA] stop 167 (CS)  t=121.727h  soc=171kWh  cd=3.81h  sd=7.80h  sw=8.52h  phi=1  r2=3  ext_sh=2/2  sd_lim=9h
+     horizon [167->168]  travel=0.46h  8 actions × 25 scen  1w  [mean,mip]  pruned=2  ws=prev
+     [FREE-MIP]  obj=122.189h  0.1s  ws=no  63v/116c
+  y=0  brk=0    rst=0   122.180h (0.041h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=0   122.893h (0.085h)  ok=25/25  ws=25/25  tauc=39m  taub=0m  (1.6s)
+  y=0  brk=0    rst=r1  133.346h (0.041h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (1.6s)
+  y=1  brk=0    rst=r1  134.040h (0.180h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (1.5s)
+  y=0  brk=b45  rst=0   123.096h (0.041h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (1.5s)
+  y=1  brk=b45  rst=0   123.159h (0.090h)  ok=25/25  ws=25/25  tauc=45m  taub=0m  (1.5s)
+  y=0  brk=b30  rst=0   122.846h (0.041h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (1.6s)
+  y=1  brk=b30  rst=0   123.119h (0.132h)  ok=25/25  ws=25/25  tauc=15m  taub=30m  (1.5s)
+     [DIAG] max per-scenario delta spread across actions: 31.10 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=121.727h  td=121.727h  (mean=122.180h)  12.5s
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 122.195 h  (122:11)
+  Duration : 114.195 h
+  Wall     : 26.1 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RlongCfewTmedium_6_LA_MIPTAIL_20260820_225941_046_scenarios.json  (coverage=100.0%)
+  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RlongCfewTmedium_6_LA_MIPTAIL_20260820_225941_046.json
