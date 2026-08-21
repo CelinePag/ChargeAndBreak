@@ -1,0 +1,33 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-21 15:24:35)
+  Instance : RmediumCfewTlarge_1   run_id=RmediumCfewTlarge_1_LA_MIPTAIL_20260821_152434_000
+  Route    : 104 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=1  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 88/104 stops done, continuing from stop 88
+
+[LA] stop 88 (LAYBY)  t=59.438h  soc=363kWh  cd=2.40h  sd=4.21h  sw=5.35h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [88->104]  travel=4.44h  5 actions × 25 scen  1w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   65.101h (1.875h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (3.0s)
+  y=0  brk=0    rst=r1  75.998h (0.178h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (3.0s)
+  y=0  brk=0    rst=r2  73.996h (0.181h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (3.0s)
+  y=0  brk=b45  rst=0   66.098h (1.850h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (3.1s)
+  y=0  brk=b30  rst=0   65.848h (1.850h)  ok=25/25  ws=0/25  tauc=0m  taub=30m  (3.1s)
+     [DIAG] max per-scenario delta spread across actions: 550.40 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=59.438h  td=59.438h  (mean=65.101h)  15.1s
+
+[LA] stop 89 (CS)  t=59.724h  soc=334kWh  cd=2.69h  sd=4.50h  sw=5.63h  phi=1  r2=2  ext_sh=2/2  sd_lim=9h
+     horizon [89->104]  travel=4.15h  10 actions × 25 scen  1w  [mean,mip]  pruned=2  ws=prev
+     [FREE-MIP]  obj=64.582h  0.1s  ws=no  459v/813c
+  y=0  brk=0    rst=0   64.614h (0.125h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.9s)
+  y=1  brk=0    rst=0   65.127h (0.143h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (3.2s)
+  y=0  brk=0    rst=r1  75.777h (0.119h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.8s)
+  y=1  brk=0    rst=r1  76.000h (0.116h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.9s)
+  y=0  brk=0    rst=r2  73.777h (0.119h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (2.8s)
+  y=1  brk=0    rst=r2  74.000h (0.116h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (2.7s)
+  y=0  brk=b45  rst=0   65.527h (0.119h)  ok=25/25  ws=25/25  tauc=0m  taub=45m  (2.8s)
+  y=1  brk=b45  rst=0   65.750h (0.116h)  ok=25/25  ws=25/25  tauc=15m  taub=45m  (2.8s)
+  y=0  brk=b30  rst=0   65.277h (0.119h)  ok=25/25  ws=25/25  tauc=0m  taub=30m  (2.8s)
