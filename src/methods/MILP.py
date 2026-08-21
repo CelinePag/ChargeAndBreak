@@ -1923,6 +1923,22 @@ def solve_horizon(full_data: dict, start_stop: int, end_stop: int,
 
     feasible = status in ("optimal", "feasible")
 
+    # A sub-problem that ran out of time but still found an incumbent is USED,
+    # not thrown away.  Discarding it scored the action at INFEASIBLE_PENALTY,
+    # which made a merely-hard configuration indistinguishable from an
+    # infeasible one: with a long horizon whole decisions came back 0/|Xi|
+    # feasible and the forced-rest net fired, so the policy degraded silently
+    # rather than reporting an unconverged solve.
+    #
+    # Gurobi returns maxTimeLimit both with and without an incumbent.  The
+    # incumbent case is exactly the one where Pyomo could load a solution, and
+    # therefore where the objective evaluated to a finite number above — a
+    # solve that found nothing leaves solve_info["obj"] as None.
+    if not feasible and status == "maxTimeLimit":
+        _o = solve_info.get("obj")
+        feasible = (_o is not None and _mi.isfinite(_o)
+                    and abs(_o) < INFEASIBLE_PENALTY / 2)
+
     if not feasible:
         return dict(feasible=False, obj=INFEASIBLE_PENALTY,
                     sol=[], status=status, first_action=None,

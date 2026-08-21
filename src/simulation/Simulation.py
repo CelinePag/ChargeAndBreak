@@ -1098,10 +1098,13 @@ def select_best_action(full_data, stop: int, state,
     # with the horizon the way the reader expects.
     #
     # The time-limit hit rate matters just as much: every sub-problem is capped
-    # (time_limit s, four times that for the nominal re-solve) and a capped
-    # solve is ACCEPTED as feasible, so a configuration too big to solve does
-    # not get slower — it silently starts scoring actions on unconverged
-    # incumbents.  Without this counter that failure is invisible.
+    # (time_limit s, four times that for the nominal re-solve) and since the
+    # 2026-08-21 change a capped solve is ACCEPTED at its incumbent rather than
+    # discarded.  That is the right trade — an unconverged answer beats a false
+    # infeasibility — but it means a configuration too big to solve no longer
+    # announces itself in either the clock or the feasibility count.  This
+    # counter is the only place it shows up, so report it alongside any gap
+    # measured on a long horizon.
     if stats_out is not None:
         _cpu, _n_sub, _n_cap = 0.0, 0, 0
         for _s in scored:
