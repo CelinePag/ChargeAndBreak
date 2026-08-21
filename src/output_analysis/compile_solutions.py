@@ -1116,6 +1116,129 @@ def build_gap_latex(rows, metric: str = "gap_pen",
     return L
 
 
+def build_gap_simplified_latex(rows, metric: str = "gap_pen",
+                               secondary: str | None = "gap_nopen") -> list[str]:
+    """
+    Simplified Table 1 — gap to oracle (%) by ROUTE x CUSTOMERS class.
+
+    Same numbers and conventions as ``build_gap_latex``, but the time-window
+    classes are pooled into the row mean instead of forming their own rows.
+    Pooling is at RUN level, so each row is the mean over every assessable run
+    of that (route, customers) class rather than a mean of cell means — the
+    two differ whenever cells hold unequal numbers of usable runs.
+
+    ROBU is omitted (dropped from the paper); columns run RO / 2SP / greedy /
+    LA, i.e. open-loop before closed-loop.
+    """
+    pen = (metric == "gap_pen")
+    ora_field = "oracle_duration_pen_h" if pen else "oracle_duration_h"
+
+    pop = [r for r in rows
+           if _is_ok(r)
+           and r.get("route_class") and r.get("customers_class")
+           and r.get("window_class")]
+
+    col_keys = ["RO", "2SP", "greedy", "LA_mean"]
+    col_hdr = ["RO", "2SP", "Greedy", "LA"]
+
+    gaps: dict = defaultdict(lambda: defaultdict(list))
+    gaps2: dict = defaultdict(lambda: defaultdict(list))
+    oracle: dict = defaultdict(dict)
+    for r in pop:
+        cell = (r["route_class"], r["customers_class"])
+        oobj = _safe_float(r.get(ora_field))
+        if oobj is not None:
+            oracle[cell][r.get("instance")] = oobj
+        mg = _method_group(r)
+        if mg is None or _is_unsolved(r):
+            continue
+        if _gap_usable(r) and r.get(metric) is not None:
+            gaps[cell][mg].append(r[metric])
+            if secondary and r.get(secondary) is not None:
+                gaps2[cell][mg].append(r[secondary])
+
+    def _cell_str(cell, mg):
+        vals = gaps[cell].get(mg, [])
+        if not vals:
+            return "--"
+        body = _pct(_mean(vals), 1)
+        sec = gaps2[cell].get(mg, []) if secondary else []
+        return (rf"{body}~{{\scriptsize({_pct(_mean(sec), 1)})}}" if sec
+                else body)
+
+    routes = [rt for rt in _ROUTE_ORDER
+              if any(c[0] == rt for c in oracle)]
+
+    def _custs_of(route):
+        return [cu for cu in _CUST_ORDER if oracle.get((route, cu))]
+
+    la_s = _mode([r.get("n_scenarios") for r in pop if r.get("method") == "LA"])
+    la_h = _mode([r.get("horizon_hours") for r in pop if r.get("method") == "LA"])
+    sp_s = _mode([r.get("n_scenarios") for r in pop if r.get("method") == "2SP"])
+    cfg_bits = []
+    if la_s:
+        cfg_bits.append(f"LA uses {int(la_s)} scenarios"
+                        + (f" over a {la_h:g}\\,h horizon" if la_h else ""))
+    if sp_s:
+        cfg_bits.append(f"2SP uses {int(sp_s)} scenarios")
+    cfg_txt = ("  " + "; ".join(cfg_bits) + ".") if cfg_bits else ""
+
+    n_inst = sorted({len(v) for v in oracle.values()})
+    if not n_inst:
+        inst_txt = "all"
+    elif len(n_inst) == 1:
+        inst_txt = str(n_inst[0])
+    else:
+        inst_txt = f"{n_inst[0]}--{n_inst[-1]}"
+
+    pen_txt = ("window penalties included" if pen
+               else "route duration only, window penalties excluded")
+    paren_txt = (r"  Parentheses give the same gap over the same runs with "
+                 r"window penalties excluded (route duration only)."
+                 if secondary else "")
+
+    lbl = "tab:gap-simplified" + ("" if pen else "-nopen")
+    L = []
+    L.append(r"\begin{table}[htbp]")
+    L.append(r"\centering")
+    L.append(rf"\caption{{Gap to oracle (\%) in route duration ({pen_txt}) by "
+             rf"route and customer-count class and method, pooling the "
+             rf"time-window classes.  Each row averages over the {inst_txt} "
+             rf"instances of the class and all their realizations."
+             rf"{paren_txt}{cfg_txt}}}")
+    L.append(rf"\label{{{lbl}}}")
+    L.append(r"\begin{tabular}{ll c cccc}")
+    L.append(r"\toprule")
+    L.append(r"\multirow{2}{*}{\textbf{\small Route}} "
+             r"& \multirow{2}{*}{\textbf{\small Cust.}} "
+             r"& \multirow{2}{*}{\textbf{Oracle (h)}} &")
+    L.append(r"\multicolumn{4}{c}{\textbf{Gap to Oracle \%}} \\")
+    L.append(r"\cmidrule(lr){4-7}")
+    L.append(" & & & " + " & ".join(col_hdr) + r" \\")
+    L.append(r"\midrule")
+    for ri, route in enumerate(routes):
+        custs = _custs_of(route)
+        if not custs:
+            continue
+        first_route = True
+        for cust in custs:
+            cell = (route, cust)
+            oracle_h = _mean(list(oracle[cell].values()))
+            gap_cells = [_cell_str(cell, ck) for ck in col_keys]
+            c0 = (rf"\multirow{{{len(custs)}}}{{*}}{{\small {_ROUTE_DISPLAY[route]}}}"
+                  if first_route else "")
+            c1 = rf"{{\small {_CUST_DISPLAY[cust]}}}"
+            L.append(f"{c0} & {c1} & {_fmt(oracle_h, 1)} & "
+                     + " & ".join(gap_cells) + r" \\")
+            first_route = False
+        if ri != len(routes) - 1:
+            L.append(r"\midrule")
+    L.append(r"\bottomrule")
+    L.append(r"\end{tabular}")
+    L.append(r"\end{table}")
+    return L
+
+
 def build_feasibility_latex(rows) -> list[str]:
     """
     Table 2 — feasibility / robustness by method.
@@ -1371,6 +1494,9 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap", gap_pen_tab)
     gap_np_tab  = build_gap_latex(base_rows, metric="gap_nopen")
     write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_nopen", gap_np_tab)
+    gap_simp_tab = build_gap_simplified_latex(base_rows, metric="gap_pen",
+                                              secondary="gap_nopen")
+    write_latex_sheet(wb.create_sheet(), "LaTeX_Gap_simple", gap_simp_tab)
 
     feas = build_feasibility_latex(base_rows)
     write_latex_sheet(wb.create_sheet(), "LaTeX_Feasibility", feas)
@@ -1384,6 +1510,7 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
         os.makedirs(tex_dir, exist_ok=True)
         _dump = {"gap.tex": gap_pen_tab,
                  "gap_nopen.tex": gap_np_tab,
+                 "gap_simplified.tex": gap_simp_tab,
                  "feasibility.tex": feas,
                  "runtime.tex": runtime}
         for name, lines in _dump.items():
@@ -1393,7 +1520,7 @@ def compile_to_excel(solutions_dir: str, logs_dir: str, output_path: str,
 
     n_failed = sum(1 for r in rows if r.get("status") != "OK")
     sheets = ["Results", "Summary", "LaTeX_Gap", "LaTeX_Gap_nopen",
-              "LaTeX_Feasibility", "LaTeX_Runtime"]
+              "LaTeX_Gap_simple", "LaTeX_Feasibility", "LaTeX_Runtime"]
     print(f"  Excel saved : {output_path}")
     print(f"  Sheets      : {', '.join(sheets)}  "
           f"({len(rows)} rows, {n_failed} unfinished)")

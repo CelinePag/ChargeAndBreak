@@ -154,6 +154,13 @@ def finalize_run(
     tw_misses  = dict(getattr(vehicle, "tw_misses", {}))
     dec_times  = list(events.get("decision_times", []))
     cmp_log    = list(events.get("cmp_log", []))
+    # Absent for methods that solve no look-ahead sub-problems (greedy, the
+    # offline plans): the metrics below then stay None rather than 0, so a
+    # method with no sub-problems is distinguishable from one that had them
+    # and spent no time.
+    _cpu_s     = list(events.get("solve_cpu_s", []))
+    _n_sub     = list(events.get("n_subproblems", []))
+    _n_cap     = list(events.get("n_subproblem_capped", []))
 
     # SIM2 — window hit rate and early/late miss split (replaces the v2
     # lateness-hours metric; the penalty is a fixed indicator, TW2)
@@ -223,6 +230,17 @@ def finalize_run(
         decision_time_mean_s  = (sum(dec_times) / len(dec_times)
                                  if dec_times else 0.0),
         decision_time_max_s   = max(dec_times) if dec_times else 0.0,
+        # Solver EFFORT, as distinct from decision wall clock.  The scenario
+        # sub-problems run in one parallel wave, so the clock above measures
+        # the slowest of them under whatever CPU contention the batch had;
+        # these three measure the work itself and whether it converged.
+        solve_cpu_s_total     = (sum(_cpu_s) if _cpu_s else None),
+        solve_cpu_s_mean      = (sum(_cpu_s) / len(_cpu_s)
+                                 if _cpu_s else None),
+        n_subproblems         = (sum(_n_sub) if _n_sub else None),
+        n_subproblem_capped   = (sum(_n_cap) if _n_cap else None),
+        subproblem_cap_rate   = (sum(_n_cap) / sum(_n_sub)
+                                 if _n_sub and sum(_n_sub) else None),
         offline_solve_time_s  = (method_meta or {}).get("solve_time"),
         directive_compliance  = compliance,
         lp_vs_mip             = cmp_summary,

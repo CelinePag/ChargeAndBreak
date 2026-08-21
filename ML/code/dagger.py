@@ -173,7 +173,11 @@ if __name__ == "__main__":
     p.add_argument("--split-mode", dest="mode", default="seed",
                    choices=["family", "seed"])
     p.add_argument("--guard-q", dest="guard_q", type=float, default=0.95)
-    p.add_argument("--no-split", dest="no_split", action="store_true", default=True)
+    # no-split is the chosen default policy; --allow-split turns it back on.
+    # (An `action="store_true", default=True` pair can never be switched off,
+    # so the negative flag is the one that has to exist.)
+    p.add_argument("--allow-split", dest="no_split", action="store_false",
+                   default=True, help="permit b15/b30 (default: forbidden)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--overwrite", action="store_true")
     main(p.parse_args())

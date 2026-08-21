@@ -633,7 +633,8 @@ def select_best_action(full_data, stop: int, state,
                        ext_shift_used: int = 0,
                        prune_quantile: float | None = GUARD_QUANTILE,
                        tiebreak_min: float = 5.0,
-                       cmp_log: list = None) -> tuple:
+                       cmp_log: list = None,
+                       stats_out: dict = None) -> tuple:
     """
     Enumerate, prune, score, and select the best action at ``stop``.
 
@@ -1088,6 +1089,40 @@ def select_best_action(full_data, stop: int, state,
        f"{'  [tiebreak]' if tb_flag else ''}"
        f"  {time.perf_counter()-t0:.1f}s")
 
+    # ── Solver-effort accounting for this decision ────────────────────────────
+    # Wall-clock decision time is NOT the compute cost of a configuration: the
+    # |Xi| scenario sub-problems run in one parallel wave (n_workers =
+    # min(cpu_count, n_scenarios)), so the clock measures the slowest
+    # sub-problem and the CPU contention around it, not the work done.  Summing
+    # the per-sub-problem solve times gives a cost that scales with |Xi| and
+    # with the horizon the way the reader expects.
+    #
+    # The time-limit hit rate matters just as much: every sub-problem is capped
+    # (time_limit s, four times that for the nominal re-solve) and a capped
+    # solve is ACCEPTED as feasible, so a configuration too big to solve does
+    # not get slower — it silently starts scoring actions on unconverged
+    # incumbents.  Without this counter that failure is invisible.
+    if stats_out is not None:
+        _cpu, _n_sub, _n_cap = 0.0, 0, 0
+        for _s in scored:
+            for _r in (_s[6] or []):
+                _si = (_r or {}).get("solve_info") or {}
+                _w  = _si.get("wall_s")
+                if _w is None:
+                    continue
+                _cpu += float(_w)
+                _n_sub += 1
+                if _si.get("status") == "maxTimeLimit":
+                    _n_cap += 1
+        _si = (nom_sol or {}).get("solve_info") or {}
+        if _si.get("wall_s") is not None:
+            _cpu += float(_si["wall_s"])
+            _n_sub += 1
+            if _si.get("status") == "maxTimeLimit":
+                _n_cap += 1
+        stats_out.update(solve_cpu_s=_cpu, n_subproblems=_n_sub,
+                         n_subproblem_capped=_n_cap)
+
     scores = [(s[0], s[1], s[2], s[3], s[5]) for s in scored]  # (act,score,std,n_feas,objs)
     scores.sort(key=lambda x: x[1])
     return best_action, scores, nom_sol
@@ -1159,7 +1194,9 @@ def run_simulation(full_data: dict,
     prev_sol   = None
     # S1/S2/RH4 event records
     events     = dict(interventions=[], decision_times=[], cmp_log=[],
-                      repairs=[], plan_violations=[])
+                      repairs=[], plan_violations=[],
+                      solve_cpu_s=[], n_subproblems=[],
+                      n_subproblem_capped=[])
 
     # ── Output directories and file paths ─────────────────────────────────────
     _paths.ensure_dirs()
@@ -1194,6 +1231,7 @@ def run_simulation(full_data: dict,
     # ── Main loop ─────────────────────────────────────────────────────────────
     for stop in range(N):
         t_dec = time.perf_counter()
+        _eff = {}
         if stop == 0:
             # Origin: no decision needed (no activity allowed at stop 0)
             action     = dict(y=0, break_type=None, rest_type=None)
@@ -1201,6 +1239,7 @@ def run_simulation(full_data: dict,
             score_list = [(action, 0.0, 0.0, 0, [])]
         else:
             action, score_list, nom_sol = select_best_action(
+                stats_out      = _eff,
                 full_data      = full_data,
                 stop           = stop,
                 state          = vehicle,
@@ -1261,6 +1300,9 @@ def run_simulation(full_data: dict,
                 nom_sol = None   # planned durations no longer match
 
         events["decision_times"].append(time.perf_counter() - t_dec)
+        for _k in ("solve_cpu_s", "n_subproblems", "n_subproblem_capped"):
+            if _k in _eff:
+                events[_k].append(_eff[_k])
 
         scores_log.append(score_list)
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
@@ -1315,6 +1357,11 @@ def run_simulation(full_data: dict,
             supervised    = supervised,
             prune_quantile= prune_quantile,
             tiebreak_min  = tiebreak_min,
+            # Solver budget and parallelism: neither was recorded before, so
+            # stored runs cannot be checked for comparability after the fact —
+            # which is exactly how the LA ladder became unreadable.
+            time_limit    = time_limit,
+            n_workers     = n_workers,
             seed          = seed,
         ),
     )
@@ -1399,7 +1446,9 @@ def run_simulation_precomputed(
     scores_log = []
     prev_sol   = None
     events     = dict(interventions=[], decision_times=[], cmp_log=[],
-                      repairs=[], plan_violations=[])
+                      repairs=[], plan_violations=[],
+                      solve_cpu_s=[], n_subproblems=[],
+                      n_subproblem_capped=[])
 
     assert len(D_real) == N, f"D_real length {len(D_real)} != N={N}"
     assert len(E_real) == N, f"E_real length {len(E_real)} != N={N}"
@@ -1484,6 +1533,7 @@ def run_simulation_precomputed(
     # ── Main loop ─────────────────────────────────────────────────────────────
     for stop in range(start_stop, N):
         t_dec = time.perf_counter()
+        _eff = {}
         if stop == 0:
             action     = dict(y=0, break_type=None, rest_type=None)
             nom_sol    = None
@@ -1498,6 +1548,7 @@ def run_simulation_precomputed(
             # precomputed pool): it draws n_scenarios over [stop, horizon_end)
             # via generate_scenarios() when precomputed_scenarios is left None.
             action, score_list, nom_sol = select_best_action(
+                stats_out      = _eff,
                 full_data             = full_data,
                 stop                  = stop,
                 state                 = vehicle,
@@ -1556,6 +1607,9 @@ def run_simulation_precomputed(
                 nom_sol = None   # planned durations no longer match
 
         events["decision_times"].append(time.perf_counter() - t_dec)
+        for _k in ("solve_cpu_s", "n_subproblems", "n_subproblem_capped"):
+            if _k in _eff:
+                events[_k].append(_eff[_k])
 
         scores_log.append(score_list)
         prev_sol = nom_sol["sol"] if nom_sol and nom_sol.get("sol") else None
@@ -1615,6 +1669,11 @@ def run_simulation_precomputed(
             supervised    = supervised,
             prune_quantile= prune_quantile,
             tiebreak_min  = tiebreak_min,
+            # Solver budget and parallelism: neither was recorded before, so
+            # stored runs cannot be checked for comparability after the fact —
+            # which is exactly how the LA ladder became unreadable.
+            time_limit    = time_limit,
+            n_workers     = n_workers,
             # Travels on full_data (it is consumed in MILP._build_sub_data);
             # surfaced here so a guarded run is self-describing.
             la_energy_quantile = full_data.get("la_energy_quantile"),

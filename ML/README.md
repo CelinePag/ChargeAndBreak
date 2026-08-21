@@ -29,7 +29,7 @@ export OMP_NUM_THREADS=1 GRB_THREADS=1
 for i in $(seq 0 15); do
   python ML/code/dagger.py --model ML/models/policy_K20_seedsplit_seed0_cw0.pt \
       --round 1 --prob 0.35 --limit 0 --slice $i/16 \
-      --k 20 --split-mode seed --guard-q 0.95 --no-split \
+      --k 20 --split-mode seed --guard-q 0.95 \
       > ML/logs/dagger_r1_$i.log 2>&1 &
 done; wait
 

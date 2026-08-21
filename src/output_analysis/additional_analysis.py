@@ -1250,6 +1250,12 @@ def cmd_la_report(args) -> None:
             pooled = {}
             for (cfg, route, _tw), recs in grp.items():
                 pooled.setdefault((cfg, route, "all"), []).extend(recs)
+                # Route classes pool the same way and for the same reason, so a
+                # figure asking what a configuration costs OVERALL reads one
+                # pooled median rather than an unweighted average of three
+                # per-corridor medians carrying very different run counts.
+                pooled.setdefault((cfg, "all", _tw), []).extend(recs)
+                pooled.setdefault((cfg, "all", "all"), []).extend(recs)
             for (cfg, route, tw), recs in sorted(list(grp.items())
                                                  + list(pooled.items())):
                 gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs

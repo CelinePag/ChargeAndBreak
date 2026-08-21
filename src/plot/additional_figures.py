@@ -16,6 +16,8 @@ Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
   data_output/additional_sens_stats.csv
   tex/tables/additional_sensitivity.tex
   figures/additional_la_config.png|pdf       §8.3 look-ahead configuration
+  figures/additional_la_horizon.png|pdf      §8.3 horizon ladder, routes pooled
+  figures/additional_la_scenarios.png|pdf    §8.3 scenario ladder, routes pooled
   figures/additional_la_frontier.png|pdf     §8.3 cost/quality frontier
   figures/additional_la_all.png|pdf          §8.3 whole LA study on one plane
                                              (horizon + scenarios + policy)
@@ -3407,9 +3409,162 @@ def section_grid():
 
 # ══════════════════════════════════════════════════════════════════════════════
 
+_LA_TAIL_SERIES = (
+    # (lptail, label, dash, marker) — the two ways the look-ahead tail beyond
+    # the horizon is solved.  Same policy, same ladder; only the subproblem
+    # differs, so they share a hue and separate on dash + marker.
+    (False, "MILP subpr.", "-",  "o"),
+    (True,  "LP subpr.",   "--", "s"),
+)
+
+
+def _la_tail_cfg(n_scen: int, horizon: float, lptail: bool) -> str:
+    """CSV config tag for one ladder rung and one tail solver.
+
+    The base cell predates the sweep and carries no S<n>H<h> tag: it is stored
+    as 'base' (MILP tail) / 'LPTAIL' (LP tail).
+    """
+    if (n_scen, horizon) == _LA_BASE:
+        return "LPTAIL" if lptail else "base"
+    tag = f"S{n_scen}H{horizon:g}"
+    return f"{tag}+LPTAIL" if lptail else tag
+
+
+def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
+    """One ladder (horizon or scenarios), route classes POOLED.
+
+    Three panels: what the configuration buys (gap), what it costs (decision
+    time), and whether it strands the truck (infeasibility).  Two series per
+    panel, one per tail solver.
+
+    Coverage is NOT uniform across the ladder — the MILP-tail rungs are still
+    filling in — and pooling the route classes makes an uneven mix invisible
+    in the median.  Points whose run count falls short of the best-covered
+    rung on the same ladder are therefore drawn hollow with their n stated, so
+    a thin cell cannot be read as a finding.
+    """
+    stats = _la_stats()
+    fig, axs = plt.subplots(1, 3, figsize=(6.9, 2.45), sharex=True)
+    ax_q, ax_c, ax_i = axs
+
+    ns_all = []
+    for lptail, _lbl, _ls, _mk in _LA_TAIL_SERIES:
+        for v in ladder:
+            ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
+            row = stats.get((_la_tail_cfg(ns, hh, lptail), "all", "all"))
+            n = _la_num(row, "n_runs")
+            if n:
+                ns_all.append(n)
+    n_ref = max(ns_all) if ns_all else 0
+
+    drew = False
+    for lptail, lbl, ls, mk in _LA_TAIL_SERIES:
+        col = (ps.tint(ps.METHOD_COLOR["LA"], 0.45) if lptail
+               else ps.METHOD_COLOR["LA"])
+        xs, qs, cs_, is_, nn = [], [], [], [], []
+        for v in ladder:
+            ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
+            row = stats.get((_la_tail_cfg(ns, hh, lptail), "all", "all"))
+            if row is None:
+                continue
+            n = _la_num(row, "n_runs")
+            inf = _la_num(row, "n_infeasible")
+            xs.append(float(v))
+            qs.append(_la_num(row, "gap_pen_median_pct"))
+            cs_.append(_la_num(row, "decision_mean_s_median"))
+            is_.append(100.0 * inf / n if (n and inf is not None) else None)
+            nn.append(n)
+        if not xs:
+            continue
+        drew = True
+        for ax, ys in ((ax_q, qs), (ax_c, cs_), (ax_i, is_)):
+            pts = [(x, y, n) for x, y, n in zip(xs, ys, nn) if y is not None]
+            if not pts:
+                continue
+            ax.plot([p[0] for p in pts], [p[1] for p in pts], ls, color=col,
+                    lw=1.3, zorder=2)
+            for x, y, n in pts:
+                thin = bool(n_ref and n and n < 0.6 * n_ref)
+                ax.plot(x, y, mk, ms=4.2, color=col, zorder=3,
+                        mfc="none" if thin else col, mec=col,
+                        mew=1.1 if thin else 0.8)
+        # Run counts belong on the cost panel only: stating them three times
+        # would crowd every panel to say one thing about the cell.
+        for x, y, n in zip(xs, cs_, nn):
+            if y is None or not n:
+                continue
+            if n_ref and n < 0.6 * n_ref:
+                ax_c.annotate(f"n={n:g}", (x, y),
+                              xytext=(0, -9 if lptail else 7),
+                              textcoords="offset points", ha="center",
+                              va="top" if lptail else "bottom",
+                              fontsize=4.8, color=col)
+
+    rungs = [float(v) for v in ladder]
+    base_x = float(_LA_BASE[1] if is_h else _LA_BASE[0])
+    for ax, ttl, ylab in ((ax_q, "Quality", "Gap to hindsight optimum (%)"),
+                          (ax_c, "Cost", "Decision time per stop (s)"),
+                          (ax_i, "Risk", "Infeasible runs (%)")):
+        ax.set_title(ttl, loc="left", fontsize=8)
+        ax.set_ylabel(ylab, fontsize=7)
+        ax.set_xscale("log")
+        ax.set_xticks(rungs, [f"{v:g}" for v in rungs])
+        ax.xaxis.set_minor_locator(mticker.NullLocator())
+        ax.set_xlim(min(rungs) / 1.22, max(rungs) * 1.22)
+        ax.set_xlabel(xlabel, fontsize=7)
+        ax.axvline(base_x, color=GRID, lw=0.9, zorder=0)
+        ax.yaxis.set_major_locator(
+            mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+        ax.grid(True, which="major", color=GRID, lw=0.6)
+        ax.set_axisbelow(True)
+        ax.set_ylim(bottom=0)
+        ax.tick_params(labelsize=6.5)
+        if not drew:
+            ax.text(0.5, 0.5, "pending", ha="center", va="center",
+                    fontsize=7.5, color=MUT, style="italic",
+                    transform=ax.transAxes)
+    ax_q.annotate("base", xy=(base_x, 0.0), xycoords=("data", "axes fraction"),
+                  xytext=(3, 3), textcoords="offset points", fontsize=5.2,
+                  color=MUT, ha="left", va="bottom")
+
+    handles = [plt.Line2D([], [], color=(ps.tint(ps.METHOD_COLOR["LA"], 0.45)
+                                         if lp else ps.METHOD_COLOR["LA"]),
+                          lw=1.4, ls=ls, marker=mk, ms=4.2)
+               for lp, _l, ls, mk in _LA_TAIL_SERIES]
+    labels = [l for _lp, l, _ls, _mk in _LA_TAIL_SERIES]
+    handles.append(plt.Line2D([], [], color=MUT, lw=0, marker="o", ms=4.2,
+                              mfc="none", mec=MUT))
+    labels.append("partial coverage")
+    fig.tight_layout(rect=(0, 0, 1, 0.86))
+    fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
+               ncol=3, bbox_to_anchor=(0.5, 0.995), handlelength=1.8,
+               handletextpad=0.4, columnspacing=1.6)
+    fig.text(0.005, 0.012, f"Route and window classes pooled; {held}.",
+             fontsize=5.4, color=MUT, ha="left")
+    _save(fig, outname)
+
+
+def section_la_ladders():
+    """Sec 8.3 — the two configuration axes, one figure each.
+
+    Splits the old two-column `additional_la_config` into a horizon figure and
+    a scenario figure, pools the route classes (the corridor-length breakdown
+    lives in `additional_la_config`), and adds the tail solver as the series
+    dimension so MILP and LP subproblems are compared on the same ladder.
+    """
+    print("== Sec 8.3 look-ahead ladders (routes pooled) ==")
+    _la_ladder_panels(_LA_HORIZONS, True, "additional_la_horizon",
+                      r"Look-ahead horizon $L$ (h)",
+                      rf"scenarios held at $|\Xi| = {_LA_BASE[0]}$")
+    _la_ladder_panels(_LA_SCENARIOS, False, "additional_la_scenarios",
+                      r"Scenarios $|\Xi|$",
+                      rf"horizon held at $L = {_LA_BASE[1]:g}$ h")
+
+
 _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
                  grid=section_grid,
                  la=section_la,
+                 la_ladders=section_la_ladders,
                  la_all=section_la_all,
                  la_local=section_la_local,
                  # both effect measures: route duration and the penalised
