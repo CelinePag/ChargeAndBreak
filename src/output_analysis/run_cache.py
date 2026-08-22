@@ -132,31 +132,41 @@ def _parse_one(job: tuple[str, str, str]) -> tuple[str, str, dict]:
 # CACHE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _scan(directory: str) -> tuple[dict, dict]:
-    """-> (runs, oracles), each name -> (mtime_ns, size).
+def _scan(directory: str) -> tuple[dict, dict, dict]:
+    """-> (runs, oracles, where), the first two name -> (mtime_ns, size).
 
-    One scandir pass: on Windows the size/mtime come back with the directory
-    entry, so this is a single cheap sweep rather than 15 000 stat calls.
+    One scandir pass per directory: on Windows the size/mtime come back with
+    the directory entry, so this is a cheap sweep rather than 15 000 stat
+    calls.  solutions/ is split into experiment buckets, so the sweep covers
+    the tree root and each bucket; `where` carries name -> full path so the
+    caller can open a file it only knows the basename of.
+
+    Names stay bucket-free on purpose.  A run_id is unique across the whole
+    corpus, so keying the cache on the basename means moving a file between
+    buckets does not invalidate its parsed record — only editing it does.
     """
     runs: dict[str, tuple[int, int]] = {}
     oracles: dict[str, tuple[int, int]] = {}
-    try:
-        with os.scandir(directory) as it:
-            for e in it:
-                if not e.name.endswith(".json"):
-                    continue
-                try:
-                    st = e.stat()
-                except OSError:
-                    continue
-                key = (st.st_mtime_ns, st.st_size)
-                if e.name.startswith("oracle_"):
-                    oracles[e.name] = key
-                else:
-                    runs[e.name] = key
-    except OSError:
-        pass
-    return runs, oracles
+    where: dict[str, str] = {}
+    for d in [directory] + [os.path.join(directory, b) for b in _paths.BUCKETS]:
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    if not e.name.endswith(".json"):
+                        continue
+                    try:
+                        st = e.stat()
+                    except OSError:
+                        continue
+                    key = (st.st_mtime_ns, st.st_size)
+                    where[e.name] = e.path
+                    if e.name.startswith("oracle_"):
+                        oracles[e.name] = key
+                    else:
+                        runs[e.name] = key
+        except OSError:
+            continue
+    return runs, oracles, where
 
 
 def _read_cache() -> dict:
@@ -212,7 +222,7 @@ def refresh(solutions_dir: str | None = None, *, quiet: bool = False) -> dict:
     if hit is not None:
         return hit
 
-    disk_runs, disk_oracles = _scan(solutions_dir)
+    disk_runs, disk_oracles, disk_where = _scan(solutions_dir)
     blob = _read_cache()
     if blob.get("dir") != solutions_dir:      # cache belongs to another tree
         blob = {"version": CACHE_VERSION, "dir": solutions_dir,
@@ -225,7 +235,7 @@ def refresh(solutions_dir: str | None = None, *, quiet: bool = False) -> dict:
         for name, key in disk.items():
             entry = have.get(name)
             if entry is None or entry[0] != key:
-                jobs.append((kind, name, os.path.join(solutions_dir, name)))
+                jobs.append((kind, name, disk_where[name]))
         # forget files that were deleted since the last pass
         for gone in [n for n in have if n not in disk]:
             del have[gone]

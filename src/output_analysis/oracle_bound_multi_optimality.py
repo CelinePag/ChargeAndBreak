@@ -29,13 +29,12 @@ Usage
 -----
   python -m src.output_analysis.oracle_bound_multi_optimality
   python -m src.output_analysis.oracle_bound_multi_optimality --opt-gap-pct 0.5 --ylim -8 8
-  python -m src.output_analysis.oracle_bound_multi_optimality --glob "logs/oracle_trace_Rlong*.log"
+  python -m src.output_analysis.oracle_bound_multi_optimality --glob "oracle_trace_Rlong*.log"
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import re
 
@@ -96,16 +95,15 @@ def collect(glob_pat: str, opt_gap_pct: float):
     instance the one with more samples wins.  Optimality is decided from the
     trace's final gap versus opt_gap_pct."""
     out = {}
-    for pat in glob_pat.split(","):
-        for path in sorted(glob.glob(pat.strip())):
-            inst = _instance_from_log(path)
-            t, inc, bnd = parse_gurobi_log(path)
-            if len(t) < 2:
-                continue
-            if inst in out and len(out[inst][1]) >= len(t):
-                continue
-            is_opt = _final_gap_pct(inc, bnd) < opt_gap_pct
-            out[inst] = (_route_class(inst), t, inc, bnd, is_opt)
+    for path in _paths.expand_logs(glob_pat):
+        inst = _instance_from_log(path)
+        t, inc, bnd = parse_gurobi_log(path)
+        if len(t) < 2:
+            continue
+        if inst in out and len(out[inst][1]) >= len(t):
+            continue
+        is_opt = _final_gap_pct(inc, bnd) < opt_gap_pct
+        out[inst] = (_route_class(inst), t, inc, bnd, is_opt)
     return out
 
 
@@ -218,7 +216,7 @@ if __name__ == "__main__":
                     "full-colour group average, coloured by final-gap "
                     "optimality (black optimal, red no proof).")
     ap.add_argument("--glob",
-                    default=_paths.logs("oracle_*_gurobi.log") + "," + _paths.logs("oracle_trace_*.log"),
+                    default="oracle_*_gurobi.log,oracle_trace_*.log",
                     help="comma-separated glob(s) of oracle Gurobi logs "
                          "(default: real-run oracle logs + one-off trace logs)")
     ap.add_argument("--out-dir", default=_paths.figures(),

@@ -1,0 +1,32 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-19 08:27:31)
+  Instance : RlongCmanyTtight_18__kwh900   run_id=RlongCmanyTtight_18__kwh900_LA_20260818_233910_083
+  Route    : 172 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=8  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+
+[LA] stop 1 (LAYBY)  t=8.233h  soc=874kWh  cd=0.23h  sd=0.23h  sw=0.23h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [1->45]  travel=12.28h +1rest  4 actions × 25 scen  8w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (2.8s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (2.7s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (2.7s)
+  y=0  brk=b15  rst=0   960000001.312h (0.000h)  ok=1/25  ws=0/25  tauc=0m  taub=15m  (3.6s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=b15  rst=0  ok  hor_stops: brk=0 rst=1 chg=2 c+b=0 c+r=0  2.3s
+  -> CHOSEN y=0  brk=b15  rst=0  tauc=0m  taub=15m  ta=8.233h  td=8.649h  (mean=960000001.312h)  14.1s
+  [!] NO FEASIBLE ACTION at stop 1 — run halted
+  [!] RUN HALTED at stop 1 of 172 (no_feasible_action) — no route duration is reported
+
+=================================================================
+  LA SIMULATION HALTED
+  Halted   : stop 1 of 172  (no_feasible_action)
+  Duration : not reported — the route was not completed
+=================================================================
+
+  [rewritten 2026-08-22: this run was made under the old forced-rest
+   safety net, which inserted a corrective rest here and carried on.
+   Under the halt semantics the run ends at this stop, so everything
+   that followed has been removed.]
+

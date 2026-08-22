@@ -200,8 +200,22 @@ def finalize_run(
     else:
         cmp_summary = None
 
+    # HALT semantics (2026-08-22): a violation ends the run at the stop it was
+    # detected at, so an infeasible run has no completed route.  These three
+    # fields are what lets every reader tell "arrived" from "stopped early"
+    # without re-deriving it from the violation list.
+    _halted_at  = getattr(vehicle, "halted_at", None)
+    _halt_why   = getattr(vehicle, "halt_reason", None)
+    _n_route    = full_data.get("N")
+    _completed  = _halted_at is None
+
     metrics = dict(
         run_infeasible        = len(violations) > 0,
+        halted_at_stop        = _halted_at,
+        halt_reason           = _halt_why,
+        route_completed       = _completed,
+        n_stops_executed      = len(getattr(vehicle, "actions", []) or []),
+        n_stops_route         = _n_route,
         n_violations          = len(violations),
         violations_by_type    = _by_type,
         violations            = violations,
@@ -246,6 +260,9 @@ def finalize_run(
         lp_vs_mip             = cmp_summary,
     )
 
+    if not _completed:
+        _lp(f"  [!] RUN HALTED at stop {_halted_at} of {_n_route} "
+            f"({_halt_why}) — no route duration is reported")
     _lp(f"  Metrics  : violations={len(violations)} "
         f"({', '.join(f'{k}:{v}' for k, v in _by_type.items()) or 'none'})"
         + (f"  tw_hit={metrics['tw_hit_rate']:.0%}"
@@ -283,8 +300,19 @@ def finalize_run(
         run_id       = run_id,
         instance     = full_data.get("title", "unknown"),
         variant      = _variant,
-        sim_arrival_h= arr,
-        duration_h   = arr - T0,
+        # A halted run never reached the destination, so `arr` is the arrival
+        # at the stop it died on, not at the end of the route.  Reporting that
+        # as a duration is what let an infeasible run post a SHORTER route than
+        # a feasible one — the earlier it failed, the better it looked.  Both
+        # fields are therefore None for a halted run, and the partial values
+        # are kept alongside under their own names for diagnosis.
+        sim_arrival_h= arr if _completed else None,
+        duration_h   = (arr - T0) if _completed else None,
+        partial_arrival_h  = None if _completed else arr,
+        partial_duration_h = None if _completed else arr - T0,
+        route_completed    = _completed,
+        halted_at_stop     = _halted_at,
+        halt_reason        = _halt_why,
         wall_clock_s = wall,
         # oracle intentionally NOT embedded — see decoupling note above; the gap
         # is derived from the shared solutions/oracle_<instance>.json cache

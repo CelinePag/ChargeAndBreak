@@ -28,7 +28,6 @@ Usage
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -55,8 +54,8 @@ def quarantine_base(dry: bool) -> int:
     for cb in COMBOS:
         for tw in TWS:
             for s in SEEDS:
-                p = _paths.solutions(f"oracle_{cb}T{tw}_{s}.json")
-                if not os.path.exists(p):
+                p = _paths.find_solution(f"oracle_{cb}T{tw}_{s}.json")
+                if p is None:
                     continue
                 if dry:
                     print(f"  would quarantine {os.path.basename(p)}")
@@ -69,7 +68,8 @@ def quarantine_base(dry: bool) -> int:
 
 def rebuild_variants(dry: bool) -> tuple[int, int]:
     best: dict[str, tuple[str, dict]] = {}
-    for p in sorted(glob.glob(_paths.logs("*__*_ORACLE_*.txt"))):
+    for p in sorted(_paths.glob_logs("*__*_ORACLE_*.txt"),
+                    key=os.path.basename):
         m = _LOG.match(os.path.basename(p))
         if not m or m.group("tag") == "diesel":
             continue                      # diesel caches are already correct
@@ -98,7 +98,7 @@ def rebuild_variants(dry: bool) -> tuple[int, int]:
 
     written = 0
     for stem, (_ts, rec) in best.items():
-        out = _paths.solutions(f"oracle_{stem}.json")
+        out = _paths.solution_path(f"oracle_{stem}.json")
         if dry:
             print(f"  would write {os.path.basename(out)}  obj={rec['obj']:.3f}")
         else:

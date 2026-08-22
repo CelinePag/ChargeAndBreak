@@ -1207,10 +1207,10 @@ def run_simulation(full_data: dict,
     title   = full_data.get("title", "run")
     rid     = run_id or f"{title}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths   = dict(
-        log = _paths.logs(f"{rid}.txt"),
-        fig = _paths.figures(f"{rid}.png"),
-        sol = _paths.solutions(f"{rid}.json"),
-        scn = _paths.logs(f"{rid}_scenarios.json"),
+        log = _paths.log_out(f"{rid}.txt"),
+        fig = _paths.figure_out(f"{rid}.png"),
+        sol = _paths.solution_out(f"{rid}.json"),
+        scn = _paths.log_out(f"{rid}_scenarios.json"),
     )
     log = open(paths["log"], "w", buffering=1, encoding="utf-8")
 
@@ -1267,30 +1267,25 @@ def run_simulation(full_data: dict,
                 cmp_log        = events["cmp_log"],
             )
 
-        # ── Forced-rest safety net ────────────────────────────────────────────
-        # If ALL scored actions are infeasible, the horizon was too short to
-        # plan a mandatory rest.  Insert a minimum corrective rest.
+        # ── No feasible action: the run ends here ─────────────────────────────
+        # Every scored action came back infeasible over the look-ahead horizon,
+        # so the policy has nothing legal to play.  The run is infeasible and
+        # STOPS at this stop (2026-08-22).
+        #
+        # This replaces a forced-rest safety net, which inserted a minimum
+        # corrective rest and carried on.  The net rescued 457 of the 614
+        # stored runs that tripped it, and that is the problem: it converted a
+        # policy failure into a completed route with a duration, so a
+        # configuration too myopic to plan its own rest was scored as if it had.
+        # What the net measured was the horizon's blind spot, not the policy's.
         if stop > 0 and all(s[1] >= INFEASIBLE_PENALTY / 2 for s in score_list):
-            rst_type = ("r2" if vehicle.rho2_used < int(full_data.get("rho_bar", 3))
-                        else "r1")
-            action   = dict(y=1 if stop in set(full_data["K"]) else 0,
-                            break_type=None, rest_type=rst_type)
-            _lp(f"  [!] FORCED REST ({rst_type}) at stop {stop}")
-            end_fr, _ = find_horizon_end_stop(full_data, stop, 2.0, state=vehicle)
-            forced    = solve_horizon(
-                full_data      = full_data,
-                start_stop     = stop,
-                end_stop       = end_fr,
-                init_state     = vehicle.as_init_state(),
-                fixed_action   = action,
-                rho2_remaining = int(full_data.get("rho_bar", 3)) - vehicle.rho2_used,
-                ext_remaining  = int(full_data.get("ext_bar", 2)) - vehicle.ext_shift_used,
-                tee            = False,
-                time_limit     = 30,
-                relax          = False,
-            )
-            nom_sol    = forced if forced["feasible"] else None
-            score_list = [(action, INFEASIBLE_PENALTY, 0.0, 0, [])]
+            _lp(f"  [!] NO FEASIBLE ACTION at stop {stop} — run halted")
+            vehicle.violations.append(dict(
+                type="no_feasible_action", stop=stop, amount=0.0,
+                detail=(f"every scored action was infeasible over the "
+                        f"{horizon_hours:g} h look-ahead at stop {stop}")))
+            vehicle.halt(stop, "no_feasible_action")
+            break
 
         # ── S1: safety supervisor (identical layer for every policy) ──────────
         if supervised and stop > 0:
@@ -1325,6 +1320,11 @@ def run_simulation(full_data: dict,
         if verbose and stop > 0:
             print(f"     -> arrived stop {vehicle.stop} after Driving {D_next:.2f}h and consuming {E_next:.1f}kWh"
                   f"  t={vehicle.t_arr:.3f}h  soc={vehicle.e_arr:.1f}kWh")
+
+        if vehicle.is_halted:
+            _lp(f"  [!] {vehicle.halt_reason.upper()} at stop "
+                f"{vehicle.halted_at} — run halted, route not completed")
+            break
 
     wall = time.perf_counter() - wall_start
     arr  = vehicle.t_arr
@@ -1463,10 +1463,10 @@ def run_simulation_precomputed(
     alg   = alg_label
     rid   = run_id or f"{title}_{alg}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths = dict(
-        log = _paths.logs(f"{rid}.txt"),
-        fig = _paths.figures(f"{rid}.png"),
-        sol = _paths.solutions(f"{rid}.json"),
-        scn = _paths.logs(f"{rid}_scenarios.json"),
+        log = _paths.log_out(f"{rid}.txt"),
+        fig = _paths.figure_out(f"{rid}.png"),
+        sol = _paths.solution_out(f"{rid}.json"),
+        scn = _paths.log_out(f"{rid}_scenarios.json"),
     )
     log = open(paths["log"], "w", buffering=1, encoding="utf-8")
 
@@ -1576,28 +1576,19 @@ def run_simulation_precomputed(
                 cmp_log               = events["cmp_log"],
             )
 
-        # ── Forced-rest safety net ────────────────────────────────────────────
+        # ── No feasible action: the run ends here ─────────────────────────────
+        # See the identical block in run_simulation for why the forced-rest
+        # safety net was removed: it turned a policy failure into a completed
+        # route with a duration, and what it measured was the horizon's blind
+        # spot rather than the policy's quality.
         if stop > 0 and all(s[1] >= INFEASIBLE_PENALTY / 2 for s in score_list):
-            rst_type = ("r2" if vehicle.rho2_used < int(full_data.get("rho_bar", 3))
-                        else "r1")
-            action   = dict(y=1 if stop in set(full_data["K"]) else 0,
-                            break_type=None, rest_type=rst_type)
-            _lp(f"  [!] FORCED REST ({rst_type}) at stop {stop}")
-            end_fr, _ = find_horizon_end_stop(full_data, stop, 2.0, state=vehicle)
-            forced    = solve_horizon(
-                full_data      = full_data,
-                start_stop     = stop,
-                end_stop       = end_fr,
-                init_state     = vehicle.as_init_state(),
-                fixed_action   = action,
-                rho2_remaining = int(full_data.get("rho_bar", 3)) - vehicle.rho2_used,
-                ext_remaining  = int(full_data.get("ext_bar", 2)) - vehicle.ext_shift_used,
-                tee            = False,
-                time_limit     = 30,
-                relax          = False,
-            )
-            nom_sol    = forced if forced["feasible"] else None
-            score_list = [(action, INFEASIBLE_PENALTY, 0.0, 0, [])]
+            _lp(f"  [!] NO FEASIBLE ACTION at stop {stop} — run halted")
+            vehicle.violations.append(dict(
+                type="no_feasible_action", stop=stop, amount=0.0,
+                detail=(f"every scored action was infeasible over the "
+                        f"{horizon_hours:g} h look-ahead at stop {stop}")))
+            vehicle.halt(stop, "no_feasible_action")
+            break
 
         # ── S1: safety supervisor (identical layer for every policy) ──────────
         if supervised and stop > 0:
@@ -1631,6 +1622,11 @@ def run_simulation_precomputed(
             print(f"     -> arrived stop {vehicle.stop}"
                   f"  D={D_next:.2f}h  E={E_next:.1f}kWh"
                   f"  t={vehicle.t_arr:.3f}h  soc={vehicle.e_arr:.1f}kWh")
+
+        if vehicle.is_halted:
+            _lp(f"  [!] {vehicle.halt_reason.upper()} at stop "
+                f"{vehicle.halted_at} — run halted, route not completed")
+            break
 
     # run completed cleanly: drop the checkpoint so a rerun starts fresh
     if resume:

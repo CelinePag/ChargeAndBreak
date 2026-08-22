@@ -76,7 +76,8 @@ KIND_STYLE = {
 def _latest_greedy(instance: str) -> dict:
     """Newest finished, non-variant greedy solution for `instance`."""
     best = None
-    for path in sorted(glob.glob(_paths.solutions(f"{instance}_GREEDY_*.json"))):
+    for path in sorted(_paths.glob_solutions(f"{instance}_GREEDY_*.json"),
+                       key=os.path.basename):
         sol = json.load(open(path, encoding="utf-8"))
         if sol.get("sim_arrival_h") is None or sol.get("variant"):
             continue
@@ -103,9 +104,10 @@ def _oracle_run(instance: str, fd: dict) -> dict:
     They are not stored because in the model they are coefficients, not
     variables.
     """
-    path = _paths.solutions(f"oracle_{instance}.json")
-    if not os.path.isfile(path):
-        raise SystemExit(f"no oracle cache at {path}")
+    path = _paths.find_solution(f"oracle_{instance}.json")
+    if path is None:
+        raise SystemExit(f"no oracle cache for '{instance}' under "
+                         f"{_paths.solutions()}/")
     cache = json.load(open(path, encoding="utf-8"))
     if not cache.get("feasible") or not cache.get("sol"):
         raise SystemExit(f"oracle cache for '{instance}' is not a feasible solution")
@@ -565,7 +567,8 @@ def build(instance: str, out_stem: str | None = None,
 
     _paths.ensure_dirs()
     sfx = "" if method == "greedy" else f"_{method}"
-    stem = out_stem or _paths.figures(f"diesel_vs_ev_{instance}{sfx}")
+    # a STEM, not a file: .png and .pdf are both written from it.
+    stem = out_stem or _paths.figure_out(f"diesel_vs_ev_{instance}{sfx}")
     fig.savefig(stem + ".png", dpi=200)
     fig.savefig(stem + ".pdf")
     plt.close(fig)

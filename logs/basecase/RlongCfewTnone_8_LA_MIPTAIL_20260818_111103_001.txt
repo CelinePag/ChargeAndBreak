@@ -1,0 +1,60 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-18 11:11:05)
+  Instance : RlongCfewTnone_8   run_id=RlongCfewTnone_8_LA_MIPTAIL_20260818_111103_001
+  Route    : 157 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=1  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 75/157 stops done, continuing from stop 75
+
+[LA] stop 75 (LAYBY)  t=43.912h  soc=192kWh  cd=2.46h  sd=9.32h  sw=11.17h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [75->111]  travel=9.27h +2rest  4 actions × 25 scen  1w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   65.795h (0.223h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (9.0s)
+  y=0  brk=0    rst=r2  74.814h (0.114h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (26.5s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (3.5s)
+  y=0  brk=b15  rst=0   70.558h (4.603h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (12.7s)
+     [DIAG] max per-scenario delta spread across actions: 537.46 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=43.912h  td=43.912h  (mean=65.795h)  51.7s
+
+[LA] stop 76 (CS)  t=44.122h  soc=170kWh  cd=2.67h  sd=9.53h  sw=11.38h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [76->112]  travel=9.29h +2rest  8 actions × 25 scen  1w  [mean,mip]  pruned=2  ws=prev
+     [FREE-MIP]  obj=75.154h  0.3s  ws=no  1083v/1982c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (3.6s)
+  y=1  brk=0    rst=0   71.647h (4.575h)  ok=25/25  ws=25/25  tauc=25m  taub=0m  (16.4s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (3.4s)
+  y=1  brk=0    rst=r2  73.965h (3.063h)  ok=25/25  ws=25/25  tauc=39m  taub=0m  (24.8s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (3.5s)
+  y=1  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (3.6s)
+  y=0  brk=b15  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=25/25  tauc=0m  taub=0m  (3.5s)
+  y=1  brk=b15  rst=0   71.661h (4.568h)  ok=25/25  ws=25/25  tauc=15m  taub=0m  (16.2s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=1  brk=b15  rst=0  CONC  ok  hor_stops: brk=0 rst=2 chg=3 c+b=0 c+r=0  0.6s
+  -> CHOSEN y=1  brk=b15  rst=0  tauc=25m (+146kWh)  taub=0m  [CONC]  ta=44.122h  td=44.778h  (mean=71.661h)  [tiebreak]  75.9s
+
+[LA] stop 77 (LAYBY)  t=45.052h  soc=291kWh  cd=2.94h  sd=9.80h  sw=11.89h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [77->114]  travel=9.50h +2rest  4 actions × 25 scen  1w  [mean,mip]  pruned=2  ws=prev
+     [FREE-] INFEASIBLE — no warm start for this stop (scenario scores decide; execution feasibility is BEHDV's call)
+     [FREE-MIP]  infeasible  0.1s  ws=yes  1092v/1998c
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (3.4s)
+  y=0  brk=0    rst=r2  1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (3.5s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (3.6s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/25  ws=0/25  tauc=0m  taub=0m  (3.5s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=45.052h  td=45.052h  (mean=1000000000.000h)  14.1s
+  [!] NO FEASIBLE ACTION at stop 77 — run halted
+  [!] RUN HALTED at stop 77 of 157 (no_feasible_action) — no route duration is reported
+
+=================================================================
+  LA SIMULATION HALTED
+  Halted   : stop 77 of 157  (no_feasible_action)
+  Duration : not reported — the route was not completed
+=================================================================
+
+  [rewritten 2026-08-22: this run was made under the old forced-rest
+   safety net, which inserted a corrective rest here and carried on.
+   Under the halt semantics the run ends at this stop, so everything
+   that followed has been removed.]
+

@@ -290,7 +290,7 @@ def load_solutions(solutions_dir: str) -> list[dict]:
     rows = []
     for name, data in run_cache.load_runs(solutions_dir):
         if "_error" in data:
-            print(f"  SKIP {os.path.join(solutions_dir, name)}: "
+            print(f"  SKIP {_paths.path_in(solutions_dir, name)}: "
                   f"{data['_error']}", file=sys.stderr)
             continue
         # copied: the cache hands out the record it will hand the next caller
@@ -322,16 +322,18 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
               f"(skipping unfinished-run detection)")
         return []
 
-    finished_ids = set()
-    if os.path.isdir(solutions_dir):
-        finished_ids = {
-            f[:-5] for f in os.listdir(solutions_dir)
-            if f.endswith(".json") and not f.startswith("oracle_")
-        }
+    # Both trees are bucketed by experiment, so these sweep the bucket
+    # subdirectories as well as the root and key on the BASENAME — a run_id is
+    # unique across the whole corpus, and a log is matched to its solution by
+    # name, never by which bucket the two happen to sit in.
+    finished_ids = {
+        name[:-5] for name, _p in _paths.scan_tree(solutions_dir)
+        if name.endswith(".json") and not name.startswith("oracle_")
+    }
 
     rows = []
     n_internal = 0
-    for f in sorted(os.listdir(logs_dir)):
+    for f, log_full in _paths.scan_tree(logs_dir):
         if not f.endswith(".txt"):
             continue
         run_id = f[:-4]
@@ -352,7 +354,7 @@ def find_failed_runs(logs_dir: str, solutions_dir: str) -> list[dict]:
         else:
             instance, method, variant = run_id, "UNKNOWN", None
 
-        log_path = os.path.join(logs_dir, f)
+        log_path = log_full
         try:
             text = open(log_path, encoding="utf-8", errors="replace").read()
         except Exception as e:
@@ -484,8 +486,8 @@ def _annotate_solver_gap(rows: list[dict], logs_dir: str):
             f"{rec.get('run_id')}_gurobi.log" if rec.get("run_id") else None)
         if not cand:
             continue
-        path = os.path.join(logs_dir, os.path.basename(str(cand)))
-        if not os.path.isfile(path):
+        path = _paths.find_in(logs_dir, os.path.basename(str(cand)))
+        if path is None:
             continue
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:

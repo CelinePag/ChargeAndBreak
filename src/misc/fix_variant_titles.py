@@ -70,7 +70,7 @@ def quarantine_runs(dry: bool) -> int:
     if not dry:
         os.makedirs(QUARANTINE, exist_ok=True)
     n = 0
-    for path in glob.glob(_paths.solutions("*.json")):
+    for path in _paths.glob_solutions("*.json"):
         base = os.path.basename(path)
         if base.startswith("oracle_"):
             continue
@@ -99,14 +99,14 @@ def suspect_oracles() -> list[str]:
     """Base oracle caches that a variant run could have overwritten: a cache
     whose schedule no longer matches the base instance is impossible to detect
     cheaply, so we just flag caches newer than the first variant run."""
-    var = [p for p in glob.glob(_paths.solutions("*.json"))
+    var = [p for p in _paths.glob_solutions("*.json")
            if "__" in os.path.basename(p)
            and not os.path.basename(p).startswith("oracle_")]
     if not var:
         return []
     first = min(os.path.getmtime(p) for p in var)
     return [os.path.basename(p)
-            for p in glob.glob(_paths.solutions("oracle_*.json"))
+            for p in _paths.glob_solutions("oracle_*.json")
             if "__" not in os.path.basename(p)
             and not os.path.basename(p).endswith("_diesel.json")
             and os.path.getmtime(p) >= first]

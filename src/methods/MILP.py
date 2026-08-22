@@ -58,15 +58,12 @@ from src.settings import BETA_TW, TRAVEL_TIME_CV_TARGET
 from src.settings import apply_solver_threads as _apply_solver_threads
 from src import paths as _paths
 
-FIGURES_DIR        = _paths.figures()
-SOLUTIONS_DIR      = _paths.solutions()
 EPS                = 1e-5
 INFEASIBLE_PENALTY = 1e9
 
 
 def _ensure_dirs():
-    os.makedirs(FIGURES_DIR,   exist_ok=True)
-    os.makedirs(SOLUTIONS_DIR, exist_ok=True)
+    _paths.ensure_dirs()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1975,8 +1972,16 @@ def solve_horizon(full_data: dict, start_stop: int, end_stop: int,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def solution_path(name: str) -> str:
+    """solutions/<bucket>/<name>.json — the deterministic MILP's own cache.
+
+    This file is named after the INSTANCE, not after a run_id, so its bucket
+    comes from instance_bucket rather than from the run-id routing (which would
+    fail to parse the name and leave the file in the tree root).
+    """
     _ensure_dirs()
-    return os.path.join(SOLUTIONS_DIR, f"{name}.json")
+    fname = f"{name}.json"
+    return (_paths.find_solution(fname)
+            or _paths.solution_out(fname, _paths.instance_bucket(name)))
 
 
 def save_solution(sol: list, data: dict, name: str):

@@ -99,6 +99,7 @@ Examples
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -669,6 +670,16 @@ LA_BASE_HORIZON = 24.0
 # both sides, which is what the threshold claim in the paper needs.
 LA_DEFAULT_CONFIGS = "S25H12,S25H48,S10H24,S50H24"
 
+# Seeds the REPORT is quoted over (2026-08-22).  The sweep itself was launched
+# over 25 seeds, but every cell must stand on the SAME instances or the level
+# column moves for a reason that has nothing to do with the configuration, and
+# the cells that ran short (S10H24, S50H24) would otherwise be compared on a
+# different population than the ones that ran full.  Ten is the window every
+# cell of the design was meant to cover; whatever is still missing inside it is
+# printed by the coverage block in cmd_la_report rather than being averaged
+# over silently.  --seeds still overrides.
+LA_REPORT_SEEDS = tuple(range(1, 11))
+
 # Combos for the LA sweep.  Unlike the instance-level axes this one DOES span
 # long routes: the whole question is how the look-ahead behaves as the route
 # grows, and the base LA runs exist for all three.
@@ -717,6 +728,83 @@ def _norm_la_tag(cfg: str) -> str:
     except SystemExit:
         return cfg
     return f"S{n_scen}H{horizon:g}"
+
+
+_N_STOPS_CACHE: dict = {}
+
+
+def _n_stops(instance: str | None) -> int | None:
+    """Stops on the route, from the instance file (run_cache keeps no lists).
+
+    Decisions happen once per stop, so this is the divisor that turns effort
+    per RUN into effort per DECISION — the only form in which two route
+    classes of very different length can be compared at all.
+    """
+    if not instance:
+        return None
+    if instance not in _N_STOPS_CACHE:
+        _N_STOPS_CACHE[instance] = _read_n(instance)
+    return _N_STOPS_CACHE[instance]
+
+
+def _read_n(instance: str) -> int | None:
+    """N off the instance file, wherever that file lives.
+
+    A regime copy (…__nosplit) is written under instances_sens/<axis>/, not
+    instances/, so a lookup that only tried instances/ returned None for every
+    such run and dropped the whole NOSPLIT column out of the per-stop cost.
+    The last resort is the STRIPPED stem: every axis reported here is a patch
+    axis, so the copy has the same geometry — same stops, same order — as the
+    instance it was patched from, and its N is the same number.
+    """
+    cands = [_paths.instances(instance + ".json")]
+    cands += sorted(glob.glob(os.path.join(str(_paths.INSTANCES_SENS), "**",
+                                           instance + ".json"),
+                              recursive=True))
+    stem, tag = _split_instance_tag(instance)
+    if tag:
+        cands.append(_paths.instances(stem + ".json"))
+    for path in cands:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        n = (raw.get("instance", raw) or {}).get("N")
+        if n:
+            return int(n)
+    return None
+
+
+def _t_per_stop_s(r) -> float | None:
+    """Average decision time per stop: run wall clock / number of stops.
+
+    Deliberately the crudest available measure (agreed 2026-08-22).  It is the
+    total time the run took divided by the decisions it made, with NO
+    correction for --jobs, for n_workers, or for how the |Xi| sub-problems of
+    one action pack into a parallel wave.  Two earlier cost columns did try to
+    correct for those — a stored per-stop mean that timed only the decision
+    call, and a CPU-effort back-fill that multiplied the clock by the worker
+    count — and both put a modelled number on the axis, one that no
+    configuration was ever observed to produce and that moved whenever a batch
+    was launched with different parallelism.
+
+    What this measures is what an operator waits: the run took `wall_clock_s`
+    and made `n_stops` decisions in it.  It carries the batch's own contention
+    with it, so cells launched under different load are not perfectly
+    comparable — that is a property of the measurement, and it is stated
+    rather than modelled away.
+    """
+    wall = r.get("wall_clock_s")
+    # Stops actually EXECUTED, falling back to the route length for runs made
+    # before the halt semantics landed.  A halted run decided fewer stops than
+    # the route has, so dividing by the route length would understate its cost
+    # — but such a run is infeasible and is filtered out of this column
+    # upstream, so this only ever matters for diagnosis.
+    n = (r.get("metrics") or {}).get("n_stops_executed")         or _n_stops(r.get("instance"))
+    if not wall or not n:
+        return None
+    return float(wall) / n
 
 
 def cmd_la(args) -> None:
@@ -1027,7 +1115,7 @@ def _cs_decision_mean_s(run_id: str | None):
         return None
     if run_id in _LA_CS_CACHE:                  # pooled rows re-read the same runs
         return _LA_CS_CACHE[run_id]
-    path = _paths.logs(f"{run_id}.txt")
+    path = _paths.log_path(f"{run_id}.txt")
     out, cur = None, None
     try:
         vals = []
@@ -1051,6 +1139,65 @@ def _cs_decision_mean_s(run_id: str | None):
     return out
 
 
+_FORCED_REST_CACHE: dict = {}
+
+
+def _tripped_forced_rest(run_id: str | None) -> bool:
+    """True when this run hit the old forced-rest safety net.
+
+    Runs stored before 2026-08-22 were simulated under the OLD semantics: when
+    every scored action came back infeasible over the look-ahead horizon, the
+    policy inserted a minimum corrective rest and carried on, so the run
+    finished the route and was recorded FEASIBLE.  Under the halt semantics the
+    same situation ends the run and it is infeasible.
+
+    Re-running the whole corpus to reclassify is unnecessary, because the net
+    printed a marker every time it fired.  Reading it back off the log recovers
+    the new classification exactly: the net fired iff the run had no feasible
+    action at some stop, which is precisely the new halt condition.
+
+    A missing log reads as False — the run then keeps whatever classification
+    it was stored with, which is the conservative direction (it stays feasible
+    and keeps contributing, rather than being silently dropped on the strength
+    of a file that is not there).
+    """
+    if not run_id:
+        return False
+    if run_id in _FORCED_REST_CACHE:
+        return _FORCED_REST_CACHE[run_id]
+    hit = False
+    try:
+        with open(_paths.log_path(f"{run_id}.txt"), encoding="utf-8",
+                  errors="replace") as fh:
+            for line in fh:
+                if "FORCED REST" in line or "NO FEASIBLE ACTION" in line:
+                    hit = True
+                    break
+    except OSError:
+        hit = False
+    _FORCED_REST_CACHE[run_id] = hit
+    return hit
+
+
+def _reclassify_forced_rest(rows) -> int:
+    """Mark every run that tripped the net as infeasible, in place.
+
+    Runs after cs._annotate_outcome, because it overrides the outcome that
+    function assigned.  Everything downstream keys on `outcome` — _gap_usable,
+    _is_truly_infeasible, the n_infeasible counts — so this one override is
+    enough to make the whole report speak the halt semantics.
+    """
+    n = 0
+    for r in rows:
+        if r.get("method") != "LA" or r.get("outcome") != "feasible":
+            continue
+        if _tripped_forced_rest(r.get("run_id")):
+            r["outcome"] = "infeasible"
+            r["_reclassified_no_feasible_action"] = True
+            n += 1
+    return n
+
+
 def _dec_cs(rec, cs):
     """Decision time per CS stop for one run, whatever produced it.
 
@@ -1062,6 +1209,133 @@ def _dec_cs(rec, cs):
     if rec.get("method") == "LA":
         return _cs_decision_mean_s(rec.get("run_id"))
     return cs._get(rec, ("metrics", "decision_time_mean_s"))
+
+
+def _run_date(run_id: str | None) -> str | None:
+    """'..._LA_S50H24_20260821_160214_000' -> '20260821'."""
+    m = re.search(r"_(\d{8})_\d{6}", run_id or "")
+    return m.group(1) if m else None
+
+
+def _batch_spread(recs) -> tuple[int, float | None]:
+    """(distinct batch dates, max/min of the per-date median t/stop).
+
+    The cost column is run wall clock over stops, uncorrected for parallelism,
+    so it is only comparable between runs that met the same machine.  It is
+    not a small effect: the base cell's own runs span seven batches over ten
+    days and their per-batch median ranges from 17 to 98 s/stop — 5.7x on ONE
+    configuration.  Paired against the 2026-08-18 base batch, S50 comes out
+    2.9x slower and L48 7.9x slower (the direction the work implies); paired
+    against 2026-08-17 both come out faster.  Whichever batch dominates a cell
+    therefore decides which way it reads.
+
+    Reporting the spread next to the number is what keeps that visible.  A
+    cell drawn from ONE batch gets (1, None) and needs no caveat; a cell with
+    a large ratio is a cell whose cost cannot be compared with another's.
+    Dates carrying fewer than three runs are skipped — a single straggler
+    re-run months later would otherwise set the ratio on its own.
+    """
+    import statistics as stat
+    by: dict = {}
+    for r in recs:
+        t = _t_per_stop_s(r)
+        d = _run_date(r.get("run_id"))
+        if t is not None and d:
+            by.setdefault(d, []).append(t)
+    meds = [stat.median(v) for v in by.values() if len(v) >= 3]
+    if len(meds) < 2 or not min(meds):
+        return len(by), None
+    return len(by), max(meds) / min(meds)
+
+
+def _la_panel(by_cell: dict, exclude: set) -> tuple[set, list]:
+    """The BALANCED PANEL: instances carrying an OK run in every cell.
+
+    Reporting each cell on whatever instances it happens to have is what
+    produced the two anomalies chased on 2026-08-22.  A cell's median is a
+    median over ITS OWN route mix, and the mixes are not equal: S25H48/MIP is
+    53% short-route runs and 5% long (four long runs exist in total), so its
+    pooled cost lands inside the short group at 27 s/stop, while the base cell
+    is a balanced 34/34/32 and lands at 72.  Side by side that reads as "a
+    longer horizon is cheaper" — the opposite of the truth, since on long
+    routes alone the same cell is 455 s/stop.
+
+    Intersecting first removes the confound at its root rather than patching
+    the symptom: every cell then reports the same instances, so a difference
+    between cells cannot be a difference in population, and the paired deltas
+    are paired on the whole panel instead of on whatever overlapped.
+
+    Keyed on the STRIPPED stem, so a regime copy (…__nosplit) counts as the
+    instance it was patched from and the NOSPLIT arms can join the panel
+    instead of emptying it.
+
+    ``exclude`` names cells that are reported but may not CONSTRAIN the panel.
+    One sparse cell otherwise decides the scope for all the others: including
+    S25H48/MIP costs 40 instances and 31 of the 34 long routes.
+    """
+    cells = [c for c in by_cell if c not in exclude and by_cell[c]]
+    if not cells:
+        return set(), []
+    return set.intersection(*[by_cell[c] for c in cells]), sorted(cells)
+
+
+def _panel_breakdown(stems, cs) -> str:
+    """'111 instances (short 39, medium 38, long 34)' for the console."""
+    n = {}
+    for stem in stems:
+        rt = cs._parse_instance_tags(stem).get("route_class")
+        n[rt] = n.get(rt, 0) + 1
+    parts = ", ".join(f"{r} {n[r]}" for r in ("short", "medium", "long")
+                      if r in n)
+    return f"{len(stems)} instance(s)" + (f" ({parts})" if parts else "")
+
+
+def _la_coverage(present, cfgs, combos, tws, seeds) -> None:
+    """What the fixed seed window actually has, and what it is missing.
+
+    The report is quoted over LA_REPORT_SEEDS rather than over whatever each
+    batch reached, which is the only way the cells compare — but a fixed window
+    turns "this cell ran short" from something that silently widens the scope
+    into something that has to be SEEN.  So the full design grid (config x
+    combo x window x seed) is walked and every hole in it is named, both on the
+    console and in data_output/additional_la_coverage.csv.
+
+    A hole means "no run with status OK on that instance": a run that exists but
+    stranded the truck counts as missing here, because it contributes nothing to
+    a median either.  The n_infeasible column of the stats CSV is where those
+    are counted; this is where their absence from the medians is explained.
+    """
+    import csv
+    rows, short = [], []
+    for cfg in sorted(cfgs):
+        miss_cfg = 0
+        for combo in sorted(combos):
+            for tw in sorted(tws):
+                got  = present.get((cfg, combo, tw), set())
+                miss = sorted(seeds - got)
+                miss_cfg += len(miss)
+                rows.append([cfg, combo, tw, len(got), len(miss),
+                             _fmt_seeds(miss) if miss else ""])
+        if miss_cfg:
+            short.append((cfg, miss_cfg))
+    full = len(cfgs) * len(combos) * len(tws) * len(seeds)
+    have = sum(r[3] for r in rows)
+    print(f"  coverage: {have}/{full} cells of the "
+          f"{len(cfgs)}x{len(combos)}x{len(tws)}x{len(seeds)} design "
+          f"(config x combo x window x seed) have an OK run")
+    if not short:
+        print("            nothing missing")
+    for cfg, n in sorted(short, key=lambda t: -t[1]):
+        det = [f"{c}/{t} {m}" for c, t, m in
+               ((r[1], r[2], r[5]) for r in rows if r[0] == cfg and r[5])]
+        print(f"            {cfg:<14} {n:>4} missing : " + "; ".join(det))
+    out = _paths.data_output("additional_la_coverage.csv")
+    with open(out, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["config", "combo", "window_class", "n_present",
+                    "n_missing", "missing_seeds"])
+        w.writerows(rows)
+    print(f"  coverage CSV: {out}")
 
 
 def cmd_la_report(args) -> None:
@@ -1106,6 +1380,10 @@ def cmd_la_report(args) -> None:
     if n_regap:
         print(f"  regime runs re-scored against the base-case oracle: {n_regap}")
     cs._annotate_outcome(rows)
+    n_rc = _reclassify_forced_rest(rows)
+    if n_rc:
+        print(f"  runs reclassified infeasible (no feasible action, halt "
+              f"semantics): {n_rc}")
     rows, _ = cs._dedup_latest(rows)
 
     found = _la_discover(rows, cs)
@@ -1120,29 +1398,41 @@ def cmd_la_report(args) -> None:
     wanted_cfg.add("GREEDY")      # the do-nothing reference, never swept
     # The superseded LP tail: reported like any other cell, but excluded from
     # scope discovery for the reason given in _la_discover, so it has to be
-    # named here or it would never be asked for.
-    wanted_cfg.add(_paths.LA_LEGACY_VARIANT)
+    # named here or it would never be asked for.  Asked for only when runs of
+    # it still EXIST: the LP-tail corpus was deleted on 2026-08-22, and a cell
+    # requested by name with nothing behind it reports its whole footprint as
+    # missing, which reads as a data gap rather than as a deliberate removal.
+    if any(r.get("method") == "LA"
+           and (r.get("variant") or "").upper().endswith(_paths.LA_LEGACY_VARIANT)
+           for r in rows):
+        wanted_cfg.add(_paths.LA_LEGACY_VARIANT)
     # A regime cell needs its own standard arm as the reference the variant arm
     # is read against, and that arm carries no --variant, so asking for
     # LPTAIL+NOSPLIT has to pull NOSPLIT in with it.
     wanted_cfg |= {c.split("+", 1)[1] for c in list(wanted_cfg) if "+" in c}
     combos = set(args.combos.split(",")) if args.combos else found["combos"]
     tws    = set(args.tw.split(","))     if args.tw     else found["tws"]
-    # The base cell is the pre-existing unlabelled runs, and those cover every
-    # seed ever run while the sweep cells cover only --seeds.  Without this
-    # filter the base gap would be a 50-instance average compared against
-    # 10-instance averages, so the LEVEL column would move between cells for a
-    # reason that has nothing to do with the configuration.
-    seeds = set(_expand_seeds(args.seeds)) if args.seeds else found["seeds"]
+    # Seeds are NOT discovered.  The base cell is the pre-existing unlabelled
+    # runs and covers every seed ever run, while each sweep cell covers only the
+    # seeds its own batch reached — so discovering the union would compare a
+    # 25-instance average against 10- and 24-instance ones, and the LEVEL column
+    # would move between cells for a reason that has nothing to do with the
+    # configuration.  Fixed at LA_REPORT_SEEDS (1-10) so every cell stands on
+    # one population; what is missing inside that window is printed by
+    # _la_coverage rather than averaged over.  --seeds still overrides.
+    seeds = set(_expand_seeds(args.seeds)) if args.seeds else set(LA_REPORT_SEEDS)
 
     src = lambda given: "given" if given else "found"
     print(f"  scope   : configs {','.join(sorted(wanted_cfg - {'base'})) or '-'} "
           f"({src(args.configs)})")
     print(f"            combos  {','.join(sorted(combos))} ({src(args.combos)})")
     print(f"            tw      {','.join(sorted(tws))} ({src(args.tw)})")
-    print(f"            seeds   {_fmt_seeds(sorted(seeds))} ({src(args.seeds)})")
+    print(f"            seeds   {_fmt_seeds(sorted(seeds))} "
+          f"({'given' if args.seeds else 'fixed'})")
 
     groups: dict = {}
+    present: dict = {}
+    by_cell: dict = {}          # cell -> the instance stems it has an OK run on
     for r in rows:
         if r.get("method") not in ("LA", "greedy") or r.get("status") != "OK":
             continue
@@ -1166,7 +1456,45 @@ def cmd_la_report(args) -> None:
         # None for a tagged copy; downstream pairing keys on window_class, so
         # write the stripped-stem value back before it is used.
         r["window_class"] = tw
+        # The stem is the panel key: a regime copy counts as the instance it
+        # was patched from, so a NOSPLIT arm joins the panel rather than
+        # emptying it.
+        r["_stem"] = _split_instance_tag(r.get("instance"))[0]
         groups.setdefault((cfg, route, tw), []).append(r)
+        present.setdefault((cfg, f"R{route}C{cust}", tw), set()).add(seed)
+        by_cell.setdefault(cfg, set()).add(r["_stem"])
+
+    _la_coverage(present, wanted_cfg, combos, tws, seeds)
+
+    # ── the balanced panel ───────────────────────────────────────────────────
+    if args.panel == "common" and by_cell:
+        excl = {c.strip() for c in (args.panel_exclude or "").split(",")
+                if c.strip()}
+        keep, held = _la_panel(by_cell, excl)
+        print(f"  panel   : {_panel_breakdown(keep, cs)} with an OK run in "
+              f"every one of {len(held)} cell(s)")
+        if excl:
+            print(f"            not constraining the panel: "
+                  f"{','.join(sorted(excl))} (still reported, still filtered)")
+        # Named individually rather than as a count: the cell that costs the
+        # most is the one worth re-running or excluding, and that is only
+        # visible per cell.
+        for c in held:
+            lost = len(by_cell[c] - keep)
+            if lost:
+                print(f"            {c:<16} drops {lost:>3} of its "
+                      f"{len(by_cell[c])} instance(s) to the panel")
+        short = sorted(by_cell, key=lambda c: len(by_cell[c]))[:1]
+        if short and len(by_cell[short[0]]) < len(keep) * 1.15:
+            print(f"            binding cell: {short[0]} "
+                  f"({len(by_cell[short[0]])} instances) — "
+                  f"--panel-exclude {short[0]} to free the rest")
+        groups = {k: [r for r in v if r["_stem"] in keep]
+                  for k, v in groups.items()}
+        groups = {k: v for k, v in groups.items() if v}
+    elif args.panel == "all":
+        print("  panel   : none (--panel all) — cells may differ in route mix, "
+              "so a difference between them can be a difference in population")
 
     # ── the LOCAL family ─────────────────────────────────────────────────────
     # Same measurements, separate corpus and separate CSV.  These runs answer a
@@ -1232,13 +1560,31 @@ def cmd_la_report(args) -> None:
             w = csv.writer(fh)
             w.writerow(["config", "n_scenarios", "horizon_h", "route_class",
                         "window_class", "n_runs", "n_infeasible",
+                        # what every median in this row is computed over
+                        "n_feasible",
                         "gap_pen_median_pct", "gap_nopen_median_pct",
                         "duration_median_h", "delta_vs_base_pct", "n_paired",
                         "duration_pen_median_h", "delta_pen_vs_base_pct",
                         "n_paired_pen",
+                        # The reported cost of a decision: run wall clock over
+                        # the number of stops, uncorrected for parallelism (see
+                        # _t_per_stop_s).  Every figure and table reads THIS
+                        # column; the three that follow are the finer-grained
+                        # instruments kept for diagnosis.
+                        "t_per_stop_s_median",
+                        # How far the cost column can be trusted ACROSS cells:
+                        # how many batches the cell was built from, and how far
+                        # apart their per-batch medians are.  See _batch_spread.
+                        "n_batches", "t_per_stop_batch_ratio",
                         "decision_mean_s_median", "decision_cs_mean_s_median",
                         "decision_max_s_median",
-                        "wall_clock_s_median"])
+                        "wall_clock_s_median", "n_stops_median",
+                        # Solver EFFORT, measured only — a run made before the
+                        # 2026-08-21 instrumentation simply has none, and is
+                        # left out rather than back-filled from the clock.
+                        # cap_rate says whether that work actually converged.
+                        "solve_cpu_h_median", "n_subproblems_median",
+                        "cap_rate_median"])
             # Window classes are also POOLED into a synthetic 'all' row per
             # (config, route).  A figure that wants one row per configuration must
             # not average the two per-window medians: the classes carry different
@@ -1258,20 +1604,42 @@ def cmd_la_report(args) -> None:
                 pooled.setdefault((cfg, "all", "all"), []).extend(recs)
             for (cfg, route, tw), recs in sorted(list(grp.items())
                                                  + list(pooled.items())):
-                gp, n_gp = _agg([100.0 * r["gap_pen"] for r in recs
-                                 if cs._gap_usable(r) and r.get("gap_pen") is not None])
-                gn, _    = _agg([100.0 * r["gap_nopen"] for r in recs
-                                 if cs._gap_usable(r) and r.get("gap_nopen") is not None])
-                dur, _   = _agg([r.get("duration_h") for r in recs])
+                # EVERY reported value is read from the FEASIBLE runs only
+                # (2026-08-22).  Since a violation now halts the run, an
+                # infeasible run has no completed route and no full decision
+                # sequence: its duration is None and its wall clock covers only
+                # the stops it reached before dying.  Averaging those in would
+                # reward failing early — the sooner a cell strands, the cheaper
+                # and shorter it would look.
+                #
+                # `recs` stays the whole cell, because n_runs and n_infeasible
+                # are what the infeasibility rate is built from, and that rate
+                # is the correction the reader applies to every column below.
+                ok = [r for r in recs if cs._gap_usable(r)]
+                n_ok = len(ok)
+                gp, n_gp = _agg([100.0 * r["gap_pen"] for r in ok
+                                 if r.get("gap_pen") is not None])
+                gn, _    = _agg([100.0 * r["gap_nopen"] for r in ok
+                                 if r.get("gap_nopen") is not None])
+                dur, _   = _agg([r.get("duration_h") for r in ok])
                 dec, _   = _agg([cs._get(r, ("metrics", "decision_time_mean_s"))
-                                 for r in recs])
-                dcs, _   = _agg([_dec_cs(r, cs) for r in recs])
+                                 for r in ok])
+                dcs, _   = _agg([_dec_cs(r, cs) for r in ok])
                 decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
-                                 for r in recs])
-                wall, _  = _agg([r.get("wall_clock_s") for r in recs])
+                                 for r in ok])
+                wall, _  = _agg([r.get("wall_clock_s") for r in ok])
+                cpu, _   = _agg([cs._get(r, ("metrics", "solve_cpu_s_total"))
+                                 for r in ok])
+                nsub, _  = _agg([cs._get(r, ("metrics", "n_subproblems"))
+                                 for r in ok])
+                caps, _  = _agg([cs._get(r, ("metrics", "subproblem_cap_rate"))
+                                 for r in ok])
+                tps, _   = _agg([_t_per_stop_s(r) for r in ok])
+                nbat, brat = _batch_spread(ok)
+                nstp, _  = _agg([_n_stops(r.get("instance")) for r in ok])
                 n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
 
-                durp, _  = _agg([r.get("duration_pen_h") for r in recs])
+                durp, _  = _agg([r.get("duration_pen_h") for r in ok])
 
                 deltas, deltas_pen = [], []
                 for r in recs:
@@ -1289,24 +1657,32 @@ def cmd_la_report(args) -> None:
 
                 ns = recs[0].get("n_scenarios")
                 hh = recs[0].get("horizon_hours")
-                w.writerow([cfg, ns, hh, route, tw, len(recs), n_inf,
+                w.writerow([cfg, ns, hh, route, tw, len(recs), n_inf, n_ok,
                             None if gp is None else round(gp, 3),
                             None if gn is None else round(gn, 3),
                             None if dur is None else round(dur, 3),
                             None if dl is None else round(dl, 3), n_pair,
                             None if durp is None else round(durp, 3),
                             None if dlp is None else round(dlp, 3), n_pair_pen,
+                            None if tps is None else round(tps, 2),
+                            nbat, None if brat is None else round(brat, 2),
                             None if dec is None else round(dec, 4),
                             None if dcs is None else round(dcs, 4),
                             None if decx is None else round(decx, 4),
-                            None if wall is None else round(wall, 1)])
-                print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
+                            None if wall is None else round(wall, 1),
+                            None if nstp is None else round(nstp, 0),
+                            None if cpu is None else round(cpu / 3600.0, 3),
+                            None if nsub is None else round(nsub, 0),
+                            None if caps is None else round(caps, 4)])
+                print(f"  {cfg:<8} {route:<7} {tw:<6} "
+                      f"n={len(recs):<3} ok={n_ok:<3} "
                       f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
                       f"(from {n_gp} run(s) with an oracle bound)  "
                       f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
                       f"(n={n_pair})  "
-                      f"dec={'—' if dec is None else f'{dec:.1f}s'}"
-                      f" (CS {'—' if dcs is None else f'{dcs:.1f}s'})")
+                      f"t/stop={'—' if tps is None else f'{tps:.1f}s'}"
+                      + (f" [{nbat} batches, x{brat:.1f} apart]"
+                         if brat and brat > 1.5 else ""))
         print(f"  CSV saved   : {out}")
 
     _write("additional_la_stats.csv", groups)
@@ -1319,8 +1695,8 @@ def cmd_la_report(args) -> None:
 def _latest_2sp_solution(stem: str) -> str | None:
     """Newest solutions/<stem>_2SP_*.json (run ids end in a timestamp, so
     lexicographic max = latest), for the RP leg of the VSS harness."""
-    import glob as _glob
-    hits = sorted(_glob.glob(_paths.solutions(f"{stem}_2SP_*.json")))
+    hits = sorted(_paths.glob_solutions(f"{stem}_2SP_*.json"),
+                  key=os.path.basename)
     return hits[-1] if hits else None
 
 
@@ -1547,9 +1923,23 @@ def main() -> None:
     p.add_argument("--tw", default=None,
                    help="TW classes (default: those the found runs cover)")
     p.add_argument("--seeds", default=None,
-                   help="Seed spec, e.g. '1-25' (default: the seeds the found "
-                        "runs cover; the base cell is held to the same set so "
-                        "the level column stays comparable)")
+                   help=f"Seed spec, e.g. '1-25' (default: "
+                        f"{_fmt_seeds(list(LA_REPORT_SEEDS))}, fixed so every "
+                        f"cell stands on one population; what is missing inside "
+                        f"that window is printed as coverage)")
+    p.add_argument("--panel", default="common", choices=["common", "all"],
+                   help="'common' (default) reports every cell on the BALANCED "
+                        "PANEL — only instances with an OK run in every cell — "
+                        "so each cell is the same population and every "
+                        "comparison is exactly paired.  'all' reports each cell "
+                        "on whatever it has, which lets route mix differ "
+                        "between cells")
+    p.add_argument("--panel-exclude", default=None,
+                   help="Cells that may NOT constrain the panel, comma "
+                        "separated (e.g. 'S25H48').  They are still reported, "
+                        "and still filtered to the panel; they just do not "
+                        "shrink it.  Use for a cell whose runs are too sparse "
+                        "to hold the rest hostage")
     p.set_defaults(func=cmd_la_report)
 
     p = sub.add_parser("vss", help="8.5 VSS / EVPI decomposition")

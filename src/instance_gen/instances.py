@@ -1,95 +1,50 @@
 """
 instances.py — Route data assembly and instance generators
 ===========================================================
-Single source of truth for all route data in the BET scheduling project.
 
-This module owns two responsibilities:
 
-  1. make_data(...)
-       Assembles the canonical data dict consumed by every other module.
-       Moving this function here (rather than in MILP.py) keeps MILP.py a
-       pure modelling file with no knowledge of instance geometry.
-
-  2. Instance generator functions (instance_tiny, instance_realistic, …)
-       Each returns a data dict by calling make_data.  All instances are
-       registered in ALL_INSTANCES so CLI entry points can reference them
-       by name.
-
-Import chain
-------------
-instances.py → (stdlib only: math, random, os, sys)
-
-No local imports at module level.  MILP.py, Simulation.py, greedy.py etc.
-all import FROM instances; instances imports from none of them.  This makes
-the dependency graph a strict DAG with instances.py at the leaves.
-
-Data dict keys (produced by make_data)
----------------------------------------
-  label, title          str   — human-readable description / filename stem
-  N                     int   — destination stop index  (route has stops 0..N)
-  I                     list  — all stop indices [0 .. N]
-  C                     list  — customer stop indices   (C ∩ K = ∅)
-  K                     list  — charging station (CS) stop indices
-  R, Rseg               list  — PWL charging curve segment indices
-  D        {leg: h}     dict  — nominal travel time per leg (hours)
-  E        {leg: kWh}   dict  — nominal energy consumption per leg (kWh)
-  km       {leg: km}    dict  — physical leg distance (km); used by ECR(v)
-  S        {stop: h}    dict  — service time at each customer stop (h)
-  Q        {stop: h}    dict  — queue time at each CS stop (h)
-  M        {stop: h}    dict  — manoeuver time per active stop (h)
-  E0, Ecap, Emin        float — initial / max / min battery SOC (kWh)
-  Ebar     {r: kWh}     dict  — PWL charging curve energy breakpoints
-  Tbar     {r: h}       dict  — PWL charging curve time breakpoints
-  Wha, Whf {stop: h}    dict  — earliest / latest arrival windows (absolute h)
-  T_hor, T_START        float — absolute planning horizon / departure time (h)
-  lb_t, ub_t {stop: h}  dict  — arrival-time variable bounds (for MILP tightening)
-  Tb45, Tb15, Tb30      float — minimum break durations (h)
-  allow_split           bool  — Art. 7 split break (15'+30') available?
-  Tr1, Tr2              float — minimum rest durations: daily=11h, reduced=9h
-  Tdrv_cons             float — max consecutive driving before mandatory break (4.5 h)
-  Tdrv_sh1, Tdrv_sh2    float — max shift driving (9 h / 10 h split-week rule)
-  Twrk_cons1/2          float — max consecutive working accumulators
-  Twrk_sh               float — max shift working (13 h)
-  M_drv, M_sd, M_sw     float — big-M constants for HoS linearisation
-  M_big                 float — generic big-M for break/rest linking constraints
-
-HoS regulation references
---------------------------
-  EU Regulation 561/2006 (driving times and rest periods):
-    https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32006R0561
-  EU Regulation 165/2014 (tachographs):
-    https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32014R0165
-
-ECR model reference
--------------------
-  Younes et al. (2020) "Energy consumption model for battery electric vehicles",
-  Journal of Energy Storage, 32, 101758.
-  https://doi.org/10.1016/j.est.2020.101758
-  Formula: ECR(v) = A/v + B + C·v²  (kWh/km),  A=33.055, B=0.2256, C=7.2e−5
+Parameters notation:
+    - I : list[int] — all stop indices, 0..N
+    - C : list[int] — customer stop indices
+    - K : list[int] — charging station stop indices
+    - L : list[int] — layby (rest-area) stop indices
+    - D : dict {leg: h} — nominal travel time per leg (hours)
+    - S : dict {stop: h} — service time at each customer stop (hours)
+    - E : dict {leg: kWh} — nominal energy consumption per leg (kWh)
+    - Wha : dict {stop: h} — earliest arrival at customer (relative to T_START)
+    - Whf : dict {stop: h} — latest   arrival at customer (relative to T_START)
+    - Q : dict {cs_stop: h} — queue times at each CS stop
+    - M_stop : dict {stop: h} — manoeuver time at stops (charging, break, or rest)
+    - M_seq : dict {cs_stop: h} — additional manoeuver time at CS stops in sequential mode
+    - Tbar : dict {r: h} — PWL charging curve cumulative-time breakpoints
+    - t0 : float — departure time (absolute hours)
+    - E0 : float — initial battery SOC (kWh)
+    - Ecap : float — battery capacity (kWh)
+    - Emin : float — minimum allowed SOC (kWh)
+    - Ebar : dict {r: kWh} — PWL charging curve energy breakpoints
+    - T_hor : float — planning horizon (absolute hours)
 """
 
 from __future__ import annotations
 
 import math
-import os
-import random
-import sys
+
 import numpy as np
 
-
 from src.settings import (
-    ECR_A as _ECR_A, ECR_B as _ECR_B, ECR_C as _ECR_C, ecr as _ecr,
+    ecr as _ecr,
     V_NOM, BATTERY_CAPACITY, SOC_MIN_FRAC, EBAR_FRACS,
     Tb45, Tb15, Tb30, ALLOW_SPLIT_BREAK, Tr1, Tr2,
     Tdrv_cons, Tdrv_sh1, Tdrv_sh2, Twrk_cons1, Twrk_cons2, Twrk_sh,
     T_SPR1, T_SPR2, TWK_60, TWK_DRV, RHO_BAR, EXT_BAR, BETA_TW,
     QUEUE_WAIT_MEAN_MIN, QUEUE_WAIT_STD_MIN,
     M_STOP_H, M_SEQ_H, M_MAN_DEFAULT_H, M_LAYBY_H,
-    LAYBY_SPACING_KM, LAYBY_MIN_LEG_H,
+    LAYBY_SPACING_KM,
     SERVICE_TIME_H, CS_SPACING_KM, T_START as _T_START,
     CHARGER_POWER_BASE_KW, charging_curve, XI_MAX,
+    CUSTOMERS_PER_CLASS, DISTANCES_CLASS, CLUSTERS_CUSTOMERS,
+    CUSTOMERS_SHIFT, CS_SHIFT,
 )
-from src import paths as _paths
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,28 +55,8 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
                         t0: float = 0.0,
                         Man_default: float = M_MAN_DEFAULT_H) -> tuple[dict, dict]:
     """
-    Forward-pass conservative arrival-time bounds for variable tightening.
-
     Returns lb[i], ub[i] — dictionaries mapping stop index to the earliest
     and latest feasible absolute arrival time (hours).
-
-    These bounds are used by MILP.build_model and MILP.build_horizon_model to
-    set variable lower/upper bounds, which significantly tightens the LP
-    relaxation and speeds up presolve.
-
-    Parameters
-    ----------
-    I            : list[int] — all stop indices
-    C            : list[int] — customer stop indices
-    K            : list[int] — CS stop indices
-    D            : dict {leg: h} — nominal travel times
-    S            : dict {stop: h} — service times
-    Q            : dict {stop: h} — queue times at CS stops
-    Tbar         : dict {r: h} — PWL charging curve time breakpoints
-    T_hor        : float — absolute planning horizon
-    t0           : float — departure time (absolute hours, default 0)
-    Man_default  : float — manoeuver time per active stop; must match M_man
-                   in make_data to keep ub_t internally consistent
     """
     N   = max(I)
     TK  = Tbar[max(Tbar)]  # maximum possible charging duration
@@ -151,22 +86,7 @@ def compute_time_bounds(I, C, K, D, S, Q, Tbar, T_hor,
 def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1,
                          delta_pad: float = XI_MAX - 1.0) -> float:
     """
-    C1 — a valid big-M H bounding the total route duration (arrival minus t0).
-
-    There is NO arrival deadline in the model; H is used ONLY as the big-M in
-    the window indicators (t_a ≥ W_a − H·δ, t_a ≤ W_f + H·δ) and the rest
-    bound (τ_r ≤ H·ρ).  It must genuinely upper-bound any feasible arrival:
-
-        H = Σ_i D_i·(1 + delta_pad)                (driving, worst-inflated)
-            + Σ_i S_i + Σ_i Q_i + Σ_i M_stop_i     (service, queue, maneuver)
-            + (N + 1)·T_rst_1                       (≤ one 11 h rest per stop)
-
-    The rest term is deliberately loose (each stop can host at most one
-    break/rest by (23), so N+1 rests of 11 h dominates every break too),
-    keeping H valid for every schedule the solver can produce — optimal or
-    not — which is what a big-M requires.  delta_pad defaults to XI_MAX − 1
-    (= 0.6): the multiplier support is hard, so D·XI_MAX bounds every
-    realised leg time.
+    valid big-M H bounding the total route duration (arrival minus t0).
     """
     D_total = sum(D.get(i, 0.0) for i in range(N))
     return (D_total * (1.0 + delta_pad)
@@ -175,180 +95,135 @@ def compute_horizon_bigM(N, D, S, Q, M_stop, Tr1,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# make_data — CANONICAL DATA DICT CONSTRUCTOR
+# make_data — DATA DICT CONSTRUCTOR
 # ══════════════════════════════════════════════════════════════════════════════
 
-def make_data(I, C, K, D, E, Wha, Whf, label, title,
-              km=None, Bcap=BATTERY_CAPACITY, Q=None, M_man_h: float = M_MAN_DEFAULT_H,
+def make_data(I, C, K, L, D, E, km, label, title,
               rng: np.random.Generator | None = None,
-              L=None, T_dead: float | None = None,
+              Bcap: float = BATTERY_CAPACITY,
               charger_power_kw: float | None = None,
+              Wha: dict | None = None,
+              Whf: dict | None = None,
+              S: dict | None = None,
+              Q: dict | None = None,
+              M_man_h: float = M_MAN_DEFAULT_H,
+              M_lay_h: float | None = None,
+              T_dead: float | None = None,
               hard_tw: bool = False,
               beta_tw: float = BETA_TW,
-              S: dict | None = None,
-              M_lay_h: float | None = None,
               allow_wait: bool = False,
               wtd_rules: bool = False,
               allow_split: bool = ALLOW_SPLIT_BREAK) -> dict:
     """
-    Assemble the canonical data dict consumed by MILP.build_model,
-    MILP.solve_horizon, BEHDV, oracle_solve, and all instance generators.
+    Attach every non-geometric attribute to a route and return the data dict
+    consumed by MILP.build_model, MILP.solve_horizon, BEHDV, oracle_solve and
+    the simulation.
 
-    Parameters
-    ----------
-    I     : list[int]        — all stop indices; must satisfy min(I)=0,
-                               max(I)=N, and set(C)|set(K) == set(I)-{0,N}
-    C     : list[int]        — customer stop indices  (C ∩ K = ∅)
-    K     : list[int]        — charging station stop indices
-    D     : dict {leg: h}    — nominal travel time per leg (hours)
-    E     : dict {leg: kWh}  — nominal energy consumption per leg (kWh)
-    S     : dict {stop: h}   — service time at each customer stop (hours)
-    E0    : float            — initial battery SOC (kWh)
-    Ecap  : float            — battery capacity (kWh)
-    Emin  : float            — minimum allowed SOC (kWh)
-    Ebar  : dict {r: kWh}    — PWL charging curve energy breakpoints
-    Tbar  : dict {r: h}      — PWL charging curve cumulative-time breakpoints
-    Wha   : dict {stop: h}   — earliest arrival at customer (relative to T_START)
-    Whf   : dict {stop: h}   — latest   arrival at customer (relative to T_START)
-    label : str              — verbose description string
-    title : str              — short identifier used as JSON filename stem
-    km    : dict {leg: km} or None
-            Physical leg distances (km).  When provided, scenario generation
-            in scenarios.py couples energy consumption to travel speed via
-            ECR(v) = A/v + B + C·v².  When None, defaults to E (i.e. treats
-            energy as proportional to travel time — backward-compatible).
-    Q     : dict {cs_stop: h} or None
-            Fixed queue times at each CS stop (plug-in + initial waiting).
-            When None, drawn from a lognormal distribution using `rng`.
-    rng   : np.random.Generator or None
-            Generator used to draw Q when Q is None.  Pass a seeded
-            np.random.default_rng(seed) for reproducible queue times; when
-            None, a fresh unseeded generator is used.
-    M_man_h : float
-            Manoeuver time (h) applied uniformly to every stop.  A manoeuver
-            is charged whenever a break or rest is taken without simultaneous
-            charging (the driver must physically park/unpark the truck).
-            Default 15/60 h (15 min).  Use larger values (e.g. 10.0 h) to
-            model high-penalty scenarios where off-CS stops are very costly,
-            forcing the optimiser to plan breaks exclusively at CS bays.
+    The route itself (I, C, K, L, km) comes from create_geometry_instance; the
+    per-leg nominal travel time D and energy E are derived from it by the
+    caller, because both depend on the assumed cruising speed.
 
-    Returns
-    -------
-    dict — see module docstring for full key listing.
+    Everything the caller does not supply is drawn or defaulted here:
 
-    L     : list[int] or None
-            Layby (rest-area) stop indices (M8).  Break/rest-only stops:
-            no service, no charging.  Default None = no laybys.
-    T_dead : float or None
-            Hard deadline at the destination (absolute hours) — constraint
-            (R6).  None = no deadline.
-    charger_power_kw : float or None
-            Average charger power (kW) for the I2 sensitivity axis.  Rescales
-            the PWL time breakpoints; None keeps the 200 kW base curve.
-    hard_tw : bool
-            True → customer windows are hard (tight-slot sensitivity).
-            False (default) → soft windows with the fixed out-of-window
-            penalty delta (TW2).
-    beta_tw : float
-            Fixed out-of-window service penalty β (h-equivalent per missed
-            window, TW2).
-    S     : dict {stop: h} or None
-            Per-stop service times at customer stops.  None (default) applies
-            the uniform SERVICE_TIME_H to every customer.  Used by external
-            benchmark instances (e.g. R15-PGLT) with heterogeneous services.
-    M_lay_h : float or None
-            Parking overhead (h) at layby stops.  None keeps M_LAYBY_H.
-            Benchmark instances pass 0.0 (their idle stops are free).
-    allow_wait : bool
-            True → MILP adds a free idle-wait variable w_i at customer and
-            layby stops (benchmark parity with the TDSP "APO" idle time).
-            Default False preserves the v3 no-idle-waiting convention.
-    wtd_rules : bool
-            True → MILP enforces the Directive 2002/15/EC working-time
-            breaks in-model (6 h continuous work → break; 30'/45' cumulative
-            per shift).  Default False keeps them ex-post only.
-    allow_split : bool
-            True (default) → the Art. 7 split break (15' + 30') is available.
-            False → x_b15 / x_b30 are dropped from every model and the
-            heuristic rules only ever take the unsplit 45' break (8.3
-            no-split sensitivity axis).
+    rng     : generator for the CS queue draws.  Pass a seeded one for a
+              reproducible instance; None draws from a fresh generator.
+    Q       : fixed queue times {cs_stop: h}.  None draws them lognormally.
+    S       : per-customer service times.  None applies SERVICE_TIME_H to all.
+    Wha/Whf : customer windows, RELATIVE to T_START (they are returned as
+              absolute hours).  None means unconstrained, which is what the
+              "none" window class and the benchmark loaders want; the windowed
+              classes are written afterwards by instance_io.generate_time_windows.
+    M_man_h : legacy uniform manoeuvre time, kept because MILP's covering
+              inequalities still index the flat "M" dict.
+    M_lay_h : layby parking overhead; None keeps M_LAYBY_H.
 
-    Raises
-    ------
-    AssertionError if C, K, L are not disjoint or do not cover {1..N-1}.
+    Raises AssertionError when C/K/L do not partition the intermediate stops,
+    or when the route cannot fit between two weekly rests (M9) — instance_io
+    catches the latter and regenerates with an advanced seed.
     """
-    N    = max(I)
-    L    = list(L) if L is not None else []
-
+    # ── geometry sanity ──────────────────────────────────────────────────────
+    N = max(I)
+    L = list(L) if L is not None else []
     assert set(C) | set(K) | set(L) == set(I) - {0, N}, (
         "C ∪ K ∪ L must equal the intermediate stops {1..N-1}")
     assert not (set(C) & set(K)), "C and K must be disjoint"
     assert not ((set(C) | set(K)) & set(L)), "L must be disjoint from C and K"
 
-    # M9: instance-generation guard — each route must fit between two weekly
-    # rests, so weekly driving caps never bind (paper §3.4(a)).
+    # M9 — each route must fit between two weekly rests, so the weekly driving
+    # cap never binds and the model needs no week-level accumulator.
     _D_total = sum(D.get(i, 0.0) for i in range(N))
     assert _D_total <= TWK_DRV + 1e-9, (
         f"total nominal driving {_D_total:.1f}h exceeds the weekly cap "
         f"{TWK_DRV}h — regenerate the instance (M9)")
 
-    # Queue times at CS stops (lognormal distribution)
-    mu    = np.log(QUEUE_WAIT_MEAN_MIN**2 / np.sqrt(QUEUE_WAIT_STD_MIN**2 + QUEUE_WAIT_MEAN_MIN**2))
-    sigma = np.sqrt(np.log(1 + (QUEUE_WAIT_STD_MIN / QUEUE_WAIT_MEAN_MIN)**2))
+    # ── per-stop attributes ──────────────────────────────────────────────────
+    # Queue times at CS stops (lognormal, mean/std in minutes -> hours)
     _rng  = rng if rng is not None else np.random.default_rng()
+    mu    = np.log(QUEUE_WAIT_MEAN_MIN**2
+                   / np.sqrt(QUEUE_WAIT_STD_MIN**2 + QUEUE_WAIT_MEAN_MIN**2))
+    sigma = np.sqrt(np.log(1 + (QUEUE_WAIT_STD_MIN / QUEUE_WAIT_MEAN_MIN)**2))
     Q_nom = dict(Q) if Q is not None else {
         i: _rng.lognormal(mu, sigma) / 60 for i in K
     }
 
-    # Maneuver overhead at CS stops.
-    # M_stop: incurred whenever any activity occurs at a CS (charging, break, or rest).
-    # M_seq:  additional repositioning in sequential mode (truck vacates charging bay
-    #         before the break begins).
-    M_man  = {i: float(M_man_h) for i in range(N + 1)}   # kept for compat
+    # Manoeuvre overheads.  These are three DISJOINT dicts because the model
+    # indexes them over disjoint sets:
+    #   M_stop  over K  — any activity at a charging station (charge/break/rest)
+    #   M_seq   over K  — extra repositioning when the break follows the charge
+    #   M_lay   over L  — parking overhead at a layby
+    # MILP builds m.Mstop on Kset and m.Mlay on Lset, and BEHDV guards each with
+    # is_CS / is_lay, so putting layby stops into M_stop would be ignored by the
+    # model and silently drop their overhead.  Merging the two into one
+    # "overhead at any non-customer stop" is a model change (Kset -> Kset|Lset
+    # in MILP, plus BEHDV) — worth doing, but not something make_data can do
+    # on its own.
     M_stop = {i: M_STOP_H for i in K}
     M_seq  = {i: M_SEQ_H  for i in K}
-    _M_lay_h = M_LAYBY_H if M_lay_h is None else float(M_lay_h)
-    M_lay  = {i: _M_lay_h for i in L}    # parking overhead at layby stops (M8)
+    M_lay  = {i: (M_LAYBY_H if M_lay_h is None else float(M_lay_h)) for i in L}
+    M_man  = {i: float(M_man_h) for i in range(N + 1)}   # legacy flat dict
 
-    S    = dict(S) if S is not None else {c: SERVICE_TIME_H for c in C}
+    S_nom = dict(S) if S is not None else {c: SERVICE_TIME_H for c in C}
+
+    # ── vehicle and charge point ─────────────────────────────────────────────
     E0   = Bcap
     Ecap = Bcap
     Emin = SOC_MIN_FRAC * Bcap
     Ebar = {r: EBAR_FRACS[r] * Bcap for r in EBAR_FRACS}
-    # I2: the curve is derived from the charge point's rated output and THIS
-    # instance's pack capacity, so the base case and the power classes share one
-    # code path and the curve tracks Bcap instead of assuming 500 kWh.
+    # The curve is derived from the charge point's rated output AND this
+    # instance's pack, so the base case and the power classes share one code
+    # path and the taper tracks Bcap instead of assuming 500 kWh.
     Tbar = charging_curve(charger_power_kw or CHARGER_POWER_BASE_KW, Bcap)
-
     R    = sorted(Ebar.keys())
     Rseg = R[1:]
 
-    T_hor = _T_START + 7 * 24   # 7-day planning horizon
-
-    km_dict = km if km is not None else dict(E)
+    # ── horizon, bounds, windows ─────────────────────────────────────────────
+    T_hor = _T_START + 7 * 24            # 7-day planning horizon
 
     lb_t, ub_t = compute_time_bounds(
-        I, C, K, D, S, Q_nom, Tbar, T_hor,
-        t0=_T_START,
-        Man_default=float(M_man_h),
+        I, C, K, D, S_nom, Q_nom, Tbar, T_hor,
+        t0=_T_START, Man_default=float(M_man_h),
     )
 
-    # Time windows: convert from relative (hours-since-T_START) to absolute
-    Wha_abs = {k: v + _T_START for k, v in Wha.items()}
-    Whf_abs = {k: v + _T_START for k, v in Whf.items()}
+    # Windows arrive RELATIVE to T_START and are stored ABSOLUTE.  Unconstrained
+    # is the default: instance_io.generate_time_windows overwrites these in
+    # place for the tight/medium/large classes.
+    Wha_rel = dict(Wha) if Wha is not None else {c: 0.0 for c in C}
+    Whf_rel = dict(Whf) if Whf is not None else {c: 2e7 for c in C}
+    Wha_abs = {k: v + _T_START for k, v in Wha_rel.items()}
+    Whf_abs = {k: v + _T_START for k, v in Whf_rel.items()}
 
     # C1 — horizon big-M (valid upper bound on the route-duration span)
-    H_bigM = compute_horizon_bigM(N, D, S, Q_nom, M_stop, Tr1)
+    H_bigM = compute_horizon_bigM(N, D, S_nom, Q_nom, M_stop, Tr1)
 
     data = dict(
         label=label, title=title,
         N=N, I=I, C=C, K=K, L=L, R=R, Rseg=Rseg,
         Q=Q_nom, M=M_man, M_stop=M_stop, M_seq=M_seq, M_lay=M_lay,
-        D=D, E=E, km=km_dict, S=S,
+        D=D, E=E, km=(dict(km) if km is not None else dict(E)), S=S_nom,
         E0=E0, Ecap=Ecap, Emin=Emin,
         Ebar=Ebar, Tbar=Tbar,
         Wha=Wha_abs, Whf=Whf_abs,
-        T_dead=T_dead,          # retained for I/O compatibility; NOT used as a
+        T_dead=T_dead,          # retained for I/O; NOT enforced as a
                                 # constraint (C1: there is no arrival deadline)
         H=H_bigM,               # C1 window / rest big-M
         hard_tw=bool(hard_tw), beta=float(beta_tw),
@@ -365,76 +240,111 @@ def make_data(I, C, K, D, E, Wha, Whf, label, title,
         # M5 shift spread limits / M9 weekly caps and exception budgets
         Tspr1=T_SPR1, Tspr2=T_SPR2, Twk60=TWK_60,
         rho_bar=RHO_BAR, ext_bar=EXT_BAR,
-        # Big-M constants for HoS linearisation (must be ≥ respective limit).
+        # Big-M constants for HoS linearisation (must be >= respective limit).
         # M_sd covers the extended 10 h shift (M6); M_sw and M_h cover the
-        # 15 h spread ceiling (M5) which bounds both sw and h.
+        # 15 h spread ceiling (M5), which bounds both sw and h.
         M_drv=Tdrv_cons, M_sd=Tdrv_sh2, M_sw=T_SPR2, M_h=T_SPR2, M_big=1000.0,
     )
     return data
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LAYBY INSERTION (M8)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def insert_laybys(I, C, K, D, km,
-                  spacing_km: float = LAYBY_SPACING_KM,
-                  min_leg_h: float = LAYBY_MIN_LEG_H):
-    """
-    M8 — Insert layby (rest-area) nodes along long legs.
-
-    On every leg with nominal duration > `min_leg_h`, layby nodes are inserted
-    at (roughly) every `spacing_km` km, splitting the leg into equal segments.
-    Laybys allow breaks/rests but no charging and no service.
-
-    Parameters use the ORIGINAL indexing; the function reindexes everything.
+def create_geometry_instance(route_class: str = "medium",
+                             clusters: int = 3,
+                             customers_class: str = "few",
+                             rng: np.random.Generator | None = None,
+                             cs_spacing_km: float = CS_SPACING_KM,
+                             layby: bool = True,
+                             layby_spacing_km: float = LAYBY_SPACING_KM):
+    """Build the route geometry of a given instance.
 
     Returns
     -------
-    (I2, C2, K2, L2, D2, E2, km2) — reindexed stop sets and leg dicts.
-    Leg energies E2 are recomputed from the segment length at the leg's
-    implied nominal speed.
+    I  : list[int]          all node indices, in route order
+    C  : list[int]          indices that are customers
+    K  : list[int]          indices that are charging stations
+    L  : list[int]          indices that are laybys
+    KM : dict[int, float]   KM[i] = distance (km) from node i to node i+1
     """
-    N     = max(I)
-    C_set = set(C)
-    K_set = set(K)
 
-    C2, K2, L2 = [], [], []
-    D2, E2, km2 = {}, {}, {}
-    idx = 0
-    for i in range(N):
-        # classify original stop i under the new numbering
-        if i in C_set:
-            C2.append(idx)
-        elif i in K_set:
-            K2.append(idx)
+    rng = rng if rng is not None else np.random.default_rng()
 
-        leg_km = km.get(i, D.get(i, 0.0) * V_NOM)
-        leg_h  = D.get(i, 0.0)
-        v_leg  = leg_km / leg_h if leg_h > 1e-9 else V_NOM
+    nb_customers   = int(rng.integers(*CUSTOMERS_PER_CLASS[customers_class],
+                                      endpoint=True))
+    route_distance = int(rng.integers(*DISTANCES_CLASS[route_class],
+                                      endpoint=True))
 
-        if leg_h > min_leg_h and leg_km > spacing_km:
-            n_lay  = max(1, int(math.ceil(leg_km / spacing_km)) - 1)
-            seg_km = leg_km / (n_lay + 1)
-            for j in range(n_lay + 1):
-                D2[idx]  = seg_km / v_leg
-                km2[idx] = seg_km
-                E2[idx]  = seg_km * _ecr(v_leg)
-                idx += 1
-                if j < n_lay:
-                    L2.append(idx)
-        else:
-            D2[idx]  = leg_h
-            km2[idx] = leg_km
-            E2[idx]  = leg_km * _ecr(v_leg)
-            idx += 1
+    # Cluster centres spread evenly along the route
+    cluster_centers = [
+        int(rng.integers(int(CLUSTERS_CUSTOMERS[clusters][c][0] * route_distance),
+                         int(CLUSTERS_CUSTOMERS[clusters][c][1] * route_distance),
+                         endpoint=True))
+        for c in range(clusters)
+    ]
+    # Customers are placed around a randomly chosen cluster centre.  The +0.5
+    # keeps every customer off the integer grid the charging stations sit on,
+    # so the two never collide exactly.
+    customer_locations = sorted(
+        float(rng.choice(cluster_centers))
+        + int(rng.integers(-CUSTOMERS_SHIFT, CUSTOMERS_SHIFT, endpoint=True))
+        + 0.5
+        for _ in range(nb_customers)
+    )
 
-    I2 = list(range(idx + 1))
-    return I2, C2, K2, L2, D2, E2, km2
+    # --- 1. collect (position, type) nodes ---------------------------------
+    nodes: list[tuple[float, str]] = [(0.0, "depot")]
+
+    for x in customer_locations:
+        nodes.append((float(x), "customer"))
+
+    # charging stations: k * spacing +/- shift, for k = 1 .. floor(D/spacing)
+    n_cs = int(route_distance // cs_spacing_km)
+    for k in range(1, n_cs + 1):
+        pos = k * cs_spacing_km + int(rng.integers(-CS_SHIFT, CS_SHIFT,
+                                                   endpoint=True))
+        pos = min(max(pos, 0.0), route_distance)
+        if any(t == "customer" and abs(pos - p) < 1 for p, t in nodes):
+            pos -= 1 # don't drop a CS on top of a fixed customer
+        nodes.append((pos, "cs"))
+
+    nodes.append((float(route_distance), "depot"))
+
+    # --- 2. sort by position ----------------------------------------------
+    nodes.sort(key=lambda t: t[0])
+
+    # --- 3. insert laybys so every gap <= layby_spacing_km ----------------
+    if layby:
+        filled: list[tuple[float, str]] = [nodes[0]]
+        for p1, t1 in nodes[1:]:
+            p0 = filled[-1][0]
+            gap = p1 - p0
+            if gap > layby_spacing_km:
+                n_seg = math.ceil(gap / layby_spacing_km)   # >= 2
+                step = gap / n_seg
+                for j in range(1, n_seg):
+                    filled.append((p0 + j * step, "layby"))
+            filled.append((p1, t1))
+        nodes = filled
+
+    # --- 4. index & build outputs -----------------------------------------
+    I, C, K, L = [], [], [], []
+    for idx, (_, typ) in enumerate(nodes):
+        I.append(idx)
+        if typ == "customer":
+            C.append(idx)
+        elif typ == "cs":
+            K.append(idx)
+        elif typ == "layby":
+            L.append(idx)
+
+    KM = {idx: nodes[idx + 1][0] - nodes[idx][0] for idx in range(len(nodes) - 1)}
+
+    return I, C, K, L, KM
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BENCHMARK INSTANCES
+# GENERATED INSTANCES
 # ══════════════════════════════════════════════════════════════════════════════
 
 def instance_realistic(route_class: str = "medium",
@@ -446,102 +356,53 @@ def instance_realistic(route_class: str = "medium",
                        battery_kwh: float | None = None,
                        add_laybys: bool = True,
                        layby_spacing_km: float = LAYBY_SPACING_KM) -> dict:
-    """
-    Randomly generated long-haul route with realistic geometry.
+    """Randomly generated long-haul route with realistic geometry.
 
-    The route is built by placing CS stops every `CS_spacing` km along a
-    corridor of length `route_distance`, then inserting customer stops drawn
-    from Gaussian clusters along the route.  Leg energies are computed using
-    ECR(v_nom) so that scenario generation can consistently vary speed.
+    Geometry comes from create_geometry_instance; this function only adds the
+    speed-dependent leg quantities and hands everything to make_data.
+
+    Windows are left UNCONSTRAINED here — instance_io.generate_time_windows
+    writes the tight/medium/large classes afterwards, because centring them
+    needs a nominal MILP solve of the finished data dict.
 
     Parameters
     ----------
-    route_class      : "short" (800–1200 km) | "medium" (1500–2500 km)
-                       | "long" (3000–4000 km)
-    clusters         : 1 | 2 | 3 — number of customer delivery clusters
-    customers_class  : "few" (1–3) | "medium" (4–6) | "many" (7–15)
-    battery_kwh      : pack capacity (kWh) for the I3 sensitivity axis.
-                       None keeps settings.BATTERY_CAPACITY.  Only the pack is
-                       resized here; make_data derives Emin, Ebar and Tbar from
-                       it, so the 20 % floor scales WITH the pack and the tail
-                       acceptance (TAIL_C_RATE·Ecap) moves too — a bigger pack
-                       therefore also shifts where the charge curve tapers.
-
-    Notes
-    -----
-    Call random.seed() before this function for a reproducible instance.
-    The title encodes the parameter choices:
-      realistic_{route_class}_{customers_class}_{clusters}
+    rng              : seeded generator; drives geometry, queue draws and,
+                       downstream in instance_io, the realisation and windows.
+    cs_spacing_km    : charging-station spacing; None keeps CS_SPACING_KM.
+    charger_power_kw : rated charge-point output; None keeps the base curve.
+    battery_kwh      : pack capacity; None keeps BATTERY_CAPACITY.  make_data
+                       derives Emin, Ebar and Tbar from it, so the SOC floor
+                       scales WITH the pack and the tail acceptance
+                       (TAIL_C_RATE*Ecap) moves too — a bigger pack therefore
+                       also shifts where the charge curve tapers.
     """
-    distances = {"short": [800, 1200], "medium": [1500, 2500], "long": [3000, 4000]}
-    customers = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
-    average_speed    = V_NOM
-    CS_spacing       = int(cs_spacing_km) if cs_spacing_km else CS_SPACING_KM
-    Battery_capacity = float(battery_kwh) if battery_kwh else BATTERY_CAPACITY
+    rng     = rng if rng is not None else np.random.default_rng()
+    spacing = float(cs_spacing_km) if cs_spacing_km else CS_SPACING_KM
+    Bcap    = float(battery_kwh) if battery_kwh else BATTERY_CAPACITY
 
-    nb_customers   = random.randint(*customers[customers_class])
-    route_distance = random.randint(*distances[route_class])
-
-    # Cluster centres spread evenly along the route
-    if clusters == 1:
-        cluster_centers = [random.randint(int(0.5 * route_distance),
-                                          int(0.6 * route_distance))]
-    elif clusters == 2:
-        cluster_centers = [
-            random.randint(int(0.35 * route_distance), int(0.45 * route_distance)),
-            random.randint(int(0.55 * route_distance), int(0.65 * route_distance)),
-        ]
-    else:
-        cluster_centers = [
-            random.randint(int(0.25 * route_distance), int(0.30 * route_distance)),
-            random.randint(int(0.50 * route_distance), int(0.55 * route_distance)),
-            random.randint(int(0.70 * route_distance), int(0.75 * route_distance)),
-        ]
-
-    customer_locations = sorted(
-        random.choice(cluster_centers) + random.randint(-75, 75) + 0.5
-        for _ in range(nb_customers)
+    I, C, K, L, km = create_geometry_instance(
+        route_class=route_class,
+        clusters=clusters,
+        customers_class=customers_class,
+        rng=rng,
+        cs_spacing_km=spacing,
+        layby=add_laybys,
+        layby_spacing_km=layby_spacing_km,
     )
 
-    I = [0]; C = []; K = []
-    D = {0: CS_spacing / average_speed}
-    E = {0: CS_spacing * _ecr(average_speed)}
-    I_nb = 1; cur_c = 0; prev_cs = 0
-
-    for dist in range(CS_spacing, route_distance, CS_spacing):
-        real = dist + random.randint(-19, 19)
-        prev_stop = prev_cs
-        # Insert any customer stops between the last CS and this one
-        while (cur_c < len(customer_locations) and
-               prev_cs < customer_locations[cur_c] < real):
-            I.append(I_nb); C.append(I_nb)
-            _km = customer_locations[cur_c] - prev_stop
-            D[I_nb] = _km / average_speed
-            E[I_nb] = _km * _ecr(average_speed)
-            I_nb += 1; prev_stop = customer_locations[cur_c]; cur_c += 1
-        I.append(I_nb); K.append(I_nb)
-        _km = real - prev_stop
-        D[I_nb] = _km / average_speed
-        E[I_nb] = _km * _ecr(average_speed)
-        I_nb += 1; prev_cs = real
-
-    I.append(I_nb)
-
-    km = {i: average_speed * D[i] for i in D}
-
-    # M8 — optionally insert layby (rest-area) nodes along long legs
-    L = []
-    if add_laybys:
-        I, C, K, L, D, E, km = insert_laybys(
-            I, C, K, D, km, spacing_km=layby_spacing_km)
+    # Nominal travel time and energy per leg, both at the cruising speed.
+    # ecr() is kWh per KM, so the energy of a leg is ecr(v) * km — not
+    # ecr(v) * D, which would be out by a factor of v.
+    D = {i: km[i] / V_NOM for i in km}
+    E = {i: _ecr(V_NOM) * km[i] for i in km}
 
     return make_data(
-        I=I, C=C, K=K, L=L, D=D, E=E, km=km, Bcap=Battery_capacity,
-        Wha={c: 0        for c in C},
-        Whf={c: 20000000 for c in C},
+        I=I, C=C, K=K, L=L, D=D, E=E, km=km,
         label="realistic — randomly generated long-haul route",
         title=f"realistic_{route_class}_{customers_class}_{clusters}",
         rng=rng,
+        Bcap=Bcap,
         charger_power_kw=charger_power_kw,
     )
 
@@ -549,7 +410,9 @@ def instance_realistic(route_class: str = "medium",
 # ══════════════════════════════════════════════════════════════════════════════
 # REGISTRY
 # ══════════════════════════════════════════════════════════════════════════════
+# Consumed by the __main__ blocks of MILP.py and Simulation.py, which solve a
+# one-off instance by name.
 
 ALL_INSTANCES: dict[str, callable] = {
-    "realistic"         : instance_realistic,
+    "realistic": instance_realistic,
 }

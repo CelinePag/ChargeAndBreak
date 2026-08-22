@@ -71,6 +71,13 @@ from src.output_analysis import compile_solutions as cs
 from src.plot import paper_style as ps
 from src import paths as _paths
 
+# Every figure this module writes is a base-case figure ("paper_gap_*",
+# "paper_tw_response*"), so the default output directory is the base-case
+# bucket rather than the figures/ root.  --out-dir still overrides it, and an
+# explicit directory is written flat: the bucket is a DEFAULT, not a rewrite of
+# whatever path the caller passes.
+_FIG_DIR = _paths.figures(_paths.BASECASE)
+
 _ROUTE_ORDER = ps.ROUTE_ORDER
 _CUST_ORDER  = ps.CUST_ORDER
 _TW_ORDER    = ps.TW_ORDER
@@ -302,7 +309,7 @@ def pool_cust(*dicts):
 
 
 def plot_tw_response(gaps, metric: str = "gap_pen",
-                     out_dir: str = _paths.figures()) -> list:
+                     out_dir: str = _FIG_DIR) -> list:
     """How each method responds to window tightness — one panel per route.
 
     A dumbbell per method: the median gap under the LOOSEST window class
@@ -389,6 +396,7 @@ def plot_tw_response(gaps, metric: str = "gap_pen",
     fig.tight_layout(rect=(0, 0, 1, 0.90))
 
     metric_sfx = "" if metric == "gap_pen" else f"_{metric}"
+    os.makedirs(out_dir, exist_ok=True)
     out = []
     for ext in ("pdf", "png"):
         p = os.path.join(out_dir, f"paper_tw_response{metric_sfx}.{ext}")
@@ -441,7 +449,7 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
 
 
 def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
-                    metric: str = "gap_pen", out_dir: str = _paths.figures(),
+                    metric: str = "gap_pen", out_dir: str = _FIG_DIR,
                     annotate_n: bool = True, full_grid: bool = True,
                     layout: str = "row", inner: str = "tw",
                     line_band: bool = True) -> list:
@@ -955,7 +963,7 @@ if __name__ == "__main__":
                     "seeds) per instance family and method, for the paper.")
     parser.add_argument("--dir", default=_paths.solutions(),
                         help="solutions directory (default: solutions)")
-    parser.add_argument("--out-dir", default=_paths.figures(),
+    parser.add_argument("--out-dir", default=_FIG_DIR,
                         help="output directory (default: figures)")
     parser.add_argument("--kind", default=None,
                         choices=["box", "bar", "violin", "line", "all"],

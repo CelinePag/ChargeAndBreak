@@ -159,7 +159,7 @@ if __name__ == "__main__":
     N = full_data["N"]
     stem = os.path.splitext(os.path.basename(args.instance))[0]
     out_base = args.out or _paths.figures(f"bound_trace_{stem}")
-    log_path = _paths.logs(f"oracle_trace_{stem}.log")
+    log_path = _paths.log_out(f"oracle_trace_{stem}.log")
     _paths.ensure_dirs()
 
     # the instance's precomputed realised travel times — exactly what the real

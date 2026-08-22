@@ -21,6 +21,12 @@ Layout
       solutions/            run results + oracle_<inst>.json caches
       logs/                 per-run .txt, gurobi .log, *_scenarios.json
       figures/              .pdf/.png plots
+        └─ basecase/ LAconfig/ usecase/ sensitivity/
+                            those three trees are split one level deep by
+                            EXPERIMENT; see "EXPERIMENT BUCKETS" below.  Writers
+                            call solution_out()/log_out()/figure_out() and
+                            readers call find_*()/glob_*()/scan_*(), so neither
+                            side has to know the bucket of a given file.
       tex/tables/           .tex — GENERATED tables (safe to overwrite)
       tex/sections/         .tex — hand-written manuscript prose (never written
                             by any script; kept apart so a table regeneration
@@ -65,6 +71,39 @@ DATA_OUTPUT : Path = ROOT / "data_output"
 ARCHIVE     : Path = ROOT / "archive"
 RESULTS_VSS : Path = ROOT / "results_vss"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPERIMENT BUCKETS
+# ══════════════════════════════════════════════════════════════════════════════
+# solutions/, logs/ and figures/ are each split one level deep, by EXPERIMENT
+# rather than by method or by date:
+#
+#     basecase/     the 3x3x4x25 base grid, standard method configurations
+#     LAconfig/     the look-ahead configuration sweep (S..H.. ladders, LOCAL)
+#     usecase/      the real corridor instances (usecase_*)
+#     sensitivity/  the one-at-a-time axes (instances_sens, "<inst>__<tag>")
+#
+# Why one level and not more: the flat trees had grown to ~18 000 solutions and
+# ~25 000 logs, which is slow to list and impossible to read.  Anything deeper
+# would need the reader to know the bucket to find a file, and the reader
+# usually does not — a run_id names the run, not the experiment.  With exactly
+# one level, "search the buckets" is a two-glob operation (see _multi_glob), so
+# every consumer can keep addressing artefacts by NAME alone.
+#
+# Files that classify into no bucket (ad-hoc runs, concept figures, the
+# framework diagram) stay at the tree root.  That is deliberate: a file we
+# cannot place is better left visible than filed under a guess.
+
+BASECASE    = "basecase"
+LACONFIG    = "LAconfig"
+USECASE     = "usecase"
+SENSITIVITY = "sensitivity"
+BUCKETS: tuple[str, ...] = (BASECASE, LACONFIG, USECASE, SENSITIVITY)
+
+# Trees that are bucketed.  data_output/ and tex/tables/ are NOT: they hold a
+# few dozen named exports whose names already say which experiment they belong
+# to, and the LaTeX \input paths in the manuscript would all have to change.
+_BUCKETED = ("SOLUTIONS", "LOGS", "FIGURES")
+
 # Directories a run may write into.  Inputs are deliberately absent: a missing
 # instances/ is a real error and must not be papered over by mkdir.  TEX_SECTIONS
 # is absent on purpose — nothing generated may land next to the manuscript.
@@ -75,6 +114,9 @@ def ensure_dirs() -> None:
     """Create the output directories if they do not exist (idempotent)."""
     for d in _WRITABLE:
         d.mkdir(parents=True, exist_ok=True)
+    for base in (SOLUTIONS, LOGS, FIGURES):
+        for b in BUCKETS:
+            (base / b).mkdir(parents=True, exist_ok=True)
 
 
 def redirect_outputs(root: str | os.PathLike) -> None:
@@ -246,3 +288,299 @@ def effective_variant(method: str | None, variant: str | None,
     if energy_q and (mode == "lp" or (eff or "").endswith(LA_LEGACY_VARIANT)):
         eff = f"{eff}+EQ{int(round(float(energy_q) * 100))}" if eff               else f"EQ{int(round(float(energy_q) * 100))}"
     return eff
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BUCKET ROUTING
+# ══════════════════════════════════════════════════════════════════════════════
+# Which of the four experiment buckets an artefact belongs to is derived from
+# its NAME, never stored anywhere.  That is what makes the split reversible and
+# self-healing: re-deriving the bucket of every file on disk reproduces the
+# layout exactly, so a file dropped in the wrong place (or left in the root by
+# an older script) is still found by the readers below and is re-filed the next
+# time the migration runs.
+#
+# Precedence is instance first, configuration second.  A look-ahead sweep run
+# on a sensitivity instance is a SENSITIVITY run: the axis is the experiment,
+# the LA tag only says how that cell was solved.  Only on the base grid does an
+# LA configuration tag mean "this run exists to compare configurations".
+
+# Base-grid instance stems: R<route>C<customers>T<window>_<seed>, optionally
+# carrying a "__<axis>" sensitivity suffix.
+_BASE_INSTANCE_RE = re.compile(
+    r"^R(?:short|medium|long)C(?:few|medium|many)T(?:tight|medium|large|none)_\d+$"
+)
+
+# Suffixes an artefact name may carry on top of its run_id / instance stem.
+_ARTEFACT_EXTS     = (".json", ".txt", ".log", ".png", ".pdf", ".pptx", ".csv")
+_ARTEFACT_SUFFIXES = ("_gurobi", "_scenarios")
+
+
+def instance_bucket(instance: str | None) -> str | None:
+    """Bucket implied by an INSTANCE stem alone, or None if unrecognised."""
+    stem = os.path.basename(str(instance or "")).removesuffix(".json")
+    if not stem:
+        return None
+    if stem.startswith("usecase"):
+        return USECASE
+    core, sep, _axis = stem.partition("__")
+    if not _BASE_INSTANCE_RE.match(core):
+        return None                       # ad-hoc / benchmark name: leave at root
+    return SENSITIVITY if sep else BASECASE
+
+
+def bucket_for(instance: str | None, algo: str | None = None,
+               variant: str | None = None) -> str | None:
+    """Bucket for a run, from its instance and its method configuration.
+
+    ``variant`` is the raw stored tag, not ``effective_variant``'s output: the
+    routing has to work at WRITE time, before a run has a solve_mode to key on.
+    Both spellings of the standard look-ahead (untagged and MIPTAIL) are base
+    case; every other LA tag is a configuration sweep.
+    """
+    b = instance_bucket(instance)
+    if (b == BASECASE and (algo or "").upper() == "LA"
+            and variant not in (None, "", LA_STD_VARIANT)):
+        return LACONFIG
+    return b
+
+
+def bucket_of_run_id(run_id: str | None) -> str | None:
+    """Bucket for a run_id (``<inst>_<ALGO>[_<VAR>]_<ts>[_<idx>]``)."""
+    d = parse_run_id(run_id or "")
+    return bucket_for(d["instance"], d["algo"], d["variant"]) if d else None
+
+
+def bucket_of_artefact(name: str) -> str | None:
+    """Bucket for any solutions/ or logs/ FILE NAME.
+
+    Handles every shape that lives in those trees::
+
+        <run_id>.json / .txt          a run
+        <run_id>_gurobi.log           its solver log
+        <run_id>_scenarios.json       its realised scenarios
+        oracle_<inst>.json            the shared per-instance oracle cache
+        oracle_<inst>_gurobi.log      and its bound log
+        oracle_trace_<inst>.log       a bound-trace re-solve
+
+    The oracle cache is keyed by instance only — one oracle serves every method
+    on that instance — so it is filed by the INSTANCE's bucket.  An LAconfig run
+    therefore finds its oracle in basecase/, which is why every reader searches
+    all buckets rather than assuming its own.
+    """
+    stem = os.path.basename(str(name or ""))
+    for ext in _ARTEFACT_EXTS:
+        if stem.endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    if not stem:
+        return None
+    if stem.startswith("oracle_trace_"):
+        return instance_bucket(stem[len("oracle_trace_"):])
+    for sfx in _ARTEFACT_SUFFIXES:
+        if stem.endswith(sfx):
+            stem = stem[: -len(sfx)]
+    if stem.startswith("oracle_"):
+        return instance_bucket(stem[len("oracle_"):])
+    return bucket_of_run_id(stem)
+
+
+# Figure names are not run_ids — they are named after the SECTION they serve —
+# so they need their own table.  Longest matching prefix wins, and a name that
+# matches nothing falls through to bucket_of_artefact, which catches the per-run
+# diagnostic PNGs (``<run_id>.png``).  Concept and framework figures match
+# neither and stay at the figures/ root: they belong to no experiment.
+_FIGURE_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("paper_",                 BASECASE),
+    ("additional_la_",         LACONFIG),
+    ("additional_sens_",       SENSITIVITY),
+    ("additional_diesel_",     SENSITIVITY),
+    ("additional_grid_",       SENSITIVITY),
+    ("diesel_vs_ev_",          SENSITIVITY),
+    ("check_diesel_timeline_", SENSITIVITY),
+    ("check_power_timeline_",  SENSITIVITY),
+    ("real_route_",            USECASE),
+)
+
+
+def bucket_of_figure(name: str) -> str | None:
+    """Bucket for a figure FILE NAME (or bare stem)."""
+    stem = os.path.basename(str(name or ""))
+    hit = max((p for p, _b in _FIGURE_PREFIXES if stem.startswith(p)),
+              key=len, default=None)
+    if hit is not None:
+        return dict(_FIGURE_PREFIXES)[hit]
+    return bucket_of_artefact(stem)
+
+
+# ── write-side resolvers ─────────────────────────────────────────────────────
+# Every writer goes through these instead of paths.solutions(name), so that the
+# bucket is decided in exactly one place.  They create the directory, so no
+# caller has to.
+
+def _out(base: Path, name: str, bucket: str | None) -> str:
+    d = base / bucket if bucket in BUCKETS else base
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / os.path.basename(name))
+
+
+def solution_out(name: str, bucket: str | None = None) -> str:
+    """Path to WRITE solutions/<bucket>/<name>."""
+    return _out(SOLUTIONS, name, bucket or bucket_of_artefact(name))
+
+
+def log_out(name: str, bucket: str | None = None) -> str:
+    """Path to WRITE logs/<bucket>/<name>."""
+    return _out(LOGS, name, bucket or bucket_of_artefact(name))
+
+
+def figure_out(name: str, bucket: str | None = None) -> str:
+    """Path to WRITE figures/<bucket>/<name>."""
+    return _out(FIGURES, name, bucket or bucket_of_figure(name))
+
+
+# ── read-side resolvers ──────────────────────────────────────────────────────
+# Readers address artefacts by NAME and must not care where they sit.  The tree
+# root is searched too, so an unbucketed leftover is still found.
+
+def _search_dirs(base: Path) -> list[str]:
+    return [str(base)] + [str(base / b) for b in BUCKETS]
+
+
+def _find(base: Path, name: str) -> str | None:
+    name = os.path.basename(str(name))
+    # Try the derived bucket first, so the common case is a single stat call.
+    guess = bucket_of_figure(name) if base == FIGURES else bucket_of_artefact(name)
+    order = ([str(base / guess)] if guess in BUCKETS else []) + _search_dirs(base)
+    seen: set[str] = set()
+    for d in order:
+        if d in seen:
+            continue
+        seen.add(d)
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _multi_glob(base: Path, pattern: str) -> list[str]:
+    """Glob `pattern` at the tree root AND inside every bucket."""
+    import glob as _glob
+    out: list[str] = []
+    for d in _search_dirs(base):
+        out.extend(_glob.glob(os.path.join(d, pattern)))
+    return sorted(out)
+
+
+def _scan_tree(base: Path) -> list[tuple[str, str]]:
+    """-> [(basename, full path)] over the tree root and every bucket.
+
+    Where a name exists in more than one place the BUCKETED copy wins; the root
+    is only a fallback for artefacts that were never filed.
+    """
+    found: dict[str, str] = {}
+    for d in _search_dirs(base):          # root first, buckets overwrite it
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    if e.is_file():
+                        found[e.name] = e.path
+        except OSError:
+            continue
+    return sorted(found.items())
+
+
+def find_solution(name: str) -> str | None:
+    """Existing solutions/**/<name>, or None."""
+    return _find(SOLUTIONS, name)
+
+
+def find_log(name: str) -> str | None:
+    """Existing logs/**/<name>, or None."""
+    return _find(LOGS, name)
+
+
+def solution_path(name: str) -> str:
+    """Where <name> IS, or — if it does not exist yet — where it would go."""
+    return find_solution(name) or solution_out(name)
+
+
+def log_path(name: str) -> str:
+    """Where <name> IS, or — if it does not exist yet — where it would go."""
+    return find_log(name) or log_out(name)
+
+
+def glob_solutions(pattern: str) -> list[str]:
+    """Glob a pattern across solutions/ and all of its buckets."""
+    return _multi_glob(SOLUTIONS, pattern)
+
+
+def glob_logs(pattern: str) -> list[str]:
+    """Glob a pattern across logs/ and all of its buckets."""
+    return _multi_glob(LOGS, pattern)
+
+
+def expand_logs(spec: str) -> list[str]:
+    """Resolve a comma-separated --glob spec against the bucketed logs/ tree.
+
+    A pattern with no directory part ("oracle_*_gurobi.log") is a NAME pattern
+    and is searched across logs/ and all of its buckets.  One that carries a
+    directory ("logs/basecase/oracle_R*.log", an absolute path) is a location
+    the caller chose and is used verbatim.  That split is what lets the CLI
+    defaults stay readable while a user can still point the tool anywhere.
+    """
+    import glob as _glob
+    out: list[str] = []
+    for part in str(spec or "").split(","):
+        pat = part.strip()
+        if not pat:
+            continue
+        out.extend(sorted(_glob.glob(pat)) if os.path.dirname(pat)
+                   else glob_logs(pat))
+    return out
+
+
+def glob_figures(pattern: str) -> list[str]:
+    """Glob a pattern across figures/ and all of its buckets."""
+    return _multi_glob(FIGURES, pattern)
+
+
+def scan_solutions() -> list[tuple[str, str]]:
+    """[(basename, path)] for every file under solutions/ and its buckets."""
+    return _scan_tree(SOLUTIONS)
+
+
+def scan_logs() -> list[tuple[str, str]]:
+    """[(basename, path)] for every file under logs/ and its buckets."""
+    return _scan_tree(LOGS)
+
+
+def find_in(directory: str | os.PathLike, name: str) -> str | None:
+    """find_solution for an arbitrary bucketed tree — see in_tree."""
+    return _find(Path(directory), name)
+
+
+def out_in(directory: str | os.PathLike, name: str,
+           bucket: str | None = None) -> str:
+    """solution_out for an arbitrary bucketed tree — see in_tree."""
+    return _out(Path(directory), name, bucket or bucket_of_artefact(name))
+
+
+def path_in(directory: str | os.PathLike, name: str) -> str:
+    """Where <name> IS in that tree, or where it would go — see in_tree."""
+    return find_in(directory, name) or out_in(directory, name)
+
+
+def in_tree(directory: str | os.PathLike, pattern: str) -> list[str]:
+    """Glob inside an arbitrary solutions-shaped directory, buckets included.
+
+    Several tools take a --dir so they can be pointed at ML/solutions or at an
+    archived copy.  Those trees are bucketed the same way, so the search has to
+    be too; this is the directory-argument form of glob_solutions.
+    """
+    return _multi_glob(Path(directory), pattern)
+
+
+def scan_tree(directory: str | os.PathLike) -> list[tuple[str, str]]:
+    """[(basename, path)] over an arbitrary bucketed tree — see in_tree."""
+    return _scan_tree(Path(directory))
