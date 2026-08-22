@@ -18,30 +18,40 @@ because it occasionally loses 10 h.  We print median, IQR and max.
 Usage:  python ML/code/compare_runs.py [--split val]
 """
 from __future__ import annotations
-import argparse, collections, glob, json, os, re, sys
+import argparse, collections, json, os, re, sys
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "ML", "code"))
 from extract_dataset import split_of
 
+sys.path.insert(0, ROOT)
+from src import paths as _paths                                  # noqa: E402
+
 SOLS, REF = os.path.join(ROOT, "ML", "solutions"), os.path.join(ROOT, "solutions")
 
 
-def _latest(pattern):
-    fs = [f for f in glob.glob(pattern) if "nosplit" not in f and "LOCAL" not in f]
-    return sorted(fs)[-1] if fs else None
+def _latest(directory, pattern):
+    """Newest match for `pattern` in a bucketed solutions tree.
+
+    Both trees are split into experiment buckets, so the search goes through
+    paths.in_tree and the ranking is on the BASENAME — a run_id ends in its
+    timestamp, so that is chronological order wherever the file sits.
+    """
+    fs = [f for f in _paths.in_tree(directory, pattern)
+          if "nosplit" not in f and "LOCAL" not in f]
+    return sorted(fs, key=os.path.basename)[-1] if fs else None
 
 
 def baseline(inst, tag):
-    f = _latest(os.path.join(REF, f"{inst}_{tag}*.json"))
+    f = _latest(REF, f"{inst}_{tag}*.json")
     return json.load(open(f)) if f else None
 
 
 def main(a):
     # group student runs: method -> instance -> latest run
     groups: dict[str, dict[str, dict]] = collections.defaultdict(dict)
-    for f in sorted(glob.glob(os.path.join(SOLS, "*.json"))):
+    for f in sorted(_paths.in_tree(SOLS, "*.json"), key=os.path.basename):
         d = json.load(open(f))
         m = re.match(r".*_(STUDENT[A-Za-z0-9]*)_S\d", os.path.basename(f))
         if not m:

@@ -43,6 +43,8 @@ REF_SOLS = os.path.join(ROOT, "solutions")     # baselines (read-only)
 FIGS     = os.path.join(ML, "figures")
 DATA     = os.path.join(ML, "data")
 
+from src import paths as _paths                  # bucketed solutions trees
+
 try:                                            # match the journal figures
     from src.plot import paper_style            # noqa: F401
     paper_style.apply() if hasattr(paper_style, "apply") else None
@@ -57,10 +59,16 @@ ROUTE_ORDER = ["short", "medium", "long"]
 
 
 # ── data loading ─────────────────────────────────────────────────────────────
-def _latest(pattern: str):
-    fs = [f for f in glob.glob(pattern)
+def _latest(directory: str, pattern: str):
+    """Newest match for `pattern` in a bucketed solutions tree.
+
+    Both trees are split into experiment buckets, so the search goes through
+    paths.in_tree and the ranking is on the BASENAME — a run_id ends in its
+    timestamp, so that is chronological order wherever the file sits.
+    """
+    fs = [f for f in _paths.in_tree(directory, pattern)
           if "nosplit" not in f and "LOCAL" not in f]
-    return sorted(fs)[-1] if fs else None
+    return sorted(fs, key=os.path.basename)[-1] if fs else None
 
 
 def collect_runs(method: str | None = None) -> list[dict]:
@@ -74,7 +82,7 @@ def collect_runs(method: str | None = None) -> list[dict]:
     pipeline: a re-run updates a result, it does not add a second sample.
     """
     by_method: dict[str, dict[str, str]] = collections.defaultdict(dict)
-    for f in sorted(glob.glob(os.path.join(SOLS, "*.json"))):
+    for f in sorted(_paths.in_tree(SOLS, "*.json"), key=os.path.basename):
         mm = re.match(r".*_(STUDENT[A-Za-z0-9]*)_S\d", os.path.basename(f))
         if mm:
             by_method[mm.group(1)][json.load(open(f))["instance"]] = f
@@ -102,7 +110,7 @@ def collect_runs(method: str | None = None) -> list[dict]:
                    student_viol=m.get("violations_by_type") or {})
         for tag, key in (("LA_MIPTAIL", "teacher"), ("LA_2026", "la_lp"),
                          ("GREEDY", "greedy")):
-            g = _latest(os.path.join(REF_SOLS, f"{inst}_{tag}*.json"))
+            g = _latest(REF_SOLS, f"{inst}_{tag}*.json")
             if g:
                 t = json.load(open(g))
                 rec[key] = t.get("duration_h")
@@ -269,8 +277,8 @@ def fig_schedule(rows, instance: str | None = None):
         med = np.median([d for _, d in deltas])
         pick = min(deltas, key=lambda kv: abs(kv[1] - med))[0]
     inst = pick["instance"]
-    stu_f = pick.get("_file") or _latest(os.path.join(SOLS, f"{inst}_*STUDENT*.json"))
-    tea_f = _latest(os.path.join(REF_SOLS, f"{inst}_LA_MIPTAIL*.json"))
+    stu_f = pick.get("_file") or _latest(SOLS, f"{inst}_*STUDENT*.json")
+    tea_f = _latest(REF_SOLS, f"{inst}_LA_MIPTAIL*.json")
     runs = [("STUDENT", json.load(open(stu_f))), ("LA-MIP (teacher)",
                                                   json.load(open(tea_f)))]
     raw = json.load(open(os.path.join(ROOT, "instances", f"{inst}.json")))["instance"]
