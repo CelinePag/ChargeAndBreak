@@ -241,11 +241,53 @@ class BEHDV:
         # retroactively cause a violation that no stop-level action can
         # repair.  The simulator RECORDS these (rather than raising) and the
         # run is marked infeasible for the violating method.
+        #
+        # HALT SEMANTICS (2026-08-22).  A violation now ENDS the run at the
+        # stop it was detected at: the route is not continued, and no metric
+        # is reported past that point.  Previously the simulator absorbed the
+        # violation — a stranded battery was clipped back up to Emin and the
+        # truck drove on — so an infeasible run still produced a full route and
+        # a duration, and that duration was optimistic by exactly the energy it
+        # had been given for free.  Reporting then had to remember to exclude
+        # those runs everywhere, and where it forgot, a stranding-prone cell
+        # could post a BETTER median than a safe one.
+        #
+        # The vehicle cannot break the caller's loop, so it raises a flag and
+        # every run loop checks `is_halted` after advance().
         self.violations    : list[dict]  = []   # {type, stop, amount, detail}
+        self.halted_at     : int | None  = None  # stop the run ended at
+        self.halt_reason   : str | None  = None  # violation type that ended it
         # TW2/SIM2: out-of-window service starts.  No waiting is ever
         # inserted (SIM1): service starts at arrival; an early or late
         # arrival records delta = 1 with the miss direction and magnitude.
         self.tw_misses     : dict[int, dict] = {}  # {stop: {type, amount}}
+
+    # ── Halt ─────────────────────────────────────────────────────────────────
+
+    @property
+    def is_halted(self) -> bool:
+        """True once a violation has ended the run."""
+        return self.halted_at is not None
+
+    def halt(self, stop: int, reason: str, detail: str = "") -> None:
+        """End the run at `stop`.  The FIRST call wins.
+
+        Recording the first reason rather than the last matters: once the run
+        is over, anything that follows is bookkeeping inside the same
+        advance() call, not a second independent failure.
+        """
+        if self.halted_at is None:
+            self.halted_at   = int(stop)
+            self.halt_reason = reason
+            if detail:
+                self.halt_detail = detail
+
+    def _halt_if_violated(self, n_before: int, stop: int) -> None:
+        """Halt when advance() recorded a violation during this stop."""
+        if len(self.violations) > n_before and self.halted_at is None:
+            v = self.violations[n_before]
+            self.halt(v.get("stop", stop), v.get("type", "violation"),
+                      v.get("detail", ""))
 
     # ── Current-state scalar properties ──────────────────────────────────────
 
@@ -399,6 +441,9 @@ class BEHDV:
         """
         full_data = self._fd
         stop      = self.stop
+        # Violations recorded from here on belong to THIS stop, and any of them
+        # ends the run (see the halt-semantics note in __init__).
+        _n_viol_before = len(self.violations)
         N         = full_data["N"]
         C_set     = set(full_data["C"])
         K_set     = set(full_data["K"])
@@ -536,6 +581,7 @@ class BEHDV:
         if stop >= N:
             # Already at destination — record and return without advancing
             self.D_actual_list.append(0.0)
+            self._halt_if_violated(_n_viol_before, stop)
             return td, 0.0
 
         D_act = float(D_next)
@@ -551,9 +597,12 @@ class BEHDV:
 
         e_new_raw = e_dep - E_act
         if e_new_raw < full_data["Emin"] - 1e-3:
-            # S2: stranding event — recorded, run marked infeasible; the SOC
-            # is clipped to Emin so the simulation can continue and the full
-            # trajectory / metrics remain observable.
+            # S2: stranding event — the run is infeasible and ENDS here (see
+            # the halt-semantics note in __init__).  The recorded SOC is still
+            # floored at Emin, but that is now only to keep the stored
+            # trajectory well-formed: no further leg is simulated, so the floor
+            # can no longer hand the truck free range the way it used to.  The
+            # violation's `amount` carries how far below Emin it actually went.
             self.violations.append(dict(
                 type="stranding", stop=stop + 1,
                 amount=full_data["Emin"] - e_new_raw,
@@ -705,6 +754,11 @@ class BEHDV:
         self.rho2_used_history.append(rho2_new)
         self.ext_shift_used_history.append(ext_new)
         self.sw_week_history.append(sw_week_new)
+
+        # Any violation recorded during this stop ends the run.  Checked once,
+        # at the end, so the state append above still happens and the halting
+        # stop is fully observable in the stored trajectory.
+        self._halt_if_violated(_n_viol_before, stop)
 
 
     # ── Dunder ────────────────────────────────────────────────────────────────

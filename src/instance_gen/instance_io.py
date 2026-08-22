@@ -89,7 +89,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import random
 import sys
 import time
 from datetime import datetime
@@ -100,7 +99,9 @@ from src.instance_gen.instances import instance_realistic
 from src.simulation.scenarios import _ecr
 from src.settings  import (V_NOM, sample_multipliers,
                        XI_MIN, XI_MAX, BETA_TW,
-                       TRAVEL_TIME_CV_TARGET, TRAVEL_TIME_AR1_RHO)
+                       TRAVEL_TIME_CV_TARGET, TRAVEL_TIME_AR1_RHO,
+                       COMBOS_CLASSES, ROUTE_TAG, CUST_TAG, WINDOW_TAG,
+                       WINDOW_HALF_WIDTH, DEADLINE_KAPPA, DEADLINE_DMIN)
 from src.methods.greedy    import compute_nominal_arrivals
 from src import paths as _paths
 
@@ -108,8 +109,8 @@ from src import paths as _paths
 
 def instance_filename(route_class: str, customers_class: str, window_class: str, seed: int) -> str:
     """Return the filename for one instance file."""
-    return (f"{_ROUTE_TAG[route_class]}{_CUST_TAG[customers_class]}"
-            f"{_WINDOW_TAG[window_class]}_{seed}.json")
+    return (f"{ROUTE_TAG[route_class]}{CUST_TAG[customers_class]}"
+            f"{WINDOW_TAG[window_class]}_{seed}.json")
 
 
 def _geometry_seed(route_class: str, customers_class: str,
@@ -123,8 +124,7 @@ def _geometry_seed(route_class: str, customers_class: str,
     M9-rejection regeneration.  SHA-256-based so the axes vary independently
     with no structured collisions; the filename still encodes the requested
     ``seed``, and the derived value is recorded in the JSON meta for
-    traceability.  Returns a 32-bit int accepted by both random.seed and
-    np.random.default_rng.
+    traceability.  Returns a 32-bit int accepted by np.random.default_rng.
     """
     key = f"{route_class}|{customers_class}|{window_class}|{seed}|{attempt}"
     return int.from_bytes(hashlib.sha256(key.encode()).digest()[:4], "big")
@@ -199,7 +199,7 @@ def generate_time_windows(full_data: dict, window_class: str,
     time limit; greedy fallback flagged via the returned meta).  Each customer
     draws its OWN half-width independently,
 
-        Delta_c ~ Uniform(lo, hi),   (lo, hi) = _WINDOW_HALF_WIDTH_RANGE[class]
+        Delta_c ~ Uniform(lo, hi),   (lo, hi) = WINDOW_HALF_WIDTH[class]
 
     so customers on the same route generally have DIFFERENT window widths.
 
@@ -213,7 +213,7 @@ def generate_time_windows(full_data: dict, window_class: str,
     and "_deadline" — for the JSON meta.
     """
     T_START  = full_data["T_START"]
-    lo, hi   = _WINDOW_HALF_WIDTH_RANGE[window_class]
+    lo, hi   = WINDOW_HALF_WIDTH[window_class]
 
     t_nominal, source = _nominal_milp_arrivals(
         full_data, solver_time_limit=solver_time_limit, mip_gap=mip_gap)
@@ -229,8 +229,8 @@ def generate_time_windows(full_data: dict, window_class: str,
 
     # Destination deadline (R6)
     t_N = t_nominal[full_data["N"]]
-    full_data["T_dead"] = t_N + max(_DEADLINE_DMIN,
-                                    _DEADLINE_KAPPA * (t_N - T_START))
+    full_data["T_dead"] = t_N + max(DEADLINE_DMIN,
+                                    DEADLINE_KAPPA * (t_N - T_START))
 
     half_widths["_source"]   = source
     half_widths["_deadline"] = full_data["T_dead"]
@@ -291,11 +291,12 @@ def generate_instance_file(route_class: str,
 
     The (route_class, customers_class, window_class, seed) tuple controls
     everything via a single derived geometry seed (see _geometry_seed):
-      - random.seed(geo_seed)  fixes the route geometry (via instance_realistic)
-      - numpy RNG seeded from geo_seed fixes CS queue-time draws (via
-        instance_realistic -> make_data), the uncertainty realisation
-        (D_real, E_real), and (when window_class != "none") the per-customer
-        time-window half-widths.
+      - a single numpy Generator seeded from geo_seed drives EVERYTHING, in
+        this order: the route geometry and the CS queue-time draws (via
+        instance_realistic), then the uncertainty realisation (D_real,
+        E_real), then — when window_class != "none" — the per-customer
+        time-window half-widths.  One stream, so the draw ORDER is part of the
+        contract: inserting a draw anywhere shifts every instance after it.
 
     Because window_class is folded into geo_seed, each window class is an
     INDEPENDENT random instance: the four window classes of a given seed have
@@ -337,7 +338,6 @@ def generate_instance_file(route_class: str,
     for attempt in range(max_attempts):
         geo_seed = _geometry_seed(route_class, customers_class,
                                   window_class, seed, attempt)
-        random.seed(geo_seed)
         rng = np.random.default_rng(geo_seed)
         try:
             full_data = instance_realistic(
@@ -473,7 +473,7 @@ def generate_all(output_dir: str  = _paths.instances(),
     list[str] -- absolute paths of all written files
     """
     if combos is None:
-        combos = _COMBOS
+        combos = COMBOS_CLASSES
 
     paths = []
     t0    = time.perf_counter()
@@ -482,7 +482,7 @@ def generate_all(output_dir: str  = _paths.instances(),
 
     for rc, cc, wc in combos:
         if verbose:
-            print(f"\n  [{_ROUTE_TAG[rc]}{_CUST_TAG[cc]}{_WINDOW_TAG[wc]}]"
+            print(f"\n  [{ROUTE_TAG[rc]}{CUST_TAG[cc]}{WINDOW_TAG[wc]}]"
                   f"  seeds {first_seed}..{first_seed + n_seeds - 1}")
         for seed in range(first_seed, first_seed + n_seeds):
             p = generate_instance_file(
@@ -617,7 +617,7 @@ if __name__ == "__main__":
     print(f"  output_dir  = {output_dir}")
     print(f"  n_seeds     = {n_seeds}  (seeds {first_seed}..{first_seed+n_seeds-1})")
     print(f"  cv          = {cv:.2f}  (xi in [{XI_MIN:.3f}, {XI_MAX:.3f}])")
-    print(f"  total files = {len(_COMBOS) * n_seeds}")
+    print(f"  total files = {len(COMBOS_CLASSES) * n_seeds}")
     print("=" * 60)
 
     generate_all(

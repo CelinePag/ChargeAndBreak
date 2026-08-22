@@ -603,6 +603,14 @@ def run_greedy(full_data: dict,
         )
         tracker.record_realisation(stop, D_act, E_actual=E_act)
 
+        # A violation ends the run at this stop (BEHDV halt semantics).  Greedy
+        # has no look-ahead and so no "no feasible action" case; what halts it
+        # is a stranding or an HoS breach revealed by the leg just driven.
+        if vehicle.is_halted:
+            _p(f"  [!] {vehicle.halt_reason.upper()} at stop "
+               f"{vehicle.halted_at} — run halted, route not completed")
+            break
+
         soc_dep = (_energy_after_charging(vehicle.e_arr_history[-2],
                                           dur["tauc"], full_data)
                    if y else vehicle.e_arr_history[-2])

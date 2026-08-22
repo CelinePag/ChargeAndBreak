@@ -18,11 +18,21 @@ Outputs (figures -> figures/, tables -> tex/tables/, csv -> data_output/)
   figures/additional_la_config.png|pdf       §8.3 look-ahead configuration
   figures/additional_la_horizon.png|pdf      §8.3 horizon ladder, routes pooled
   figures/additional_la_scenarios.png|pdf    §8.3 scenario ladder, routes pooled
-  figures/additional_la_frontier.png|pdf     §8.3 cost/quality frontier
   figures/additional_la_all.png|pdf          §8.3 whole LA study on one plane
                                              (horizon + scenarios + policy)
-  tex/tables/additional_la.tex               (both read
-  additional_analysis.py's data_output/additional_la_stats.csv)
+  tex/tables/additional_la.tex               (all read
+  tex/tables/additional_la_policy[_pen].tex   additional_analysis.py's
+  tex/tables/additional_la_local.tex          data_output/additional_la_stats.csv)
+
+The LA study is four figures and four tables.  Dropped 2026-08-22 on request:
+the cost/quality FRONTIER (its content is the la_all plane), the two POLICY bar
+figures (dur and pen — the tables carry them), and the LOCAL plane (five runs on
+axes built for twelve cells).  The policy and LOCAL TABLES are unchanged.
+
+Every LA cost axis is decision time per stop = run wall clock / number of
+stops, uncorrected for --jobs or n_workers (la-report's t_per_stop_s_median).
+LA figures and tables are quoted over seeds 1-10 only; la-report prints what is
+missing inside that window and writes data_output/additional_la_coverage.csv.
   tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
   data_output/additional_vss_stats.csv             results_vss/ fills up)
 
@@ -2087,6 +2097,76 @@ def _log_ticks_plain(axis) -> None:
     axis.set_minor_formatter(ticker.NullFormatter())
 
 
+# Route scope of the LA figures.  All three classes — but only because
+# la-report now reports every cell on a BALANCED PANEL (the instances carrying
+# an OK run in EVERY cell), which is what makes pooling them legitimate again.
+#
+# Without that panel it was not.  A pooled cell's median is a median over
+# whatever route mix the cell happens to have, and the mixes were not equal:
+# S25H48/MIP was 53% short-route runs and 5% long, so its pooled cost landed
+# inside the short group at 27 s/stop while the balanced base cell landed at
+# 72 — which reads as "a longer horizon is cheaper", the opposite of the truth
+# (455 s/stop on long routes alone).  On the panel every cell holds the same
+# instances, so a difference between cells cannot be a difference in
+# population.  Pass --panel all to la-report to go back to the unbalanced
+# reading; these figures will then be comparing route mixes again.
+# Short routes are left out (2026-08-22, on request).  A short route is about
+# one duty cycle long, so the look-ahead has almost nothing to look ahead AT
+# and the configuration axes flatten out there; the classes that carry the
+# question are medium and long.  Dropping the class also halves the cost range
+# the figures have to span, which is what lets the cost axes stay linear.
+# The TABLE still carries all three classes.
+_LA_FIG_ROUTES = ["medium", "long"]
+
+
+# The two look-ahead TAIL SOLVERS, defined once and used by every LA figure.
+# (lptail, label, dash, marker).  Same policy, same ladder; only the subproblem
+# beyond the horizon differs, so they share a hue and separate on dash+marker.
+_LA_TAIL_SERIES = (
+    (False, "MILP subpr.", "-",  "o"),
+    (True,  "LP subpr.",   "--", "s"),
+)
+
+
+def _la_tail_color(lptail: bool):
+    """Hue for a tail solver.  LA's own colour, lightened for the LP tail."""
+    return (ps.tint(ps.METHOD_COLOR["LA"], 0.45) if lptail
+            else ps.METHOD_COLOR["LA"])
+
+
+# Axis labels shared by the configuration figure and the ladder figures, so the
+# same axis is never named two ways across the section.
+_LBL_HORIZON      = r"Look-ahead horizon $L$ (h)"
+_LBL_SCEN         = r"Scenarios $|\Xi|$"
+_LBL_HORIZON_HELD = _LBL_HORIZON + r"   [$|\Xi| = 25$]"
+_LBL_SCEN_HELD    = _LBL_SCEN + r"   [$L = 24$ h]"
+_LBL_GAP          = "Gap to hindsight optimum (%)"
+_LBL_COST         = "Decision time per stop (s)"
+
+# When a cell is too thin to read as an estimate.  ABSOLUTE, and the same
+# number in every figure of the section.  It used to be a relative rule (below
+# 60% of the best-covered cell), which made sense while the cells held
+# different instances — but on the balanced panel every cell of a given facet
+# holds the SAME instances, so a relative rule either never fires or fires on
+# all of them at once, depending on which rows happen to enter the reference.
+# What is still worth flagging is a facet that is small in absolute terms: the
+# long route class carries 3 of the panel's 70 instances.
+_LA_THIN_N = 5
+
+
+def _thin_note(seen: dict) -> str:
+    """'  Hollow markers: long route, n = 3.' — or nothing when all cells are
+    full.  One sentence for the whole figure: with the route class as the
+    facet, every cell of a thin class carries the same n, so labelling each
+    point restated one fact once per series."""
+    if not seen:
+        return ""
+    parts = ", ".join(f"{ps.ROUTE_LBL[r].lower()} n = {n:g}"
+                      for r, n in sorted(seen.items(),
+                                         key=lambda kv: ps.ROUTE_ORDER.index(kv[0])))
+    return f"  Hollow markers mark a thin cell ({parts})."
+
+
 def _la_stats(name: str = "additional_la_stats.csv") -> dict:
     """data_output/<name> -> {(cfg, route, tw): row}.
 
@@ -2151,18 +2231,31 @@ def _la_cell(stats, n_scen, horizon, route, tw, col):
 
 
 def section_la():
+    """8.3 - the two configuration ladders, quality over cost, plus the risk
+    strip underneath.
+
+    Draws the SAME ten cells as `la_ladders` and `la_all`: five configurations
+    crossed with the two look-ahead tail solvers (_LA_TAIL_SERIES).  It used to
+    draw only the five MIP-tail ones while the other two figures of the section
+    drew ten and twelve, so a configuration could appear in one figure and not
+    in another.
+
+    Route classes are POOLED, and the series dimension that frees up is spent
+    on the tail solver instead.  Pooling is legitimate now and was not before:
+    la-report reports every cell on a balanced panel, so the pooled cells hold
+    the same instances (see _LA_FIG_ROUTES).  The per-route breakdown lives in
+    `la_all` and in the table, which read the same rows at a finer grain.
+    """
     print("== Sec 8.3 look-ahead configuration ==")
     stats = _la_stats()
-    routes = ps.ROUTE_ORDER
-    tws    = ["none", "tight"]
+    routes = _LA_FIG_ROUTES
 
-    # ── figure 1: quality and cost on both axes ──────────────────────────────
     # Columns are the two axes of the one-at-a-time design, rows are the two
     # things a configuration trades off.  Sharing the y-axis WITHIN a row is
     # the whole point: the reader compares the shape of the horizon response
     # against the shape of the scenario response, and any difference in slope
     # is then real rather than an artefact of two independent scales.
-    # A third, short row carries the infeasibility heat strip — the same device
+    # A third, short row carries the infeasibility heat strip - the same device
     # the base-case box figure puts under each panel.  It is not optional
     # decoration: a configuration that strands the truck drops those runs from
     # the gap median above, so a cell can look BETTER precisely because it
@@ -2182,39 +2275,56 @@ def section_la():
     for ax in (ax_sq, ax_sc):
         ax.tick_params(labelleft=False)
 
+    def _cell(v, is_h, lptail, route, col):
+        """One rung of one ladder, for one tail solver and one route class.
+
+        Window classes are POOLED into the route's 'all' row — the same row
+        `la_all` reads — so a value shown here is the same number that figure
+        shows for the same cell.
+        """
+        ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
+        return _la_num(stats.get((_la_tail_cfg(ns, hh, lptail), route, "all")),
+                       col)
+
+    thin_seen = {}          # route class -> its run count, when below the floor
     for ax_q, ax_c, ladder, is_h in ((ax_hq, ax_hc, _LA_HORIZONS, True),
                                      (ax_sq, ax_sc, _LA_SCENARIOS, False)):
         drew = False
         for route in routes:
-            for tw in tws:
-                xs, gq, gc = [], [], []
+            col = _LA_ROUTE_SHADE[route]
+            mk  = _LA_ROUTE_MARK[route]
+            for lptail, _lbl, sty, _m in _LA_TAIL_SERIES:
+                xs, gq, gc, nn = [], [], [], []
                 for v in ladder:
-                    ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v),
-                                                                   _LA_BASE[1])
-                    q = _la_cell(stats, ns, hh, route, tw, "gap_pen_median_pct")
-                    c = _la_cell(stats, ns, hh, route, tw,
-                                 "decision_mean_s_median")
+                    q = _cell(v, is_h, lptail, route, "gap_pen_median_pct")
+                    c = _cell(v, is_h, lptail, route, "t_per_stop_s_median")
                     if q is None and c is None:
                         continue
                     xs.append(v); gq.append(q); gc.append(c)
+                    nn.append(_cell(v, is_h, lptail, route, "n_runs"))
                 if not xs:
                     continue
                 drew = True
-                col = _LA_ROUTE_SHADE[route]
-                sty = _LA_TW_STYLE[tw]
-                mk  = _LA_ROUTE_MARK[route]
                 for ax, ys in ((ax_q, gq), (ax_c, gc)):
-                    pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
+                    pts = [(x, y, n) for x, y, n in zip(xs, ys, nn)
+                           if y is not None]
                     if not pts:
                         continue
                     ax.plot([p[0] for p in pts], [p[1] for p in pts],
                             sty, color=col, marker=mk, ms=3.8, lw=1.3,
                             mfc=col, mec=col)
+                    # Thin cells keep the marker OUTLINE and lose the fill.
+                    # How thin they are is stated once, in the footnote.
+                    for x, y, n in pts:
+                        if n and n < _LA_THIN_N:
+                            thin_seen[route] = n
+                            ax.plot(x, y, mk, ms=3.8, mfc="none", mec=col,
+                                    mew=1.0, zorder=4)
                     # The base cell is the reference the sweep is quoted
                     # against, so it is marked rather than left as one dot
                     # among three.
                     bx = _LA_BASE[1] if is_h else _LA_BASE[0]
-                    for x, y in pts:
+                    for x, y, _n in pts:
                         if x == bx:
                             ax.plot(x, y, mk, ms=7.5, mfc="none", mec=col,
                                     lw=0.9)
@@ -2225,10 +2335,9 @@ def section_la():
                         transform=ax.transAxes)
 
     # Both ladders are RATIO ladders (12/24/48, 10/25/50), so a log x-axis puts
-    # the rungs at equal distances and the tick set is exactly the rungs — no
+    # the rungs at equal distances and the tick set is exactly the rungs - no
     # auto-ticks between them, no minor ticks to imply a continuum that was
-    # never sampled.  (The HOS reference lines at 13 h / 24 h were dropped with
-    # their labels.)
+    # never sampled.
     for ax_st, ladder in ((st_h, _LA_HORIZONS), (st_s, _LA_SCENARIOS)):
         rungs = [float(v) for v in ladder]
         ax_st.set_xscale("log")     # sharex carries this up the whole column
@@ -2236,18 +2345,20 @@ def section_la():
         ax_st.xaxis.set_minor_locator(mticker.NullLocator())
         ax_st.set_xlim(min(rungs) / 1.22, max(rungs) * 1.22)
 
-    st_h.set_xlabel(r"Look-ahead horizon $L$ (h)   [$|\Xi| = 25$]")
-    st_s.set_xlabel(r"Scenarios $|\Xi|$   [$L = 24$ h]")
+    st_h.set_xlabel(_LBL_HORIZON_HELD)
+    st_s.set_xlabel(_LBL_SCEN_HELD)
     ax_hq.set_ylabel("Gap to hindsight\noptimum (%)")
     ax_hc.set_ylabel("Decision time\nper stop (s)")
 
     # Both response axes are LINEAR and evenly ticked.  The cost axis used to be
     # log so that equal ratios read as equal distances, but a scale whose grid
     # spacing changes at 10 s invites the reader to measure it as if it were
-    # linear and get the wrong slope; a uniform grid costs some resolution at the
-    # short-route end and lies about nothing.
-    # Grid: vertical rules at the ladder rungs (so a point can be traced to its
-    # configuration) plus major+minor horizontal rules on the response axes.
+    # linear and get the wrong slope; a uniform grid costs some resolution at
+    # the cheap end and lies about nothing.
+    # Both response rows are LINEAR and evenly ticked.  A log cost axis was
+    # tried and dropped: a scale whose grid spacing changes partway invites the
+    # reader to measure it as if it were linear and get the slope wrong, and
+    # with the short routes gone the range no longer forces the issue.
     for ax in axes.ravel():
         ax.yaxis.set_major_locator(
             mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
@@ -2257,49 +2368,51 @@ def section_la():
         ax.set_axisbelow(True)
         ax.tick_params(axis="y", which="minor", length=2)
         ax.tick_params(axis="x", which="minor", length=0)
+        # Headroom for the n= labels on thin cells: the steepest of them sits
+        # at the top of the cost panel, and without this its label would land
+        # outside the axes.
+        lo, hi = ax.get_ylim()
+        ax.set_ylim(lo, hi + 0.09 * (hi - lo))
 
-    # ── infeasibility heat strip ────────────────────────────────────────────
-    # Same traffic-light ramp as the base-case figure (Okabe-Ito bluish green ->
-    # yellow -> vermillion) and, as there, scaled to the WORST rate actually
-    # observed so the red end marks a real cell rather than a hypothetical 100%.
-    # Layout: one ROW per route class (top to bottom = short, medium, long, the
-    # legend's order) and, at each rung, one cell per window class — solid-line
-    # class ("none") left, dashed ("tight") right, keyed by the header letters.
+    # -- infeasibility heat strip --------------------------------------------
+    # Same traffic-light ramp as the base-case figure and, as there, scaled to
+    # the WORST rate actually observed so the red end marks a real cell rather
+    # than a hypothetical 100%.  One ROW per tail solver (the series dimension
+    # of the panels above) and, at each rung, one cell per window class:
+    # solid-line class ("none") left, dashed ("tight") right.
     from matplotlib.patches import Rectangle as _Rect
     _reds = _INFEAS_CMAP
 
-    def _infeas(ns, hh, route, tw):
-        n = _la_cell(stats, ns, hh, route, tw, "n_runs")
-        i = _la_cell(stats, ns, hh, route, tw, "n_infeasible")
+    def _infeas(v, is_h, lptail, route):
+        n = _cell(v, is_h, lptail, route, "n_runs")
+        i = _cell(v, is_h, lptail, route, "n_infeasible")
         return (i / n) if (n and i is not None) else None
 
-    def _coords(is_h, v):
-        return (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
-
-    fracs = [f for ax_st, ladder, is_h in ((st_h, _LA_HORIZONS, True),
-                                           (st_s, _LA_SCENARIOS, False))
-             for v in ladder for route in routes for tw in tws
-             for f in [_infeas(*_coords(is_h, v), route, tw)] if f]
+    fracs = [f for _ax, ladder, is_h in ((st_h, _LA_HORIZONS, True),
+                                         (st_s, _LA_SCENARIOS, False))
+             for v in ladder for lp, _l, _s, _m in _LA_TAIL_SERIES
+             for route in routes
+             for f in [_infeas(v, is_h, lp, route)] if f]
     fmax = max(fracs) if fracs else 1.0
 
     # Cells are sized in DEX because the x-axis is log: a fixed multiplicative
     # half-width keeps every group the same visual width at every rung.
     _HALF_DEX = 0.085
+    tails = list(_LA_TAIL_SERIES)
     for ax_st, ladder, is_h in ((st_h, _LA_HORIZONS, True),
                                 (st_s, _LA_SCENARIOS, False)):
         ax_st.set_ylim(0, len(routes))
         ax_st.set_yticks([])
         ax_st.tick_params(axis="x", length=0)
-        for s in ax_st.spines.values():
-            s.set_visible(False)
+        for sp in ax_st.spines.values():
+            sp.set_visible(False)
         for v in ladder:
-            ns, hh = _coords(is_h, v)
             for ri, route in enumerate(routes):
                 y0 = len(routes) - 1 - ri + 0.10      # short on top
-                for ti, tw in enumerate(tws):
-                    f = _infeas(ns, hh, route, tw)
+                for ti, (lptail, _l, _s, _m) in enumerate(tails):
+                    f = _infeas(v, is_h, lptail, route)
                     if f is None:
-                        continue                       # not run -> left blank
+                        continue                     # not run -> left blank
                     l0 = np.log10(float(v)) - _HALF_DEX + ti * _HALF_DEX
                     x0, x1 = 10 ** l0, 10 ** (l0 + _HALF_DEX)
                     ax_st.add_patch(_Rect(
@@ -2307,44 +2420,39 @@ def section_la():
                         facecolor=_reds(min(1.0, f / fmax)),
                         edgecolor="#8a8a8a", lw=0.35, zorder=3))
 
-    # Row key on the left panel only, in the route shades used by the lines.
-    # Initials, not words: they are keyed by the SHADE, which is the same one
-    # the lines above use, so "S/M/L" decodes off the legend at a glance and the
-    # strip keeps its narrow left margin.
+    # Row key on the left panel only, in the route shades the lines use.
     for ri, route in enumerate(routes):
         st_h.annotate(ps.ROUTE_LBL[route][0], xy=(0, len(routes) - 0.5 - ri),
                       xycoords=("axes fraction", "data"),
                       xytext=(-3, 0), textcoords="offset points",
                       ha="right", va="center", fontsize=5.6,
                       color=_LA_ROUTE_SHADE[route])
-    # Which half of a pair is which window class, stated once.
-    for ti, tw in enumerate(tws):
+    # Which half of a pair is which tail solver, stated once.
+    for ti, (_lp, lbl, _s, _m) in enumerate(tails):
         l0 = np.log10(float(_LA_HORIZONS[0])) - _HALF_DEX + (ti + 0.5) * _HALF_DEX
-        st_h.annotate(ps.TW_LBL[tw][0], xy=(10 ** l0, len(routes)),
+        st_h.annotate(lbl[0], xy=(10 ** l0, len(routes)),
                       xytext=(0, 1.5), textcoords="offset points",
                       ha="center", va="bottom", fontsize=5.0, color=MUT)
-    # Strip name goes in the y-label slot, outside the row keys, so it cannot
-    # collide with the N/T header letters.
-    st_h.set_ylabel("Infeas.\nrate", fontsize=5.8, color=MUT, labelpad=13,
+    st_h.set_ylabel("Infeas.\nrate", fontsize=5.8, color=MUT, labelpad=20,
                     linespacing=0.95)
 
     handles = [plt.Line2D([], [], color=_LA_ROUTE_SHADE[r], lw=1.4,
                           marker=_LA_ROUTE_MARK[r], ms=3.8) for r in routes]
     labels  = [ps.ROUTE_LBL[r] for r in routes]
-    handles += [plt.Line2D([], [], color=MUT, lw=1.2, ls=_LA_TW_STYLE[t])
-                for t in tws]
-    labels  += [f"{ps.TW_LBL[t]} windows" for t in tws]
+    handles += [plt.Line2D([], [], color=MUT, lw=1.2, ls=sty)
+                for _lp, _l, sty, _m in _LA_TAIL_SERIES]
+    labels  += [l for _lp, l, _s, _m in _LA_TAIL_SERIES]
     # Explicit margins rather than tight_layout: the heat-strip axes carry only
     # patches and annotations, which tight_layout cannot measure (it warns and
     # guesses).  Fixed margins also make the colourbar placement below exact.
     fig.subplots_adjust(left=0.135, right=0.925, top=0.895, bottom=0.105,
                         hspace=0.16, wspace=0.12)
     fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
-               ncol=5, bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
+               ncol=4, bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
                handletextpad=0.4, columnspacing=1.4)
 
-    # Compact colour key for the strip, tucked to its right (as in the base-case
-    # figure).  Placed after tight_layout so the axes positions are final.
+    # Compact colour key for the strip, tucked to its right (as in the
+    # base-case figure).  Placed after subplots_adjust so positions are final.
     import matplotlib.cm as _cm
     from matplotlib.colors import Normalize as _Norm
     _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_reds)
@@ -2357,64 +2465,21 @@ def section_la():
     _cb.outline.set_linewidth(0.3)
     _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
     _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
+    fig.text(0.005, 0.008,
+             "Balanced panel; window classes pooled; short routes excluded."
+             + _thin_note(thin_seen),
+             fontsize=4.6, color=MUT, ha="left")
+
     _save(fig, "additional_la_config")
 
-    # ── figure 2: what a per-decision compute budget buys ────────────────────
-    # Same five cells, re-plotted as cost against quality.  The two ladders
-    # become two paths from the same base point, and the question "should the
-    # next second of compute go into horizon or into scenarios?" is read off
-    # directly as which path is steeper.
-    fig2, axs = plt.subplots(1, len(routes), figsize=(6.6, 2.5),
-                             sharey=True)
-    for ax, route in zip(np.atleast_1d(axs), routes):
-        drew = False
-        for tw in tws:
-            for ladder, is_h, col, lbl in (
-                    (_LA_HORIZONS, True, ps.METHOD_COLOR["LA"], "horizon"),
-                    (_LA_SCENARIOS, False, ps.METHOD_COLOR["greedy"],
-                     "scenarios")):
-                pts = []
-                for v in ladder:
-                    ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v),
-                                                                   _LA_BASE[1])
-                    c = _la_cell(stats, ns, hh, route, tw,
-                                 "decision_mean_s_median")
-                    q = _la_cell(stats, ns, hh, route, tw,
-                                 "gap_pen_median_pct")
-                    if c is None or q is None:
-                        continue
-                    pts.append((c, q, v))
-                if len(pts) < 2:
-                    continue
-                drew = True
-                ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                        _LA_TW_STYLE[tw], color=col, marker="o", ms=3.4,
-                        lw=1.2)
-                for c, q, v in pts:
-                    ax.annotate(f"{lbl[0].upper()}{v:g}", (c, q),
-                                xytext=(3, 3), textcoords="offset points",
-                                fontsize=5.5, color=MUT)
-        ax.set_title(ps.ROUTE_LBL[route], loc="left")
-        ax.set_xscale("log")
-        _log_ticks_plain(ax.xaxis)
-        ax.set_xlabel("Decision time per stop (s)")
-        ax.yaxis.grid(True, color=GRID, lw=0.6)
-        ax.set_axisbelow(True)
-        if not drew:
-            ax.text(0.5, 0.5, "pending", ha="center", va="center",
-                    fontsize=7.5, color=MUT, style="italic",
-                    transform=ax.transAxes)
-    np.atleast_1d(axs)[0].set_ylabel("Gap to hindsight optimum (%)")
-    h2 = [plt.Line2D([], [], color=ps.METHOD_COLOR["LA"], lw=1.4, marker="o",
-                     ms=3.4),
-          plt.Line2D([], [], color=ps.METHOD_COLOR["greedy"], lw=1.4,
-                     marker="o", ms=3.4)]
-    l2 = [r"horizon ladder ($|\Xi| = 25$)", r"scenario ladder ($L = 24$ h)"]
-    fig2.tight_layout(rect=(0, 0, 1, 0.87))
-    fig2.legend(h2, l2, frameon=False, fontsize=7, loc="upper center", ncol=2,
-                bbox_to_anchor=(0.5, 0.995), handlelength=1.6,
-                handletextpad=0.4, columnspacing=1.4)
-    _save(fig2, "additional_la_frontier")
+
+    # The TABLE keeps the per-route breakdown the figure pools away, and the
+    # MIP tail only: it is the standard configuration, and doubling every row
+    # for the LP tail would restate the ladder figure at ten times the length.
+    # The LP tail is reported by tab:la_policy, on the same rows of the same
+    # CSV, so the two never disagree.
+    routes = _LA_FIG_ROUTES
+    tws    = ["none", "tight"]
 
     # ── table ────────────────────────────────────────────────────────────────
     # One row per cell, route classes across the columns.  Both effect measures
@@ -2427,6 +2492,14 @@ def section_la():
               for h in _LA_HORIZONS if h != _LA_BASE[1]] +
              [(_la_cfg(s, _LA_BASE[1]), s, _LA_BASE[1])
               for s in _LA_SCENARIOS if s != _LA_BASE[0]])
+    # Same thin-cell rule as the figure, in the form a table can carry: a cell
+    # resting on well under the runs the design gives it is daggered rather
+    # than printed as if it were one of the full ones.  Without it the L48
+    # long-route column reads as a 455 s measurement instead of as four runs.
+    n_max = max([n for cfg, _s, _h in order for tw in tws for route in routes
+                 for n in [_la_num(stats.get((cfg, route, tw)), "n_runs")]
+                 if n] or [0])
+    thin = []
     for cfg, ns, hh in order:
         for tw in tws:
             cells = []
@@ -2434,8 +2507,16 @@ def section_la():
                 row = stats.get((cfg, route, tw))
                 gap = _la_num(row, "gap_pen_median_pct")
                 dlt = _la_num(row, "delta_vs_base_pct")
-                dec = _la_num(row, "decision_mean_s_median")
-                cells += [_fmt(gap, ".1f"),
+                dec = _la_num(row, "t_per_stop_s_median")
+                n   = _la_num(row, "n_runs")
+                mark = ""
+                if n and n_max and n < 0.6 * n_max:
+                    mark = r"$^{\dagger}$"
+                    thin.append(f"$|\Xi| = {ns}$, $L = {hh:g}$, "
+                                f"{ps.TW_LBL[tw].lower()} windows, "
+                                f"{ps.ROUTE_LBL[route].split()[0].lower()} "
+                                f"($n = {n:g}$)")
+                cells += [_fmt(gap, ".1f") + mark,
                           "--" if cfg == "base" else _fmt(dlt, "+.1f"),
                           _fmt(dec, ".0f")]
             lbl = "base" if cfg == "base" else ""
@@ -2449,8 +2530,9 @@ def section_la():
         r"gap to the hindsight optimum; $\Delta$ is the median paired change "
         r"in route duration with respect to the base cell "
         r"($|\Xi| = 25$, $L = 24$\,h), positive meaning slower; $t_{\text{dec}}$ "
-        r"is the median per-stop decision time.  Cells shown as ``--'' have "
-        r"no runs yet.}",
+        r"is the median per-stop decision time, taken as run wall clock over "
+        r"the number of stops and uncorrected for parallelism.  Every cell is "
+        r"quoted over seeds 1--10.  Cells shown as ``--'' have no runs yet.}",
         r"\label{tab:la-config}",
         r"\begin{tabular}{rrl" + "rrr" * len(routes) + "}",
         r"\toprule",
@@ -2467,7 +2549,13 @@ def section_la():
     ]
     for head, cells in body:
         lines.append(head + " & " + " & ".join(cells) + r" \\")
-    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}", ""]
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    if thin:
+        lines.append(
+            r"\\[2pt]{\footnotesize $^{\dagger}$ fewer than 60\% of the runs "
+            r"the best-covered cell of the table has, so the median is thin: "
+            + "; ".join(sorted(set(thin))) + r".}")
+    lines += [r"\end{table}", ""]
     _write_tex("additional_la.tex", "\n".join(lines))
 
 
@@ -2541,7 +2629,7 @@ _LA_EFFECT = {
 
 
 def section_la_policy(effect: str = "dur"):
-    """§8.3 — LA POLICY variants (TB0, LPTAIL), one figure + one table.
+    """§8.3 — LA POLICY variants (TB0, LPTAIL): one table, no figure.
 
     Separate from section_la on purpose.  The S/H sweep asks "how much compute
     should LA get?" and its cells sit on two ladders; these variants ask "what
@@ -2566,168 +2654,28 @@ def section_la_policy(effect: str = "dur"):
                    and not re.fullmatch(r"S\d+H\d+(\.\d+)?", c))
     cfgs = _LA_POLICY_ORDER + extra
     if not cfgs:
-        print("  no policy variants in additional_la_stats.csv — nothing drawn")
+        print("  no policy variants in additional_la_stats.csv — no table")
         return
 
     def cell(cfg, route, tw, col):
         return _la_num(stats.get((cfg, route, tw)), col)
 
-    # ── x layout: 6 cells, grouped into route blocks by SPACING ──────────────
-    _BLOCK_GAP = 0.7
-    xs, keys = [], []
-    for ri, route in enumerate(routes):
-        for ti, tw in enumerate(tws):
-            xs.append(ri * (len(tws) + _BLOCK_GAP) + ti)
-            keys.append((route, tw))
-    xs = np.asarray(xs, dtype=float)
-
-    # Every series here is the LA policy, so they take LA's hue and separate by
-    # lightness — the same grammar as the configuration figure.
-    face = {"base": ps.tint(GREEN, 0.62)}
-    for i, c in enumerate(cfgs):
-        face[c] = (GREEN if i == 0 else
-                   ps.shade(GREEN, min(0.62, 0.30 + 0.18 * i)))
-
-    fig = plt.figure(figsize=(7.0, 5.0))
-    gs  = fig.add_gridspec(3, 1, height_ratios=[1.0, 0.72, 0.30], hspace=0.18)
-    ax_d = fig.add_subplot(gs[0])                      # paired effect
-    ax_c = fig.add_subplot(gs[1], sharex=ax_d)         # cost
-    ax_s = fig.add_subplot(gs[2], sharex=ax_d)         # infeasibility strip
-    ax_d.tick_params(labelbottom=False)
-    ax_c.tick_params(labelbottom=False)
-
-    # ── row 0: paired delta vs base (base is the zero line by construction) ──
-    w = 0.78 / max(1, len(cfgs))
-    drawn = []
-    for k, cfg in enumerate(cfgs):
-        vals = [cell(cfg, r, t, eff["col"]) for r, t in keys]
-        if all(v is None for v in vals):
-            continue
-        drawn.append(cfg)
-        off = (k - (len(cfgs) - 1) / 2) * w
-        for x, v in zip(xs, vals):
-            if v is None:
-                continue
-            ax_d.bar(x + off, v, width=w, color=face[cfg],
-                     edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
-            # Point offset, not a data offset: the two effect measures live on
-            # different scales and a fixed data nudge would collide on one of
-            # them.
-            ax_d.annotate(f"{v:+.2f}", xy=(x + off, v),
-                          xytext=(0, 2 if v >= 0 else -2),
-                          textcoords="offset points", ha="center",
-                          va="bottom" if v >= 0 else "top",
-                          rotation=90, fontsize=5.2, color=INK)
+    # No figure.  The bar panel this section used to draw was dropped
+    # (2026-08-22): its six x-slots are the same route x window cells the
+    # configuration figure already carries, and the policy variants have no
+    # position on a ladder, so the picture added an axis of comparison the
+    # table states more precisely.  The table below is the whole output.
+    #
+    # `drawn` is what the figure's first row used to decide: a variant is
+    # reported when it has at least one paired effect value somewhere on the
+    # grid.  A variant with none is named as pending instead of being printed
+    # as a row of dashes.
+    drawn = [c for c in cfgs
+             if any(cell(c, r, t, eff["col"]) is not None
+                    for r, t in [(r, t) for r in routes for t in tws])]
     pending = [c for c in cfgs if c not in drawn]
     if pending:
-        # Parked in the corner, not on the zero line: the zero line is the base
-        # reference and a note sitting on it reads as a data label.
-        ax_d.text(0.012, 0.03, "pending: " + ", ".join(pending),
-                  transform=ax_d.transAxes, ha="left", va="bottom",
-                  fontsize=6.5, color=MUT, style="italic")
-    ax_d.axhline(0, color=INK, lw=0.9)
-    ax_d.set_ylabel(eff["ylabel"])
-
-    # ── row 1: what it costs (base drawn too — the cost may move on its own) ─
-    w2 = 0.78 / (len(cfgs) + 1)
-    for k, cfg in enumerate(["base"] + cfgs):
-        vals = [cell(cfg, r, t, "decision_mean_s_median") for r, t in keys]
-        if all(v is None for v in vals):
-            continue
-        off = (k - len(cfgs) / 2) * w2
-        for x, v in zip(xs, vals):
-            if v is None:
-                continue
-            ax_c.bar(x + off, v, width=w2, color=face[cfg],
-                     edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
-    ax_c.set_ylabel("Decision time\nper stop (s)")
-
-    for ax in (ax_d, ax_c):
-        ax.yaxis.set_major_locator(
-            mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
-        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
-        ax.grid(True, which="major", axis="y", color=GRID, lw=0.6)
-        ax.grid(True, which="minor", axis="y", color=GRID, lw=0.35, alpha=0.6)
-        ax.set_axisbelow(True)
-        ax.tick_params(axis="y", which="minor", length=2)
-
-    # ── row 2: infeasibility strip, one row per config ───────────────────────
-    # Same device and ramp as the base-case box figure: a variant that strands
-    # more drops those runs from the delta above, so it can look better for the
-    # wrong reason.  This is where that shows.
-    from matplotlib.patches import Rectangle as _Rect
-    strip_cfgs = ["base"] + drawn
-
-    def infeas(cfg, route, tw):
-        n = cell(cfg, route, tw, "n_runs")
-        i = cell(cfg, route, tw, "n_infeasible")
-        return (i / n) if (n and i is not None) else None
-
-    fr = [f for cfg in strip_cfgs for r, t in keys
-          for f in [infeas(cfg, r, t)] if f]
-    fmax = max(fr) if fr else 1.0
-    ax_s.set_ylim(0, len(strip_cfgs))
-    ax_s.set_yticks([])
-    for s in ax_s.spines.values():
-        s.set_visible(False)
-    for ci, cfg in enumerate(strip_cfgs):
-        y0 = len(strip_cfgs) - 1 - ci + 0.12
-        for x, (r, t) in zip(xs, keys):
-            f = infeas(cfg, r, t)
-            if f is None:
-                continue
-            ax_s.add_patch(_Rect((x - 0.42, y0), 0.84, 0.76,
-                                 facecolor=_INFEAS_CMAP(min(1.0, f / fmax)),
-                                 edgecolor="#8a8a8a", lw=0.35, zorder=3))
-        ax_s.annotate(cfg, xy=(0, len(strip_cfgs) - 0.5 - ci),
-                      xycoords=("axes fraction", "data"),
-                      xytext=(-3, 0), textcoords="offset points",
-                      ha="right", va="center", fontsize=5.6,
-                      color=face[cfg] if cfg != "base" else MUT)
-    ax_s.set_ylabel("Infeas.\nrate", fontsize=5.8, color=MUT, labelpad=22,
-                    linespacing=0.95)
-
-    # window class on the ticks, route class as the block label underneath
-    ax_s.set_xticks(xs, [ps.TW_LBL[t] for _r, t in keys])
-    ax_s.set_xlim(xs[0] - 0.7, xs[-1] + 0.7)
-    ax_s.tick_params(axis="x", length=0)
-    span = ax_s.get_xaxis_transform()
-    for ri, route in enumerate(routes):
-        c = xs[ri * len(tws):(ri + 1) * len(tws)].mean()
-        ax_s.annotate(ps.ROUTE_LBL[route], xy=(c, 0), xycoords=span,
-                      xytext=(0, -22), textcoords="offset points",
-                      ha="center", va="top", fontsize=7.5, color=MUT)
-
-    handles = [plt.Rectangle((0, 0), 1, 1, facecolor=face[c],
-                             edgecolor=ps.shade(GREEN, 0.5), linewidth=0.5)
-               for c in ["base"] + drawn]
-    labels = ["base ($|\\Xi|=25$, $L=24$ h)"] + [
-        _LA_POLICY_LBL.get(c, c) for c in drawn]
-    ax_d.legend(handles, labels, frameon=True, framealpha=0.9,
-                edgecolor="none", facecolor="white", fontsize=7,
-                loc="upper center", ncol=min(3, len(handles)),
-                handlelength=1.1, handletextpad=0.4, columnspacing=1.4)
-    # Headroom above for the legend, room below for the rotated value labels
-    # under the negative bars (they are drawn outside the data range).
-    lo, hi = ax_d.get_ylim()
-    ax_d.set_ylim(lo - 0.22 * (hi - lo), hi + 0.42 * (hi - lo))
-    fig.subplots_adjust(left=0.145, right=0.915, top=0.975, bottom=0.115)
-
-    # Colour key for the strip — without it "red" has no magnitude, and the
-    # ramp is scaled to the worst cell in THIS figure, not to 100%.
-    import matplotlib.cm as _cm
-    from matplotlib.colors import Normalize as _Norm
-    _sm = _cm.ScalarMappable(norm=_Norm(0, 100.0 * fmax), cmap=_INFEAS_CMAP)
-    _sm.set_array([])
-    _p = ax_s.get_position()
-    _cax = fig.add_axes([_p.x1 + 0.012, _p.y0, 0.010, _p.height])
-    _cb = fig.colorbar(_sm, cax=_cax, orientation="vertical",
-                       ticks=[0, 100.0 * fmax])
-    _cb.ax.set_yticklabels(["0", f"{100.0 * fmax:.0f}"])
-    _cb.outline.set_linewidth(0.3)
-    _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
-    _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
-    _save(fig, f"additional_la_policy{eff['sfx']}")
+        print("  pending (no paired runs yet): " + ", ".join(pending))
 
     # ── table ────────────────────────────────────────────────────────────────
     body = []
@@ -2738,7 +2686,7 @@ def section_la_policy(effect: str = "dur"):
                 cells += [_fmt(cell(cfg, route, tw, "gap_pen_median_pct"), ".1f"),
                           "--" if cfg == "base"
                           else _fmt(cell(cfg, route, tw, eff["col"]), "+.2f"),
-                          _fmt(cell(cfg, route, tw, "decision_mean_s_median"),
+                          _fmt(cell(cfg, route, tw, "t_per_stop_s_median"),
                                ".0f")]
             body.append((f"{cfg} & {ps.TW_LBL[tw]}", cells))
 
@@ -2751,8 +2699,10 @@ def section_la_policy(effect: str = "dur"):
         r"median gap to the hindsight optimum, $\Delta$ the median paired "
         r"change in "
         + eff["tex"] +
-        r" (positive = worse), $t_{\text{dec}}$ the median decision "
-        r"time per stop.}",
+        r" (positive = worse), $t_{\text{dec}}$ the median decision time per "
+        r"stop, taken as run wall clock over the number of stops and "
+        r"uncorrected for parallelism.  Every cell is quoted over seeds "
+        r"1--10.}",
         r"\label{tab:la_policy" + eff["sfx"] + r"}",
         r"\resizebox{\textwidth}{!}{%",
         r"\begin{tabular}{ll" + "rrr" * len(routes) + r"}", r"\toprule",
@@ -2851,7 +2801,6 @@ _LA_VARIANTS = [
     ("S25H48",  "L48",      "^"),
     ("S10H24",  "S10",      "<"),
     ("S50H24",  "S50",      ">"),
-    ("NOSPLIT", "no split", "D"),
 ]
 # Assigned in the order clusters are first seen.  Kept clear of every method hue
 # (blue, vermillion, orange, green, reddish purple, grey) and of the
@@ -2861,8 +2810,14 @@ _LA_CLUSTER_HUES = ["#1A1A1A", "#6A3D9A", "#C2007A", "#00688B", "#8C6D31"]
 # other methods, and ad-hoc probes.  Prefix-matched for the LOCAL family, whose
 # tags arrive under several spellings (LOCAL, LOCAL_MIPTAIL, LOCAL+LPTAIL, ...);
 # an exact-match list let each new one through as a spurious cell.
-_LA_ALL_SKIP = {"GREEDY", "TB0"}
+# Cells no LA CONFIGURATION figure draws.  GREEDY is the do-nothing reference
+# rather than a configuration; TB0 and LOCAL are other studies; the NOSPLIT
+# arms belong to the break-regime axis, which `la_config` and the ladders do
+# not carry either — leaving them in was the third way the three figures of
+# this section disagreed about what they were showing.
+_LA_ALL_SKIP = {"GREEDY", "TB0", "NOSPLIT"}
 _LA_ALL_SKIP_PREFIX = ("LOCAL",)
+_LA_ALL_SKIP_SUFFIX = ("+NOSPLIT",)
 
 
 def _la_parse_cell(cfg):
@@ -2910,16 +2865,13 @@ def _la_cluster_label(cluster):
 
 def section_la_all(csv_name="additional_la_stats.csv",
                    outname="additional_la_all",
-                   banner="cost/quality plane by solver cluster",
-                   min_n=5, skip=None, skip_prefix=None):
+                   banner="cost/quality plane by solver cluster"):
     """8.3 - every LA configuration on one cost/quality plane, in solver clusters.
 
-    Cost is SOLVER EFFORT PER DECISION (CPU-seconds per stop), not decision
-    wall clock: the |Xi|
-    sub-problems run W at a time, so the clock times the slowest of a parallel
-    wave rather than the work done.  Cells whose runs predate the instrumen-
-    tation are BACK-FILLED (see additional_analysis._cpu_hours) and carry a
-    contention bias the measured cells do not — the banner names them.
+    Cost is DECISION TIME PER STOP: the run's wall clock over the number of
+    stops it decided (la-report's t_per_stop_s_median), with no correction for
+    --jobs or n_workers.  It is what the truck waits, batch contention and all,
+    rather than a modelled solver effort no run was observed to spend.
 
     One panel per route class, window classes pooled.  Each configuration family
     (LP subproblem, MILP subproblem, MILP + energy guard, ...) forms a cluster:
@@ -2932,32 +2884,34 @@ def section_la_all(csv_name="additional_la_stats.csv",
     if not stats:
         print(f"  data_output/{csv_name} missing - nothing drawn")
         return
-    routes, TW = ps.ROUTE_ORDER, "all"
+    routes, TW = _LA_FIG_ROUTES, "all"
     if not any(t == TW for (_c, _r, t) in stats):
         print("  no pooled 'all' window rows - re-run: python -m "
               "src.output_analysis.additional_analysis la-report")
         return
 
+    # A thin cell is FLAGGED, not dropped.  The hard minimum this used to apply
+    # made the section inconsistent with itself: on the balanced panel the long
+    # route class carries 3 instances, so a floor of 5 silently removed every
+    # long-route panel here while `la_config` and the table went on reporting
+    # those very cells.  A figure that hides what its neighbour shows is worse
+    # than one that shows a small number and says so, which is what the hollow
+    # marker and the n= label do (the same convention the ladder figure uses).
     def cell(cfg, route):
         row = stats.get((cfg, route, TW))
-        c = _la_num(row, "cpu_s_per_stop_best")
+        c = _la_num(row, "t_per_stop_s_median")
         q = _la_num(row, "gap_pen_median_pct")
         if c is None or q is None:
             return None
         n, i = _la_num(row, "n_runs"), _la_num(row, "n_infeasible")
-        if (n or 0) < min_n:        # a median over a handful is not an estimate
-            return None
-        return c, q, ((i / n) if (n and i is not None) else None)
+        thin = bool(n and n < _LA_THIN_N)
+        return c, q, ((i / n) if (n and i is not None) else None), n, thin
 
     # discover the configuration families actually present
-    # The LOCAL figure reads a corpus whose cells all start with LOCAL, so the
-    # exclusions are a parameter: what is noise in the sweep is the subject
-    # there.
-    _skip = _LA_ALL_SKIP if skip is None else set(skip)
-    _pre = _LA_ALL_SKIP_PREFIX if skip_prefix is None else tuple(skip_prefix)
     have = {c for (c, _r, _t) in stats
-            if c not in _skip
-            and not (_pre and c.upper().startswith(_pre))}
+            if c not in _LA_ALL_SKIP
+            and not c.upper().startswith(_LA_ALL_SKIP_PREFIX)
+            and not c.upper().endswith(_LA_ALL_SKIP_SUFFIX)}
     clusters = {}
     for cfg in have:
         cl, var = _la_parse_cell(cfg)
@@ -2976,23 +2930,33 @@ def section_la_all(csv_name="additional_la_stats.csv",
     vals = [got for cl, mem in clusters.items() for cfg in mem.values()
             for r in routes for got in [cell(cfg, r)] if got]
     if not vals:
-        print("  every cell is below the minimum sample - nothing drawn")
+        print("  no cell carries both a cost and a gap - nothing drawn")
         return
-    costs = [v[0] for v in vals]
     quals = [v[1] for v in vals]
     fmax = max([v[2] for v in vals if v[2]] or [1.0])
-    # Markers are drawn at the data point but have width, and on a LINEAR axis
-    # the cheapest cell sits within a few seconds of the origin, so the left
-    # margin goes slightly negative rather than clipping it against the spine.
-    xlim = (-0.055 * max(costs), max(costs) * 1.16)
+
+    # x is scaled PER ROUTE, y is shared.  The cost axis spans an order of
+    # magnitude between route classes — the long panel carries a 455 s cell
+    # while the short one tops out near 40 — so one shared cost axis renders
+    # two of the three panels as a vertical stripe against the spine.  The gap
+    # axis stays shared, because comparing quality across route classes is the
+    # thing the reader is actually here for.  Markers are drawn at the data
+    # point but have width, so the left margin goes slightly negative rather
+    # than clipping the cheapest cell against the spine.
+    def _xlim(route):
+        cs = [got[0] for cl, mem in clusters.items() for cfg in mem.values()
+              for got in [cell(cfg, route)] if got]
+        hi = max(cs) if cs else 1.0
+        return (-0.055 * hi, hi * 1.16)
     span = max(max(quals) - min(quals), 2.0)   # floor: don't magnify rounding
     mid = 0.5 * (max(quals) + min(quals))
     ylim = (mid - 0.66 * span, mid + 0.66 * span)
 
     fig, axs = plt.subplots(1, len(routes), figsize=(7.2, 3.3),
-                            sharex=True, sharey=True)
+                            sharey=True)
     axs = np.atleast_1d(axs)
 
+    thin_seen = {}          # route class -> its run count, when below the floor
     for ri, route in enumerate(routes):
         ax = axs[ri]
         drew = False
@@ -3013,15 +2977,21 @@ def section_la_all(csv_name="additional_la_stats.csv",
                 if not got:
                     continue
                 drew = True
-                c, q, f = got
+                c, q, f, n, thin = got
+                # Thin cells keep their marker OUTLINE but lose the
+                # infeasibility fill, so they cannot be read off the colourbar
+                # as if the rate were estimated from a full sample.
                 ax.plot(c, q, mark.get(var, "*"), ms=6.0,
-                        mfc=_INFEAS_CMAP(min(1.0, (f or 0.0) / fmax)),
+                        mfc=("none" if thin
+                             else _INFEAS_CMAP(min(1.0, (f or 0.0) / fmax))),
                         mec=col, mew=1.4, zorder=5 if var is None else 4)
+                if thin:
+                    thin_seen[route] = n
         if not drew:
             ax.text(0.5, 0.5, "pending", ha="center", va="center",
                     transform=ax.transAxes, fontsize=7.5, color=MUT,
                     style="italic")
-        ax.set_xlim(*xlim)
+        ax.set_xlim(*_xlim(route))
         ax.set_ylim(*ylim)
         ax.xaxis.set_major_locator(
             mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
@@ -3032,9 +3002,9 @@ def section_la_all(csv_name="additional_la_stats.csv",
         ax.set_axisbelow(True)
         ax.tick_params(which="minor", length=2)
         ax.set_title(ps.ROUTE_LBL[route], loc="left")
-        ax.set_xlabel("CPU-s per decision")
+        ax.set_xlabel(_LBL_COST)
         if ri == 0:
-            ax.set_ylabel("Gap to hindsight optimum (%)")
+            ax.set_ylabel(_LBL_GAP)
 
     # legend in two registers: colour = family, marker = variant within it
     h1 = [plt.Line2D([], [], color=hue[cl], lw=1.3, ls=":", marker="o", ms=5.4,
@@ -3072,12 +3042,10 @@ def section_la_all(csv_name="additional_la_stats.csv",
     _cb.outline.set_linewidth(0.3)
     _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
     _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
-    est = sorted({c for (c, _r, t) in stats if t == TW
-                  and (_la_num(stats.get((c, _r, t)), "cpu_est_frac") or 0) > 0.5})
-    if est:
-        fig.text(0.005, 0.008,
-                 "Cost back-filled from wall clock (indicative) for: "
-                 + ", ".join(est), fontsize=4.6, color=MUT, ha="left")
+    fig.text(0.005, 0.008,
+             "Cost is run wall clock / number of stops, uncorrected for "
+             "parallelism." + _thin_note(thin_seen),
+             fontsize=4.6, color=MUT, ha="left")
     _save(fig, outname)
 
 
@@ -3096,19 +3064,14 @@ def section_la_all(csv_name="additional_la_stats.csv",
 # anchor the other three are read against, exactly as the base cell is in the
 # sweep figure.
 def section_la_local():
-    """§8.3 — the same cost/quality plane for the cab-hardware (LOCAL) runs.
+    """§8.3 — the cab-hardware (LOCAL) timing probe: table only.
 
-    Mostly empty until those runs land; every declared cell still draws its
-    legend entry and reports itself as pending, which is the point — the figure
-    states the intended 2x2 before the evidence for it exists.
+    The cost/quality plane this used to draw was dropped (2026-08-22).  It was
+    the sweep's figure re-run on five runs, and a scatter of five points on a
+    plane whose axes were built to separate twelve configurations reads as a
+    finding it cannot support.  The measurement the probe exists for is a
+    per-stop time on cab-grade hardware, and that is a table.
     """
-    section_la_all(csv_name="additional_la_local_stats.csv",
-                   outname="additional_la_local",
-                   banner="cab-hardware cost/quality plane (LOCAL)",
-                   skip=(), skip_prefix=(),
-                   # a timing probe is a few instances on purpose; one run is
-                   # already the measurement, not a sample of one
-                   min_n=1)
     section_la_local_table()
 
 
@@ -3431,13 +3394,6 @@ def section_grid():
 
 # ══════════════════════════════════════════════════════════════════════════════
 
-_LA_TAIL_SERIES = (
-    # (lptail, label, dash, marker) — the two ways the look-ahead tail beyond
-    # the horizon is solved.  Same policy, same ladder; only the subproblem
-    # differs, so they share a hue and separate on dash + marker.
-    (False, "MILP subpr.", "-",  "o"),
-    (True,  "LP subpr.",   "--", "s"),
-)
 
 
 def _la_tail_cfg(n_scen: int, horizon: float, lptail: bool) -> str:
@@ -3453,19 +3409,17 @@ def _la_tail_cfg(n_scen: int, horizon: float, lptail: bool) -> str:
 
 
 def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
-    """One ladder (horizon or scenarios), route classes POOLED.
+    """One ladder (horizon or scenarios), one series per route x tail solver.
 
     Three panels: what the configuration buys (gap), what it costs (decision
     time), and whether it strands the truck (infeasibility).  Two series per
     panel, one per tail solver.
 
-    Cost is SOLVER CPU TIME, not decision wall clock.  The |Xi| sub-problems
-    run n_workers at a time, so the clock measures the slowest of a parallel
-    wave under whatever contention the batch had; CPU time measures the work
-    and scales with |Xi| and with the horizon the way a reader expects.  Cells
-    whose runs predate that instrumentation carry no CPU value and are simply
-    absent from the cost panel rather than being back-filled with the clock,
-    which would put two incomparable quantities on one axis.
+    Cost is DECISION TIME PER STOP — the run's wall clock over the number of
+    stops — uncorrected for --jobs or n_workers.  A cell launched under heavier
+    batch contention therefore reads slower, which is a property of the
+    measurement rather than of the configuration; the ladder shape is what the
+    panel is read for, not the absolute level.
 
     Coverage is NOT uniform across the ladder — the MILP-tail rungs are still
     filling in — and pooling the route classes makes an uneven mix invisible
@@ -3474,66 +3428,62 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
     a thin cell cannot be read as a finding.
     """
     stats = _la_stats()
-    fig, axs = plt.subplots(1, 3, figsize=(6.9, 2.45), sharex=True)
+    fig, axs = plt.subplots(1, 3, figsize=(6.9, 2.6), sharex=True)
     ax_q, ax_c, ax_i = axs
 
-    ns_all = []
-    for lptail, _lbl, _ls, _mk in _LA_TAIL_SERIES:
-        for v in ladder:
-            ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
-            row = stats.get((_la_tail_cfg(ns, hh, lptail), "all", "all"))
-            n = _la_num(row, "n_runs")
-            if n:
-                ns_all.append(n)
-    n_ref = max(ns_all) if ns_all else 0
+    # Coverage: the run count of the pooled cell, against the section-wide
+    # _LA_THIN_N floor.  On the balanced panel every cell holds the same
+    # instances, so this stays silent — which is the point.  It speaks up when
+    # a cell was excluded from constraining the panel (--panel-exclude) and
+    # does not cover all of it.
+    def _cover(cfg, route):
+        return _la_num(stats.get((cfg, route, "all")), "n_runs") or 0
 
     drew = False
-    for lptail, lbl, ls, mk in _LA_TAIL_SERIES:
-        col = (ps.tint(ps.METHOD_COLOR["LA"], 0.45) if lptail
-               else ps.METHOD_COLOR["LA"])
-        xs, qs, cs_, is_, nn = [], [], [], [], []
-        for v in ladder:
-            ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v), _LA_BASE[1])
-            row = stats.get((_la_tail_cfg(ns, hh, lptail), "all", "all"))
-            if row is None:
+    thin_seen = {}          # route class -> its run count, when below the floor
+    for route in _LA_FIG_ROUTES:
+        col = _LA_ROUTE_SHADE[route]
+        mk  = _LA_ROUTE_MARK[route]
+        for lptail, lbl, ls, _m in _LA_TAIL_SERIES:
+            xs, qs, cs_, is_, nn = [], [], [], [], []
+            for v in ladder:
+                ns, hh = (_LA_BASE[0], float(v)) if is_h else (int(v),
+                                                               _LA_BASE[1])
+                cfg = _la_tail_cfg(ns, hh, lptail)
+                # The route's window-pooled row — the SAME row section_la and
+                # la_all read, so a value here is the value there.
+                row = stats.get((cfg, route, "all"))
+                if row is None:
+                    continue
+                n = _la_num(row, "n_runs")
+                inf = _la_num(row, "n_infeasible")
+                xs.append(float(v))
+                qs.append(_la_num(row, "gap_pen_median_pct"))
+                cs_.append(_la_num(row, "t_per_stop_s_median"))
+                is_.append(100.0 * inf / n if (n and inf is not None) else None)
+                nn.append(_cover(cfg, route))
+            if not xs:
                 continue
-            n = _la_num(row, "n_runs")
-            inf = _la_num(row, "n_infeasible")
-            xs.append(float(v))
-            qs.append(_la_num(row, "gap_pen_median_pct"))
-            cs_.append(_la_num(row, "cpu_s_per_stop_best"))
-            is_.append(100.0 * inf / n if (n and inf is not None) else None)
-            nn.append(n)
-        if not xs:
-            continue
-        drew = True
-        for ax, ys in ((ax_q, qs), (ax_c, cs_), (ax_i, is_)):
-            pts = [(x, y, n) for x, y, n in zip(xs, ys, nn) if y is not None]
-            if not pts:
-                continue
-            ax.plot([p[0] for p in pts], [p[1] for p in pts], ls, color=col,
-                    lw=1.3, zorder=2)
-            for x, y, n in pts:
-                thin = bool(n_ref and n and n < 0.6 * n_ref)
-                ax.plot(x, y, mk, ms=4.2, color=col, zorder=3,
-                        mfc="none" if thin else col, mec=col,
-                        mew=1.1 if thin else 0.8)
-        # Run counts belong on the cost panel only: stating them three times
-        # would crowd every panel to say one thing about the cell.
-        for x, y, n in zip(xs, cs_, nn):
-            if y is None or not n:
-                continue
-            if n_ref and n < 0.6 * n_ref:
-                ax_c.annotate(f"n={n:g}", (x, y),
-                              xytext=(0, -9 if lptail else 7),
-                              textcoords="offset points", ha="center",
-                              va="top" if lptail else "bottom",
-                              fontsize=4.8, color=col)
+            drew = True
+            for ax, ys in ((ax_q, qs), (ax_c, cs_), (ax_i, is_)):
+                pts = [(x, y, n) for x, y, n in zip(xs, ys, nn)
+                       if y is not None]
+                if not pts:
+                    continue
+                ax.plot([p[0] for p in pts], [p[1] for p in pts], ls, color=col,
+                        lw=1.3, zorder=2)
+                for x, y, n in pts:
+                    thin = bool(n and n < _LA_THIN_N)
+                    if thin:
+                        thin_seen[route] = n
+                    ax.plot(x, y, mk, ms=4.2, color=col, zorder=3,
+                            mfc="none" if thin else col, mec=col,
+                            mew=1.1 if thin else 0.8)
 
     rungs = [float(v) for v in ladder]
     base_x = float(_LA_BASE[1] if is_h else _LA_BASE[0])
-    for ax, ttl, ylab in ((ax_q, "Quality", "Gap to hindsight optimum (%)"),
-                          (ax_c, "Cost", "Solver CPU-s per decision"),
+    for ax, ttl, ylab in ((ax_q, "Quality", _LBL_GAP),
+                          (ax_c, "Cost", _LBL_COST),
                           (ax_i, "Risk", "Infeasible runs (%)")):
         ax.set_title(ttl, loc="left", fontsize=8)
         ax.set_ylabel(ylab, fontsize=7)
@@ -3545,9 +3495,9 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
         ax.axvline(base_x, color=GRID, lw=0.9, zorder=0)
         ax.yaxis.set_major_locator(
             mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+        ax.set_ylim(bottom=0)
         ax.grid(True, which="major", color=GRID, lw=0.6)
         ax.set_axisbelow(True)
-        ax.set_ylim(bottom=0)
         ax.tick_params(labelsize=6.5)
         if not drew:
             ax.text(0.5, 0.5, "pending", ha="center", va="center",
@@ -3557,19 +3507,23 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
                   xytext=(3, 3), textcoords="offset points", fontsize=5.2,
                   color=MUT, ha="left", va="bottom")
 
-    handles = [plt.Line2D([], [], color=(ps.tint(ps.METHOD_COLOR["LA"], 0.45)
-                                         if lp else ps.METHOD_COLOR["LA"]),
-                          lw=1.4, ls=ls, marker=mk, ms=4.2)
-               for lp, _l, ls, mk in _LA_TAIL_SERIES]
-    labels = [l for _lp, l, _ls, _mk in _LA_TAIL_SERIES]
+    handles = [plt.Line2D([], [], color=_LA_ROUTE_SHADE[r], lw=1.4,
+                          marker=_LA_ROUTE_MARK[r], ms=4.2)
+               for r in _LA_FIG_ROUTES]
+    labels = [ps.ROUTE_LBL[r] for r in _LA_FIG_ROUTES]
+    handles += [plt.Line2D([], [], color=MUT, lw=1.3, ls=ls)
+                for _lp, _l, ls, _m in _LA_TAIL_SERIES]
+    labels += [l for _lp, l, _ls, _m in _LA_TAIL_SERIES]
     handles.append(plt.Line2D([], [], color=MUT, lw=0, marker="o", ms=4.2,
                               mfc="none", mec=MUT))
-    labels.append("partial coverage")
-    fig.tight_layout(rect=(0, 0, 1, 0.86))
+    labels.append("thin cell")
+    fig.tight_layout(rect=(0, 0.02, 1, 0.84))
     fig.legend(handles, labels, frameon=False, fontsize=7, loc="upper center",
-               ncol=3, bbox_to_anchor=(0.5, 0.995), handlelength=1.8,
-               handletextpad=0.4, columnspacing=1.6)
-    fig.text(0.005, 0.012, f"Route and window classes pooled; {held}.",
+               ncol=6, bbox_to_anchor=(0.5, 0.995), handlelength=1.8,
+               handletextpad=0.4, columnspacing=1.2)
+    fig.text(0.005, 0.012,
+             f"Balanced panel; window classes pooled; short routes excluded; "
+             f"{held}." + _thin_note(thin_seen),
              fontsize=5.4, color=MUT, ha="left")
     _save(fig, outname)
 
@@ -3584,10 +3538,10 @@ def section_la_ladders():
     """
     print("== Sec 8.3 look-ahead ladders (routes pooled) ==")
     _la_ladder_panels(_LA_HORIZONS, True, "additional_la_horizon",
-                      r"Look-ahead horizon $L$ (h)",
+                      _LBL_HORIZON,
                       rf"scenarios held at $|\Xi| = {_LA_BASE[0]}$")
     _la_ladder_panels(_LA_SCENARIOS, False, "additional_la_scenarios",
-                      r"Scenarios $|\Xi|$",
+                      _LBL_SCEN,
                       rf"horizon held at $L = {_LA_BASE[1]:g}$ h")
 
 
@@ -3596,6 +3550,7 @@ _SECTIONS = dict(diesel=section_diesel, sensitivity=section_sensitivity,
                  la=section_la,
                  la_ladders=section_la_ladders,
                  la_all=section_la_all,
+                 # tables only since 2026-08-22 — see each function
                  la_local=section_la_local,
                  # both effect measures: route duration and the penalised
                  # objective the model actually minimises

@@ -129,7 +129,7 @@ def build_norway_instance(seed: int = 1) -> tuple[dict, float, float]:
     powers = [s["power"] for s in stops if s["kind"] == "K"] or [200.0]
 
     full_data = make_data(
-        I=I, C=C, K=K, D=D, E=E, km=km,
+        I=I, C=C, K=K, L=[], D=D, E=E, km=km,
         Wha=Wha, Whf=Whf,
         label=f"Norway E6 corridor — {route_km:.0f} km, "
               f"{len(C)} terminals, {len(K)} HDV chargers (NOBIL)",

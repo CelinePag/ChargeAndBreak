@@ -211,6 +211,10 @@ def run_plan_with_recourse(full_data: dict,
                         milp_sol=nom_sol)
         tracker.record_realisation(stop, D_act, E_actual=E_act)
 
+        # A violation ends the run at this stop (BEHDV halt semantics).
+        if vehicle.is_halted:
+            break
+
     return vehicle, tracker, events
 
 
@@ -318,5 +322,9 @@ def run_plan_static(full_data: dict,
         vehicle.advance(action=action, D_next=D_act, E_next=E_act,
                         milp_sol=nom_sol)
         tracker.record_realisation(stop, D_act, E_actual=E_act)
+
+        # A violation ends the run at this stop (BEHDV halt semantics).
+        if vehicle.is_halted:
+            break
 
     return vehicle, tracker, events

@@ -197,6 +197,9 @@ def build_pglt_data(parsed: dict, grid_min: int = 15,
 
     data = make_data(
         I=I, C=C, K=[], L=L, D=D, E=E,
+        # no distances: the battery is disabled for this benchmark, so E is 0
+        # on every leg and km is only ever read as an energy proxy.
+        km=None,
         Wha=Wha, Whf=Whf,
         S=S_h, Q={}, M_man_h=0.0, M_lay_h=0.0,
         hard_tw=True, allow_wait=allow_wait, wtd_rules=True,
