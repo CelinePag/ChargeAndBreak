@@ -1142,7 +1142,7 @@ def run_simulation(full_data: dict,
                    seed: int           = 42,
                    time_limit: int     = 20,
                    verbose: bool       = True,
-                   n_workers           = None,
+                   n_workers           = 1,
                    solve_mode: str     = "lp",
                    charge_only: bool   = False,
                    criterion: str      = "mean",
@@ -1384,7 +1384,7 @@ def run_simulation_precomputed(
     cv: float                    = TRAVEL_TIME_CV_TARGET,
     time_limit: int              = 20,
     verbose: bool                = True,
-    n_workers                    = None,
+    n_workers                    = 1,
     solve_mode: str              = "lp",
     charge_only: bool            = False,
     criterion: str               = "mean",
@@ -1695,7 +1695,7 @@ if __name__ == "__main__":
     n_scenarios   = int(sys.argv[2])          if len(sys.argv) > 2 else 5
     horizon_hours = float(sys.argv[3])        if len(sys.argv) > 3 else 8.0
     cv            = float(sys.argv[4])        if len(sys.argv) > 4 else TRAVEL_TIME_CV_TARGET
-    n_workers     = int(sys.argv[5])          if len(sys.argv) > 5 else None
+    n_workers     = int(sys.argv[5])          if len(sys.argv) > 5 else 1
     solve_mode    = {"0":"lp","lp":"lp","1":"mip","mip":"mip",
                      "2":"both","both":"both"}.get(
                     sys.argv[6].lower() if len(sys.argv) > 6 else "0", "lp")

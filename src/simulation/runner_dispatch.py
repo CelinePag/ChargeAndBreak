@@ -193,7 +193,7 @@ def run_algorithm(
     n_scenarios: int       = 10,
     horizon_hours: float   = 12.0,
     time_limit: int        = 300,
-    n_workers              = None,
+    n_workers              = 1,
     # The standard LA configuration solves its look-ahead tail as a MIP (the
     # runs stored under the historic "MIPTAIL" tag); "lp" is the superseded
     # default and now produces a variant — see paths.effective_variant.
@@ -923,7 +923,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_scenarios", type=int,   default=10)
     parser.add_argument("--horizon",     type=float, default=12.0)
     parser.add_argument("--time_limit",  type=int,   default=300)
-    parser.add_argument("--n_workers",   type=int,   default=8)
+    parser.add_argument("--n_workers",   type=int,   default=1)
     parser.add_argument("--solve_mode",  type=str,   default="mip",
                         choices=["lp", "mip", "both"],
                         help="LA look-ahead tail: mip is the standard "
