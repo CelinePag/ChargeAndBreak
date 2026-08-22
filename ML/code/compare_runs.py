@@ -69,39 +69,48 @@ def main(a):
     ref_cache: dict[str, dict] = {}
     def refs(inst):
         if inst not in ref_cache:
-            ref_cache[inst] = dict(
-                teacher=baseline(inst, "LA_MIPTAIL"),
-                la_lp=baseline(inst, "LA_2026"))
+            # LA_MIPTAIL is now the STANDARD look-ahead (the LP tail was
+            # demoted to an LPTAIL variant and no longer exists for the base
+            # grid), so the teacher is the only solver baseline available.
+            ref_cache[inst] = dict(teacher=baseline(inst, "LA_MIPTAIL"))
         return ref_cache[inst]
 
-    hdr = (f"{'method':12s} {'n':>3s} {'vs teacher %':>22s} {'vs LP-tail %':>14s} "
-           f"{'infeas':>7s} {'HoS':>4s} {'strand':>6s} {'TW':>4s} {'ms/dec':>7s}")
+    def completed(run):
+        """Route finished?  Since the halt-on-infeasible change a run that
+        breaches ends AT that stop and carries duration_h = None, so a
+        duration only exists for a completed route.  Halted runs must never
+        enter a duration median — they are counted, not averaged."""
+        return bool(run) and run.get("duration_h") is not None
+
+    hdr = (f"{'method':16s} {'n':>3s} {'vs teacher % (completed only)':>30s} "
+           f"{'halt':>5s} {'infeas':>7s} {'HoS':>4s} {'strand':>6s} {'TW':>4s} "
+           f"{'ms/dec':>7s}")
     print(hdr); print("-" * len(hdr))
     for meth in sorted(groups, key=lambda s: int(re.sub(r"\D", "", s) or 0)):
         runs = groups[meth]
-        dt, dl, infeas, hos, strand, tw, dec = [], [], 0, 0, 0, 0, []
+        dt, halt, infeas, hos, strand, tw, dec = [], 0, 0, 0, 0, 0, []
         for inst, d in runs.items():
             r, m = refs(inst), d.get("metrics", {})
-            if r["teacher"] and r["teacher"].get("duration_h"):
+            if not completed(d):
+                halt += 1                      # no duration exists: count it
+            elif completed(r["teacher"]):
                 dt.append(100 * (d["duration_h"] - r["teacher"]["duration_h"])
                           / r["teacher"]["duration_h"])
-            if r["la_lp"] and r["la_lp"].get("duration_h"):
-                dl.append(100 * (d["duration_h"] - r["la_lp"]["duration_h"])
-                          / r["la_lp"]["duration_h"])
             infeas += bool(m.get("run_infeasible"))
             hos    += int(m.get("n_hos_violations") or 0)
             strand += int(m.get("n_stranding") or 0)
             tw     += int(m.get("tw_n_misses") or 0)
             dec.append(1000 * (m.get("decision_time_mean_s") or 0))
         q = np.percentile(dt, [25, 50, 75]) if dt else [np.nan] * 3
-        print(f"{meth:12s} {len(runs):3d} "
-              f"{q[1]:+7.2f} [{q[0]:+6.2f},{q[2]:+6.2f}] max{max(dt):+6.1f} "
-              f"{np.median(dl) if dl else np.nan:+13.2f} "
-              f"{infeas:7d} {hos:4d} {strand:6d} {tw:4d} {np.median(dec):7.2f}")
+        mx = max(dt) if dt else float("nan")
+        print(f"{meth:16s} {len(runs):3d} "
+              f"{q[1]:+7.2f} [{q[0]:+6.2f},{q[2]:+6.2f}] max{mx:+6.1f} n={len(dt):<3d} "
+              f"{halt:5d} {infeas:7d} {hos:4d} {strand:6d} {tw:4d} "
+              f"{np.median(dec):7.2f}")
 
     # teacher/LP-tail reference rows on the same instances
     insts = sorted({i for g in groups.values() for i in g})
-    for tag, key in (("LA-MIP (teacher)", "teacher"), ("LA-LP", "la_lp")):
+    for tag, key in (("LA-MIP (teacher)", "teacher"),):
         vals = [refs(i)[key] for i in insts if refs(i)[key]]
         if not vals:
             continue
