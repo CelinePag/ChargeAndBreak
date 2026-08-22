@@ -24,13 +24,11 @@ Usage
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import subprocess
 import sys
 from src import paths as _paths
 
-SOL = _paths.solutions()
 
 
 def is_base(path: str) -> bool:
@@ -41,11 +39,11 @@ def is_base(path: str) -> bool:
 def fingerprint() -> dict[str, tuple]:
     """name -> (size, mtime_ns) for every base-case solution and oracle cache."""
     fp = {}
-    for p in glob.glob(os.path.join(SOL, "*.json")):
-        if not is_base(p):
+    for name, p in _paths.scan_solutions():
+        if not name.endswith(".json") or not is_base(name):
             continue
         st = os.stat(p)
-        fp[os.path.basename(p)] = (st.st_size, st.st_mtime_ns)
+        fp[name] = (st.st_size, st.st_mtime_ns)
     return fp
 
 

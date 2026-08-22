@@ -27,7 +27,7 @@ from pptx.enum.dml import MSO_LINE
 from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
 
-OUT = _paths.figures("framework_concept.pptx")
+OUT = _paths.figure_out("framework_concept.pptx")
 
 # ============================================================ styling =======
 def RGB(h): return RGBColor.from_string(h.lstrip("#"))

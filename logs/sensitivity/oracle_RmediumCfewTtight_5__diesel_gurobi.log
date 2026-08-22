@@ -1,0 +1,82 @@
+
+Gurobi 9.5.2 (linux64) logging started Tue Aug 11 21:01:12 2026
+
+Set parameter LogFile to value "/mnt/beegfs/users/celinep/ChargeAndBreak/logs/oracle_RmediumCfewTtight_5__diesel_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 4561 rows, 2425 columns and 46157 nonzeros
+Model fingerprint: 0xa350ff24
+Variable types: 1534 continuous, 891 integer (891 binary)
+Coefficient statistics:
+  Matrix range     [2e-01, 1e+03]
+  Objective range  [5e-01, 1e+00]
+  Bounds range     [1e+00, 3e+01]
+  RHS range        [6e-03, 5e+02]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x6831_ by 1.000000000
+
+Presolve removed 2214 rows and 871 columns
+Presolve time: 0.90s
+Presolved: 2347 rows, 1554 columns, 35761 nonzeros
+Variable types: 908 continuous, 646 integer (646 binary)
+Found heuristic solution: objective 908.4184110
+Root relaxation presolve removed 61 rows and 0 columns
+Root relaxation presolved: 2286 rows, 1554 columns, 22322 nonzeros
+
+
+Root relaxation: objective 5.291841e+01, 1342 iterations, 0.41 seconds (0.13 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      63.0850777   52.91841  16.1%     -    1s
+     0     0   52.91841    0    6   63.08508   52.91841  16.1%     -    1s
+     0     0   52.91841    0   16   63.08508   52.91841  16.1%     -    2s
+     0     0   52.91841    0    7   63.08508   52.91841  16.1%     -    2s
+     0     0   52.91841    0    8   63.08508   52.91841  16.1%     -    3s
+H    0     0                      57.2375727   52.91841  7.55%     -    3s
+     0     0   52.92055    0    9   57.23757   52.92055  7.54%     -    3s
+     0     0   53.00437    0    8   57.23757   53.00437  7.40%     -    4s
+     0     0   53.00448    0    9   57.23757   53.00448  7.40%     -    5s
+H    0     0                      56.3209060   53.00448  5.89%     -    5s
+     0     0   53.00448    0   28   56.32091   53.00448  5.89%     -    7s
+H    0     0                      56.1241415   53.00448  5.56%     -    7s
+H    0     0                      55.4184110   53.00448  4.36%     -    7s
+     0     0   53.00448    0   46   55.41841   53.00448  4.36%     -    7s
+     0     0   53.00448    0   45   55.41841   53.00448  4.36%     -    7s
+     0     0   53.16180    0   60   55.41841   53.16180  4.07%     -    8s
+H    0     0                      55.2074748   53.16180  3.71%     -    8s
+     0     0   53.16952    0   57   55.20747   53.16952  3.69%     -    8s
+H    0     0                      54.8350777   53.16952  3.04%     -    9s
+H    0     0                      54.5017443   53.38411  2.05%     -    9s
+     0     0   53.50714    0   16   54.50174   53.50714  1.82%     -    9s
+     0     0   53.50867    0   24   54.50174   53.50867  1.82%     -    9s
+     0     0   53.50867    0   36   54.50174   53.50867  1.82%     -    9s
+     0     0   53.58858    0   40   54.50174   53.58858  1.68%     -   11s
+     0     0   53.61925    0   33   54.50174   53.61925  1.62%     -   11s
+     0     0   53.62912    0   41   54.50174   53.62912  1.60%     -   11s
+     0     0   53.62912    0   41   54.50174   53.62912  1.60%     -   11s
+H    0     0                      53.9184110   53.62912  0.54%     -   12s
+     0     0   53.70914    0   26   53.91841   53.70914  0.39%     -   12s
+
+Cutting planes:
+  Gomory: 21
+  Lift-and-project: 23
+  Cover: 5
+  Implied bound: 35
+  Clique: 2
+  MIR: 66
+  Flow cover: 88
+  Zero half: 18
+  RLT: 5
+  Relax-and-lift: 6
+
+Explored 1 nodes (5055 simplex iterations) in 12.71 seconds (2.50 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 10: 53.9184 54.5017 54.8351 ... 908.418
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 5.391841100000e+01, best bound 5.370914414642e+01, gap 0.3881%

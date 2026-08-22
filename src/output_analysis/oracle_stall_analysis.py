@@ -43,10 +43,11 @@ def _is_num(x) -> bool:
                                                 and math.isnan(x))
 
 
-def load_rows(solutions_dir: str = _paths.solutions(),
+def load_rows(solutions_dir: str | None = None,
               instances_dir: str = _paths.instances()) -> list[dict]:
     rows = []
-    for f in glob.glob(os.path.join(solutions_dir, "oracle_*.json")):
+    solutions_dir = _paths.SOLUTIONS if solutions_dir is None else solutions_dir
+    for f in _paths.in_tree(solutions_dir, "oracle_*.json"):
         inst = os.path.basename(f)[len("oracle_"):-len(".json")]
         try:
             d = json.load(open(f, encoding="utf-8"))

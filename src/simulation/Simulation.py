@@ -1207,10 +1207,10 @@ def run_simulation(full_data: dict,
     title   = full_data.get("title", "run")
     rid     = run_id or f"{title}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths   = dict(
-        log = _paths.logs(f"{rid}.txt"),
-        fig = _paths.figures(f"{rid}.png"),
-        sol = _paths.solutions(f"{rid}.json"),
-        scn = _paths.logs(f"{rid}_scenarios.json"),
+        log = _paths.log_out(f"{rid}.txt"),
+        fig = _paths.figure_out(f"{rid}.png"),
+        sol = _paths.solution_out(f"{rid}.json"),
+        scn = _paths.log_out(f"{rid}_scenarios.json"),
     )
     log = open(paths["log"], "w", buffering=1, encoding="utf-8")
 
@@ -1463,10 +1463,10 @@ def run_simulation_precomputed(
     alg   = alg_label
     rid   = run_id or f"{title}_{alg}_S{n_scenarios}_H{horizon_hours:.0f}_{ts}"
     paths = dict(
-        log = _paths.logs(f"{rid}.txt"),
-        fig = _paths.figures(f"{rid}.png"),
-        sol = _paths.solutions(f"{rid}.json"),
-        scn = _paths.logs(f"{rid}_scenarios.json"),
+        log = _paths.log_out(f"{rid}.txt"),
+        fig = _paths.figure_out(f"{rid}.png"),
+        sol = _paths.solution_out(f"{rid}.json"),
+        scn = _paths.log_out(f"{rid}_scenarios.json"),
     )
     log = open(paths["log"], "w", buffering=1, encoding="utf-8")
 

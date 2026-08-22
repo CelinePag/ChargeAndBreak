@@ -1,0 +1,55 @@
+
+Gurobi 9.5.2 (linux64) logging started Sat Aug 15 10:24:07 2026
+
+Set parameter LogFile to value "/mnt/beegfs/users/celinep/ChargeAndBreak/logs/oracle_RshortCfewTnone_2__kwh900_gurobi.log"
+Gurobi Optimizer version 9.5.2 build v9.5.2rc0 (linux64)
+Thread count: 16 physical cores, 32 logical processors, using up to 32 threads
+Optimize a model with 2542 rows, 1333 columns and 16847 nonzeros
+Model fingerprint: 0x32f66a7d
+Variable types: 845 continuous, 488 integer (488 binary)
+Coefficient statistics:
+  Matrix range     [5e-02, 9e+02]
+  Objective range  [5e-01, 1e+00]
+  Bounds range     [1e+00, 2e+01]
+  RHS range        [2e-02, 2e+07]
+
+User MIP start did not produce a new incumbent solution
+User MIP start violates constraint c_l_x3763_ by 1.000000000
+
+Presolve removed 985 rows and 346 columns
+Presolve time: 0.14s
+Presolved: 1557 rows, 987 columns, 10072 nonzeros
+Variable types: 605 continuous, 382 integer (380 binary)
+Found heuristic solution: objective 378.6098477
+Found heuristic solution: objective 342.1923068
+Root relaxation presolve removed 27 rows and 26 columns
+Root relaxation presolved: 1530 rows, 961 columns, 9865 nonzeros
+
+
+Root relaxation: objective 3.249839e+01, 1018 iterations, 0.12 seconds (0.04 work units)
+Another try with MIP start
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+H    0     0                      33.6454970   32.49839  3.41%     -    0s
+     0     0   32.49839    0    9   33.64550   32.49839  3.41%     -    0s
+H    0     0                      33.0969192   32.49839  1.81%     -    0s
+     0     0   32.51880    0   20   33.09692   32.51880  1.75%     -    0s
+H    0     0                      32.6609857   32.51880  0.44%     -    0s
+
+Cutting planes:
+  Gomory: 8
+  Lift-and-project: 1
+  Cover: 1
+  Implied bound: 2
+  Flow cover: 5
+  RLT: 1
+
+Explored 1 nodes (1101 simplex iterations) in 0.55 seconds (0.17 work units)
+Thread count was 32 (of 32 available processors)
+
+Solution count 5: 32.661 33.0969 33.6455 ... 378.61
+
+Optimal solution found (tolerance 5.00e-03)
+Best objective 3.266098566642e+01, best bound 3.251880020374e+01, gap 0.4353%

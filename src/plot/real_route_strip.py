@@ -170,7 +170,7 @@ def make_figure(out_png: str, named: bool = False) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=_paths.figures("real_route_strip.png"))
+    ap.add_argument("--out", default=_paths.figure_out("real_route_strip.png"))
     ap.add_argument("--named", action="store_true",
                     help="label customers by place instead of C1..Cn "
                          "(NOT for the paper)")

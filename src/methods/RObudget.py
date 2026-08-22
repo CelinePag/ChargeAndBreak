@@ -457,10 +457,10 @@ def run_robu(full_data: dict,
         ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"{title}_ROBU_{ts}"
     paths = dict(
-        log = _paths.logs(f"{run_id}.txt"),
-        fig = _paths.figures(f"{run_id}.png"),
-        sol = _paths.solutions(f"{run_id}.json"),
-        scn = _paths.logs(f"{run_id}_scenarios.json"),
+        log = _paths.log_out(f"{run_id}.txt"),
+        fig = _paths.figure_out(f"{run_id}.png"),
+        sol = _paths.solution_out(f"{run_id}.json"),
+        scn = _paths.log_out(f"{run_id}_scenarios.json"),
     )
     log = open(paths["log"], "w", encoding="utf-8")
 

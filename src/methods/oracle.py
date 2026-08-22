@@ -63,8 +63,17 @@ from src import paths as _paths
 # the gap to oracle is derived on demand (compile_solutions / plots) from this
 # cache, whenever it exists.
 
-def oracle_cache_path(instance: str, solutions_dir: str = _paths.solutions()) -> str:
-    return os.path.join(solutions_dir, f"oracle_{instance}.json")
+def oracle_cache_path(instance: str, solutions_dir: str | None = None) -> str:
+    """Where instance's oracle cache IS, or — if unsolved — where it will go.
+
+    solutions/ is bucketed by experiment, and the cache is filed under the
+    INSTANCE's bucket because one oracle serves every method on that instance.
+    An existing file always wins over the derived location, so a cache still
+    sitting in the tree root from before the split is read and rewritten in
+    place rather than silently forked into a second copy.
+    """
+    base = _paths.SOLUTIONS if solutions_dir is None else solutions_dir
+    return _paths.path_in(base, f"oracle_{instance}.json")
 
 
 def _reint_keys(obj):
@@ -77,7 +86,7 @@ def _reint_keys(obj):
     return obj
 
 
-def load_oracle_cache(instance: str, solutions_dir: str = _paths.solutions()):
+def load_oracle_cache(instance: str, solutions_dir: str | None = None):
     """Return the cached oracle dict for an instance, or None if not solved yet."""
     path = oracle_cache_path(instance, solutions_dir)
     if not os.path.isfile(path):
@@ -90,7 +99,7 @@ def load_oracle_cache(instance: str, solutions_dir: str = _paths.solutions()):
 
 
 def save_oracle_cache(instance: str, result: dict,
-                      solutions_dir: str = _paths.solutions()) -> str:
+                      solutions_dir: str | None = None) -> str:
     """Write an oracle result to its per-instance cache file; returns the path."""
     def _ser(o):
         if isinstance(o, (int, float, bool, str, type(None))):

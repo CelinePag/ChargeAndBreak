@@ -69,10 +69,10 @@ CFG  = RUNS[SOL]
 INST = CFG["inst"]
 SOLFILE = CFG.get("sol_file", SOL)
 SOURCE  = CFG.get("source", "sim")
-OUT  = _paths.figures(f"solution_concept_{SOL}.pptx")
+OUT  = _paths.figure_out(f"solution_concept_{SOL}.pptx")
 
 # ================================================================ data ======
-sol  = json.load(open(_paths.solutions(SOLFILE + ".json")))
+sol  = json.load(open(_paths.solution_path(SOLFILE + ".json")))
 inst = json.load(open(_paths.instances(INST + ".json")))
 fd     = inst["instance"]
 D_real = inst["D_real"]

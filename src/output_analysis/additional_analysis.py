@@ -719,6 +719,78 @@ def _norm_la_tag(cfg: str) -> str:
     return f"S{n_scen}H{horizon:g}"
 
 
+_N_STOPS_CACHE: dict = {}
+
+
+def _n_stops(instance: str | None) -> int | None:
+    """Stops on the route, from the instance file (run_cache keeps no lists).
+
+    Decisions happen once per stop, so this is the divisor that turns effort
+    per RUN into effort per DECISION — the only form in which two route
+    classes of very different length can be compared at all.
+    """
+    if not instance:
+        return None
+    if instance not in _N_STOPS_CACHE:
+        n = None
+        try:
+            with open(_paths.instances(instance + ".json"), encoding="utf-8") as fh:
+                raw = json.load(fh)
+            n = (raw.get("instance", raw) or {}).get("N")
+        except (OSError, ValueError):
+            n = None
+        _N_STOPS_CACHE[instance] = int(n) if n else None
+    return _N_STOPS_CACHE[instance]
+
+
+LA_BACKFILL_WORKERS = 8      # every stored LA log records workers=8
+LA_BACKFILL_OVERHEAD = 0.92  # LP-file write + gurobi process spawn per solve
+
+
+def _cpu_hours(r, cs) -> tuple[float | None, bool]:
+    """Solver effort for one run, in hours.  Returns (hours, is_estimate).
+
+    Measured where the run carries ``solve_cpu_s_total`` (runs made after the
+    2026-08-21 instrumentation).  Older runs are BACK-FILLED from the run wall
+    clock: the |Xi| sub-problems of an action are dispatched W at a time, so
+    the clock sees only the slowest of each wave, and the work is recovered by
+    multiplying by how well a wave packs into the workers,
+
+        cpu ~ wall_clock * W * [ |Xi| / (ceil(|Xi|/W) * W) ] * 0.92
+
+    Calibrated on the instrumented cells: predicted 0.719 / 0.821 against
+    0.733 / 0.811 measured, for |Xi| = 25 / 50.  The packing term is NOT a
+    constant — it varies along the scenario ladder — so a single global factor
+    would bias the very axis the ladder measures.  (Run wall clock is used
+    rather than t_dec * n_stops because run_cache keeps only scalars; the two
+    bases agreed to within 1% on every instrumented cell.)
+
+    The estimate inherits one flaw it cannot fix: it is built from elapsed
+    time, so a batch that ran under heavy CPU contention back-fills to an
+    inflated "effort".  Estimated cells are indicative, not measured.
+    """
+    import math
+    meas = cs._get(r, ("metrics", "solve_cpu_s_total"))
+    if meas:
+        return float(meas) / 3600.0, False
+    wall = r.get("wall_clock_s")
+    S    = r.get("n_scenarios")
+    if not (wall and S):
+        return None, False
+    W   = LA_BACKFILL_WORKERS
+    eff = S / (math.ceil(S / W) * W)
+    return (float(wall) * W * eff * LA_BACKFILL_OVERHEAD) / 3600.0, True
+
+
+def _cpu_s_per_stop(r, cs) -> tuple[float | None, bool]:
+    """Solver effort per DECISION, in seconds.  Returns (seconds, is_estimate)."""
+    hours, est = _cpu_hours(r, cs)
+    n = _n_stops(r.get("instance"))
+    if hours is None or not n:
+        return None, est
+    return hours * 3600.0 / n, est
+
+
 def cmd_la(args) -> None:
     """Section 8.3 — LA look-ahead horizon / scenario-count sensitivity.
 
@@ -1027,7 +1099,7 @@ def _cs_decision_mean_s(run_id: str | None):
         return None
     if run_id in _LA_CS_CACHE:                  # pooled rows re-read the same runs
         return _LA_CS_CACHE[run_id]
-    path = _paths.logs(f"{run_id}.txt")
+    path = _paths.log_path(f"{run_id}.txt")
     out, cur = None, None
     try:
         vals = []
@@ -1238,7 +1310,17 @@ def cmd_la_report(args) -> None:
                         "n_paired_pen",
                         "decision_mean_s_median", "decision_cs_mean_s_median",
                         "decision_max_s_median",
-                        "wall_clock_s_median"])
+                        "wall_clock_s_median",
+                        # Solver EFFORT.  Wall clock measures the slowest of
+                        # n_workers parallel sub-problems under whatever CPU
+                        # contention the batch had; CPU time measures the work.
+                        # cap_rate says whether that work actually converged.
+                        "solve_cpu_h_median", "n_subproblems_median",
+                        "cap_rate_median",
+                        # measured where available, back-filled otherwise;
+                        # est_frac says how much of the cell is estimated
+                        "solve_cpu_h_best", "cpu_s_per_stop_best",
+                        "cpu_est_frac"])
             # Window classes are also POOLED into a synthetic 'all' row per
             # (config, route).  A figure that wants one row per configuration must
             # not average the two per-window medians: the classes carry different
@@ -1269,6 +1351,20 @@ def cmd_la_report(args) -> None:
                 decx, _  = _agg([cs._get(r, ("metrics", "decision_time_max_s"))
                                  for r in recs])
                 wall, _  = _agg([r.get("wall_clock_s") for r in recs])
+                cpu, _   = _agg([cs._get(r, ("metrics", "solve_cpu_s_total"))
+                                 for r in recs])
+                nsub, _  = _agg([cs._get(r, ("metrics", "n_subproblems"))
+                                 for r in recs])
+                caps, _  = _agg([cs._get(r, ("metrics", "subproblem_cap_rate"))
+                                 for r in recs])
+                _pst = [h for h, _e in (_cpu_s_per_stop(r, cs)
+                                        for r in recs) if h is not None]
+                cpus, _ = _agg(_pst)
+                _cpu_pairs = [_cpu_hours(r, cs) for r in recs]
+                _cpu_ok    = [(h, e) for h, e in _cpu_pairs if h is not None]
+                cpub, _    = _agg([h for h, _e in _cpu_ok])
+                estf = (sum(1 for _h, e in _cpu_ok if e) / len(_cpu_ok)
+                        if _cpu_ok else None)
                 n_inf = sum(1 for r in recs if cs._is_truly_infeasible(r))
 
                 durp, _  = _agg([r.get("duration_pen_h") for r in recs])
@@ -1299,7 +1395,13 @@ def cmd_la_report(args) -> None:
                             None if dec is None else round(dec, 4),
                             None if dcs is None else round(dcs, 4),
                             None if decx is None else round(decx, 4),
-                            None if wall is None else round(wall, 1)])
+                            None if wall is None else round(wall, 1),
+                            None if cpu is None else round(cpu / 3600.0, 3),
+                            None if nsub is None else round(nsub, 0),
+                            None if caps is None else round(caps, 4),
+                            None if cpub is None else round(cpub, 3),
+                            None if cpus is None else round(cpus, 2),
+                            None if estf is None else round(estf, 3)])
                 print(f"  {cfg:<8} {route:<7} {tw:<6} n={len(recs):<3} "
                       f"gap_pen={'—' if gp is None else f'{gp:.2f}%':<7} "
                       f"(from {n_gp} run(s) with an oracle bound)  "
@@ -1319,8 +1421,8 @@ def cmd_la_report(args) -> None:
 def _latest_2sp_solution(stem: str) -> str | None:
     """Newest solutions/<stem>_2SP_*.json (run ids end in a timestamp, so
     lexicographic max = latest), for the RP leg of the VSS harness."""
-    import glob as _glob
-    hits = sorted(_glob.glob(_paths.solutions(f"{stem}_2SP_*.json")))
+    hits = sorted(_paths.glob_solutions(f"{stem}_2SP_*.json"),
+                  key=os.path.basename)
     return hits[-1] if hits else None
 
 

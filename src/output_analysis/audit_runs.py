@@ -49,7 +49,6 @@ from src.output_analysis import run_cache
 
 ARCHIVE = _paths.archive()
 SOL_DIR = _paths.solutions()
-LOG_DIR = _paths.logs()
 
 # Shared with the runner (src/paths.py) so this audit sees exactly the run ids
 # the runner writes — including the optional VARIANT segment.  With the old
@@ -117,7 +116,7 @@ def oracle_log_index() -> dict[str, list[str]]:
     """stem -> sorted ORACLE log timestamps.  Built ONCE: globbing the log
     directory per run turned this audit into a multi-minute job."""
     idx: dict[str, list[str]] = defaultdict(list)
-    for p in glob.glob(os.path.join(LOG_DIR, "*_ORACLE_*.txt")):
+    for p in _paths.glob_logs("*_ORACLE_*.txt"):
         b = os.path.basename(p)[:-4]
         stem, _, rest = b.partition("_ORACLE_")
         ts = rest[:15]
@@ -137,7 +136,10 @@ def audit():
     # Parsed through run_cache: the corpus is read once per machine rather than
     # once per reporting script (see src/output_analysis/run_cache.py).
     for base, d in run_cache.load_runs(SOL_DIR):
-        path = os.path.join(SOL_DIR, base)
+        # run_cache keys on the basename; the file itself sits in one of the
+        # experiment buckets under SOL_DIR, and every path the audit reports
+        # (and --apply moves) has to be the real one.
+        path = _paths.solution_path(base)
         m = _RUN_RE.match(base[:-5])
         if not m:
             continue
@@ -227,7 +229,7 @@ def audit():
     # schedule LENGTH (_n_sol) rather than the schedule, which is all this check
     # ever needed and keeps ~230 MB of oracle payload out of the audit.
     for title, c in sorted(run_cache.load_oracles(SOL_DIR).items()):
-        path = os.path.join(SOL_DIR, f"oracle_{title}.json")
+        path = _paths.solution_path(f"oracle_{title}.json")
         ipath = idx.get(title)
         if ipath is None:
             buckets["oracle_orphan"].append(path)
@@ -259,7 +261,7 @@ def audit_logs(latest: dict) -> list[str]:
     """G — logs with no surviving solution.  ORACLE logs are legitimate."""
     finished = {os.path.basename(p)[:-5] for _ts, p in latest.values()}
     orphans = []
-    for p in sorted(glob.glob(os.path.join(LOG_DIR, "*.txt"))):
+    for p in _paths.glob_logs("*.txt"):
         rid = os.path.basename(p)[:-4]
         if "_ORACLE_" in rid or rid.endswith("_ORACLE"):
             continue

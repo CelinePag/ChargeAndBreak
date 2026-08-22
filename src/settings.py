@@ -9,6 +9,37 @@ from __future__ import annotations
 import os
 import numpy as np
 
+
+
+
+# instances parameters
+
+ROUTE_CLASSES = ["short", "medium", "long"]
+CUST_CLASSES  = ["few", "medium", "many"]
+WINDOW_CLASSES = ["none", "tight", "medium", "large"]
+
+COMBOS_CLASSES: list[tuple[str, str, str]] = [
+    (rc, cc, wc)
+    for rc in ROUTE_CLASSES
+    for cc in CUST_CLASSES
+    for wc in WINDOW_CLASSES
+]
+
+ROUTE_TAG  = {"short": "Rshort", "medium": "Rmedium", "long": "Rlong"}
+CUST_TAG   = {"few":   "Cfew",   "medium": "Cmedium", "many": "Cmany"}
+WINDOW_TAG = {"none": "Tnone", "tight": "Ttight", "medium": "Tmedium", "large": "Tlarge"}
+
+
+WINDOW_HALF_WIDTH = {"tight": (0.5, 1.0), "medium": (1.0, 3.0), "large":  (3.0, 6.0)}
+DISTANCES_CLASS = {"short": [800, 1200], "medium": [1500, 2500], "long": [3000, 4000]}
+CUST_CLASSES = {"few": (1, 3), "medium": (4, 6), "many": (7, 15)}
+CLUSTERS_CUSTOMERS = {1: [(0.5, 0.6)], 2: [(0.35, 0.45), (0.55, 0.65)], 3: [(0.25, 0.30), (0.50, 0.55), (0.70, 0.75)]}
+CUSTOMERS_SHIFT = 75
+
+
+
+
+
 # ── solver threading ─────────────────────────────────────────────────────────
 # How many threads Gurobi may use for ONE subproblem solve.  0 keeps Gurobi's
 # own default, which is the machine's physical core count.

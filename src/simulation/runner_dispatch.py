@@ -460,12 +460,17 @@ def run_algorithm(
         from src.methods.oracle import oracle_solve, save_oracle_cache
         instance   = full_data.get("title", "unknown")
         _paths.ensure_dirs()
-        gurobi_log = _paths.logs(f"oracle_{instance}_gurobi.log")
+        # Both logs are filed under the INSTANCE's bucket.  Passing it
+        # explicitly matters for the fallback stem below: it carries no
+        # timestamp, so it is not a parseable run_id and the name-derived
+        # routing would leave it in the logs/ root.
+        _bucket    = _paths.instance_bucket(instance)
+        gurobi_log = _paths.log_out(f"oracle_{instance}_gurobi.log", _bucket)
         # Always produce a summary .txt log: a single manual run (run_id=None)
         # falls back to an instance-named file so the user still gets a log
         # instead of only the per-instance Gurobi node table.
         txt_stem   = run_id if run_id else f"{instance}_ORACLE"
-        txt_log    = _paths.logs(f"{txt_stem}.txt")
+        txt_log    = _paths.log_out(f"{txt_stem}.txt", _bucket)
         # line-buffered so the header/summary is readable while the (possibly
         # multi-hour) solve is still running, not only after it closes.
         _lfh = open(txt_log, "w", encoding="utf-8", buffering=1)
@@ -730,11 +735,11 @@ def _stored_sig_val(sol: dict, field: str):
 
 
 def _find_matching_run(json_file: str, alg: str, kw: dict,
-                       solutions_dir: str = _paths.solutions()) -> Optional[str]:
+                       solutions_dir: str | None = None) -> Optional[str]:
     """Return the path of a finished solution with matching params, else None."""
-    import glob as _glob
     import json as _json
 
+    solutions_dir = _paths.SOLUTIONS if solutions_dir is None else solutions_dir
     stem = os.path.splitext(os.path.basename(json_file))[0]
 
     # ORACLE writes no per-run solution file — its result IS the shared cache
@@ -745,8 +750,8 @@ def _find_matching_run(json_file: str, alg: str, kw: dict,
     # already-cached instances.
     if alg == "ORACLE":
         for cand in dict.fromkeys((stem, stem.replace("__", "_"))):
-            path = os.path.join(solutions_dir, f"oracle_{cand}.json")
-            if not os.path.isfile(path):
+            path = _paths.find_in(solutions_dir, f"oracle_{cand}.json")
+            if path is None:
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as fh:
@@ -763,7 +768,7 @@ def _find_matching_run(json_file: str, alg: str, kw: dict,
     if req is None:
         return None
     want_diesel = bool(kw.get("diesel_mode", False))
-    for path in _glob.glob(os.path.join(solutions_dir, f"{stem}_{alg}_*.json")):
+    for path in _paths.in_tree(solutions_dir, f"{stem}_{alg}_*.json"):
         if os.path.basename(path).startswith("oracle_"):
             continue
         try:

@@ -6,10 +6,6 @@ Each JSON file represents ONE independent instance: a unique route geometry
 seed, together with its uncertainty realisation (actual travel times and
 energies per leg).
 
-Scenario pools are NOT precomputed or stored here.  2SP and LA (the two
-algorithms that need forward-looking scenarios) each draw them live via
-scenarios.generate_scenarios() at solve/decision time — see 2SP.run_2sp and
-Simulation.run_simulation_precomputed / select_best_action.
 
 File naming
 -----------
@@ -109,43 +105,9 @@ from src.methods.greedy    import compute_nominal_arrivals
 from src import paths as _paths
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# COMBO REGISTRY
-# ══════════════════════════════════════════════════════════════════════════════
 
-_ROUTE_CLASSES = ["short", "medium", "long"]
-_CUST_CLASSES  = ["few", "medium", "many"]
-_WINDOW_CLASSES = ["none", "tight", "medium", "large"]
-
-_COMBOS: list[tuple[str, str, str]] = [
-    (rc, cc, wc)
-    for rc in _ROUTE_CLASSES
-    for cc in _CUST_CLASSES
-    for wc in _WINDOW_CLASSES
-]
-
-_ROUTE_TAG  = {"short": "Rshort", "medium": "Rmedium", "long": "Rlong"}
-_CUST_TAG   = {"few":   "Cfew",   "medium": "Cmedium", "many": "Cmany"}
-_WINDOW_TAG = {"none": "Tnone", "tight": "Ttight", "medium": "Tmedium", "large": "Tlarge"}
-
-# Per-customer half-width sampling range (hours) for each window class.
-# Every customer on a route draws its OWN half-width independently, uniformly
-# from the class range — so customers on the same route have different window
-# widths.  "none" is unconstrained and draws no half-widths.
-_WINDOW_HALF_WIDTH_RANGE: dict[str, tuple[float, float]] = {
-    "tight":  (0.5, 1.0),
-    "medium": (1.0, 3.0),
-    "large":  (3.0, 6.0),
-}
-
-# Destination deadline (R6) slack relative to the nominal arrival
-_DEADLINE_KAPPA = 0.20
-_DEADLINE_DMIN  = 2.0
-
-
-def instance_filename(route_class: str, customers_class: str,
-                      window_class: str, seed: int) -> str:
-    """Return the canonical filename for one instance file."""
+def instance_filename(route_class: str, customers_class: str, window_class: str, seed: int) -> str:
+    """Return the filename for one instance file."""
     return (f"{_ROUTE_TAG[route_class]}{_CUST_TAG[customers_class]}"
             f"{_WINDOW_TAG[window_class]}_{seed}.json")
 

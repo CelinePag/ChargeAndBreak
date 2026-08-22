@@ -18,14 +18,13 @@ curves meeting at 0, while a solve that stalls leaves the lower curve short.
 Usage
 -----
   python -m src.output_analysis.oracle_bound_multi                       # all classes present
-  python -m src.output_analysis.oracle_bound_multi --glob "logs/oracle_trace_Rlong*.log"
+  python -m src.output_analysis.oracle_bound_multi --glob "oracle_trace_Rlong*.log"
   python -m src.output_analysis.oracle_bound_multi --out-dir figures
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import re
 
@@ -71,15 +70,14 @@ def collect(glob_pat: str):
     oracle logs and the one-off trace logs can be pooled together.  When two
     logs map to the same instance, the one with more samples wins."""
     out = {}
-    for pat in glob_pat.split(","):
-        for path in sorted(glob.glob(pat.strip())):
-            inst = _instance_from_log(path)
-            t, inc, bnd = parse_gurobi_log(path)
-            if len(t) < 2:
-                continue
-            if inst in out and len(out[inst][1]) >= len(t):
-                continue
-            out[inst] = (_route_class(inst), t, inc, bnd)
+    for path in _paths.expand_logs(glob_pat):
+        inst = _instance_from_log(path)
+        t, inc, bnd = parse_gurobi_log(path)
+        if len(t) < 2:
+            continue
+        if inst in out and len(out[inst][1]) >= len(t):
+            continue
+        out[inst] = (_route_class(inst), t, inc, bnd)
     return out
 
 
@@ -149,9 +147,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(
         description="Per-class oracle bound convergence (UB/LB as % from opt).")
     ap.add_argument("--glob",
-                    default=_paths.logs("oracle_*_gurobi.log") + "," + _paths.logs("oracle_trace_*.log"),
-                    help="comma-separated glob(s) of oracle Gurobi logs "
-                         "(default: real-run oracle logs + one-off trace logs)")
+                    default="oracle_*_gurobi.log,oracle_trace_*.log",
+                    help="comma-separated glob(s) of oracle Gurobi logs, "
+                         "searched across logs/ and its experiment buckets "
+                         "(default: real-run oracle logs + one-off traces)")
     ap.add_argument("--out-dir", default=_paths.figures(),
                     help="output directory (default: figures)")
     args = ap.parse_args()

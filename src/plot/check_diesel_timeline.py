@@ -69,7 +69,7 @@ def _blocks(fname: str, fuel_h: float) -> tuple[list, dict, float]:
     The order within a stop is cosmetic — the totals do not depend on it — but it
     keeps the bands legible and matches the concept figure's convention.
     """
-    d = json.load(open(_paths.solutions(fname), encoding="utf-8"))
+    d = json.load(open(_paths.solution_path(fname), encoding="utf-8"))
     traj, dur, td = d["sim_trajectory"], d["durations_list"], d["td_list"]
     inst = af._instance(str(d.get("instance") or "").split("__")[0]) or {}
     C = {int(i) for i in (inst.get("C") or [])}
@@ -222,7 +222,8 @@ def build(instance: str, method: str, out: str | None = None) -> str:
                  x=0.012, ha="left", fontsize=9.5, y=0.998)
     fig.tight_layout(rect=(0.10, 0.05, 1, 0.875))
 
-    out = out or _paths.figures(f"check_diesel_timeline_{instance}_{alg}.png")
+    out = out or _paths.figure_out(
+        f"check_diesel_timeline_{instance}_{alg}.png")
     fig.savefig(out, dpi=200)
     plt.close(fig)
     print(f"  Figure    : {out}")

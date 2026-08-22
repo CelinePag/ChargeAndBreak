@@ -94,19 +94,27 @@ def _stem(route, cust, tw, seed) -> str:
 _DIR_INDEX: dict[str, list[str]] = {}
 
 
+_DIR_WHERE: dict[str, dict[str, str]] = {}
+
+
 def _dir_index(directory: str) -> list[str]:
-    """Sorted entry names of ``directory``, scanned once per process.
+    """Sorted entry NAMES of ``directory``, scanned once per process.
+
+    solutions/ and logs/ are split into experiment buckets, so the index covers
+    the tree root and each bucket and is keyed on the basename; _DIR_WHERE
+    holds name -> full path so _matches can still hand back openable paths.
+    Sorting basenames rather than paths is what keeps the order meaningful: a
+    run_id ends in its timestamp, so lexicographic order is chronological order
+    regardless of which bucket a run landed in.
 
     These are read-only reporting runs, so the listing cannot change underneath
     us; call ``_DIR_INDEX.clear()`` if that ever stops holding.
     """
     names = _DIR_INDEX.get(directory)
     if names is None:
-        try:
-            names = sorted(os.listdir(directory or "."))
-        except OSError:
-            names = []
-        _DIR_INDEX[directory] = names
+        where = dict(_paths.scan_tree(directory or "."))
+        _DIR_WHERE[directory] = where
+        names = _DIR_INDEX[directory] = sorted(where)
     return names
 
 
@@ -136,7 +144,8 @@ def _matches(pattern: str) -> list[str]:
         lo = bisect.bisect_left(names, prefix)
         hi = bisect.bisect_left(names, prefix + "￿")
         block = [n for n in names[lo:hi] if fnmatch.fnmatchcase(n, pat)]
-    return [os.path.join(directory, n) for n in block]
+    where = _DIR_WHERE[directory]
+    return [where[n] for n in block]
 
 
 def _latest(pattern: str) -> str | None:
@@ -287,7 +296,7 @@ def _run_dwell(fname: str | None) -> dict | None:
     if fname is None:
         return None
     if fname not in _RUN_DWELL:
-        d = _load(_paths.solutions(fname))
+        d = _load(_paths.solution_path(fname))
         if not d:
             _RUN_DWELL[fname] = None
         else:
@@ -469,9 +478,9 @@ def _la(stem: str, tag: str | None = None) -> dict | None:
 
 def _oracle(stem: str, tag: str | None = None) -> dict | None:
     """Oracle cache -> duration (h), total/coupled charging time (h)."""
-    names = ([_paths.solutions(f"oracle_{stem}.json")] if tag is None else
-             [_paths.solutions(f"oracle_{stem}__{tag}.json"),
-              _paths.solutions(f"oracle_{stem}_{tag}.json")])
+    names = ([_paths.solution_path(f"oracle_{stem}.json")] if tag is None else
+             [_paths.solution_path(f"oracle_{stem}__{tag}.json"),
+              _paths.solution_path(f"oracle_{stem}_{tag}.json")])
     for n in names:
         d = _load_oracle(n)
         if not (d and d.get("feasible")):
@@ -532,9 +541,9 @@ def _oracle_dwell(stem: str, tag: str | None = None) -> dict | None:
     (verbatim copy, same D_real), differencing these components accounts for
     the whole EV-vs-diesel makespan gap with no residual.
     """
-    names = ([_paths.solutions(f"oracle_{stem}.json")] if tag is None else
-             [_paths.solutions(f"oracle_{stem}__{tag}.json"),
-              _paths.solutions(f"oracle_{stem}_{tag}.json")])
+    names = ([_paths.solution_path(f"oracle_{stem}.json")] if tag is None else
+             [_paths.solution_path(f"oracle_{stem}__{tag}.json"),
+              _paths.solution_path(f"oracle_{stem}_{tag}.json")])
     sol = None
     for n in names:
         d = _load(n)
@@ -595,10 +604,10 @@ def _mean(vals):
 
 def _save(fig, name):
     for ext in ("png", "pdf"):
-        fig.savefig(_paths.figures(f"{name}.{ext}"),
-                    dpi=300 if ext == "png" else None)
+        out = _paths.figure_out(f"{name}.{ext}")
+        fig.savefig(out, dpi=300 if ext == "png" else None)
     plt.close(fig)
-    print(f"  Figure    : figures/{name}.png|pdf")
+    print(f"  Figure    : {os.path.relpath(out, _paths.ROOT)[:-4]}.png|pdf")
 
 
 def _write_csv(name, header, rows):
@@ -1762,7 +1771,7 @@ def _discover_scope(tags) -> dict:
     cust_of  = {v: k for k, v in _CTAG.items()}      # "Cfew"   -> "few"
     combos, tws, seeds = set(), set(), set()
     for tag in tags:
-        for path in glob.glob(_paths.solutions(f"*__{tag}_*.json")):
+        for path in _paths.glob_solutions(f"*__{tag}_*.json"):
             m = re.match(r"^(R[a-z]+)(C[a-z]+)T([a-z]+)_(\d+)__",
                          os.path.basename(path))
             if not m:
@@ -2905,6 +2914,13 @@ def section_la_all(csv_name="additional_la_stats.csv",
                    min_n=5, skip=None, skip_prefix=None):
     """8.3 - every LA configuration on one cost/quality plane, in solver clusters.
 
+    Cost is SOLVER EFFORT PER DECISION (CPU-seconds per stop), not decision
+    wall clock: the |Xi|
+    sub-problems run W at a time, so the clock times the slowest of a parallel
+    wave rather than the work done.  Cells whose runs predate the instrumen-
+    tation are BACK-FILLED (see additional_analysis._cpu_hours) and carry a
+    contention bias the measured cells do not — the banner names them.
+
     One panel per route class, window classes pooled.  Each configuration family
     (LP subproblem, MILP subproblem, MILP + energy guard, ...) forms a cluster:
     its own base cell, with the two ladders and the no-split regime drawn as
@@ -2924,7 +2940,7 @@ def section_la_all(csv_name="additional_la_stats.csv",
 
     def cell(cfg, route):
         row = stats.get((cfg, route, TW))
-        c = _la_num(row, "decision_cs_mean_s_median")
+        c = _la_num(row, "cpu_s_per_stop_best")
         q = _la_num(row, "gap_pen_median_pct")
         if c is None or q is None:
             return None
@@ -3016,7 +3032,7 @@ def section_la_all(csv_name="additional_la_stats.csv",
         ax.set_axisbelow(True)
         ax.tick_params(which="minor", length=2)
         ax.set_title(ps.ROUTE_LBL[route], loc="left")
-        ax.set_xlabel("Decision time per CS stop (s)")
+        ax.set_xlabel("CPU-s per decision")
         if ri == 0:
             ax.set_ylabel("Gap to hindsight optimum (%)")
 
@@ -3056,6 +3072,12 @@ def section_la_all(csv_name="additional_la_stats.csv",
     _cb.outline.set_linewidth(0.3)
     _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
     _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
+    est = sorted({c for (c, _r, t) in stats if t == TW
+                  and (_la_num(stats.get((c, _r, t)), "cpu_est_frac") or 0) > 0.5})
+    if est:
+        fig.text(0.005, 0.008,
+                 "Cost back-filled from wall clock (indicative) for: "
+                 + ", ".join(est), fontsize=4.6, color=MUT, ha="left")
     _save(fig, outname)
 
 
@@ -3123,7 +3145,7 @@ def _la_local_logs() -> dict:
     and 129.0 s over the full route — 20 to 27 % hot.
     """
     out: dict = {}
-    for path in sorted(glob.glob(_paths.logs("*_LA_LOCAL*.txt"))):
+    for path in _paths.glob_logs("*_LA_LOCAL*.txt"):
         rid = os.path.basename(path)[:-4]
         by, cur, head, inst = {}, None, "", ""
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -3145,7 +3167,7 @@ def _la_local_logs() -> dict:
             continue
         key = ("MILP" if re.search(r"\bMIP\b", head) else "LP",
                "__nosplit" in inst)
-        done = bool(glob.glob(_paths.solutions(f"{rid}.json")))
+        done = _paths.find_solution(f"{rid}.json") is not None
         out.setdefault(key, {"done": [], "running": []})
         out[key]["done" if done else "running"].append(
             dict(all=[t for v in by.values() for t in v], cs=css))
@@ -3437,6 +3459,14 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
     time), and whether it strands the truck (infeasibility).  Two series per
     panel, one per tail solver.
 
+    Cost is SOLVER CPU TIME, not decision wall clock.  The |Xi| sub-problems
+    run n_workers at a time, so the clock measures the slowest of a parallel
+    wave under whatever contention the batch had; CPU time measures the work
+    and scales with |Xi| and with the horizon the way a reader expects.  Cells
+    whose runs predate that instrumentation carry no CPU value and are simply
+    absent from the cost panel rather than being back-filled with the clock,
+    which would put two incomparable quantities on one axis.
+
     Coverage is NOT uniform across the ladder — the MILP-tail rungs are still
     filling in — and pooling the route classes makes an uneven mix invisible
     in the median.  Points whose run count falls short of the best-covered
@@ -3471,7 +3501,7 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
             inf = _la_num(row, "n_infeasible")
             xs.append(float(v))
             qs.append(_la_num(row, "gap_pen_median_pct"))
-            cs_.append(_la_num(row, "decision_mean_s_median"))
+            cs_.append(_la_num(row, "cpu_s_per_stop_best"))
             is_.append(100.0 * inf / n if (n and inf is not None) else None)
             nn.append(n)
         if not xs:
@@ -3503,7 +3533,7 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
     rungs = [float(v) for v in ladder]
     base_x = float(_LA_BASE[1] if is_h else _LA_BASE[0])
     for ax, ttl, ylab in ((ax_q, "Quality", "Gap to hindsight optimum (%)"),
-                          (ax_c, "Cost", "Decision time per stop (s)"),
+                          (ax_c, "Cost", "Solver CPU-s per decision"),
                           (ax_i, "Risk", "Infeasible runs (%)")):
         ax.set_title(ttl, loc="left", fontsize=8)
         ax.set_ylabel(ylab, fontsize=7)

@@ -20,10 +20,10 @@ from src import paths as _paths
 BASE = str(_paths.ROOT)
 SOL  = "RshortCfewTmedium_19_RO_20260716_092310_060"
 INST = "RshortCfewTmedium_19"
-OUT  = _paths.figures("solution_concept_" + SOL + ".png")
+OUT  = _paths.figure_out("solution_concept_" + SOL + ".png")
 
 # ---------------------------------------------------------------- load ------
-sol  = json.load(open(_paths.solutions(f"{SOL}.json")))
+sol  = json.load(open(_paths.solution_path(f"{SOL}.json")))
 inst = json.load(open(_paths.instances(f"{INST}.json")))
 fd     = inst["instance"]
 D_real = inst["D_real"]

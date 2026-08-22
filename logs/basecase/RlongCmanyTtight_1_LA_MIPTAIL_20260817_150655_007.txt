@@ -1,0 +1,23 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-17 15:06:57)
+  Instance : RlongCmanyTtight_1   run_id=RlongCmanyTtight_1_LA_MIPTAIL_20260817_150655_007
+  Route    : 152 stops  departure=8:00
+  Settings : N_scen=25  H=24.0h  cv=0.15  workers=1  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 17/152 stops done, continuing from stop 17
+
+[LA] stop 17 (LAYBY)  t=13.710h  soc=342kWh  cd=1.49h  sd=4.43h  sw=4.73h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [17->61]  travel=11.76h +1rest  4 actions × 25 scen  1w  [mean,mip]  pruned=1
+  y=0  brk=0    rst=0   40.379h (0.171h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (19.2s)
+  y=0  brk=0    rst=r2  49.438h (0.158h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (30.5s)
+  y=0  brk=b45  rst=0   42.659h (0.664h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (41.8s)
+  y=0  brk=b15  rst=0   40.909h (0.340h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (26.4s)
+     [DIAG] max per-scenario delta spread across actions: 90.11 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=13.710h  td=13.710h  (mean=40.379h)  117.9s
+
+[LA] stop 18 (CS)  t=13.930h  soc=316kWh  cd=1.71h  sd=4.65h  sw=4.95h  phi=0  r2=0  ext_sh=0/2  sd_lim=9h
+     horizon [18->61]  travel=11.51h +1rest  8 actions × 25 scen  1w  [mean,mip]  pruned=2  ws=prev
+     [FREE-MIP]  obj=40.292h  0.9s  ws=no  1300v/2379c

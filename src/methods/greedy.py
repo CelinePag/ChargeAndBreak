@@ -505,11 +505,11 @@ def run_greedy(full_data: dict,
     if not persist:
         os.makedirs(_int_dir, exist_ok=True)
     paths = dict(
-        log = (_paths.logs(f"{run_id}.txt") if persist
+        log = (_paths.log_out(f"{run_id}.txt") if persist
                else os.path.join(_int_dir, f"{run_id}.txt")),
-        fig = _paths.figures(f"{run_id}.png") if persist else None,
-        sol = _paths.solutions(f"{run_id}.json") if persist else None,
-        scn = (_paths.logs(f"{run_id}_scenarios.json")
+        fig = _paths.figure_out(f"{run_id}.png") if persist else None,
+        sol = _paths.solution_out(f"{run_id}.json") if persist else None,
+        scn = (_paths.log_out(f"{run_id}_scenarios.json")
                if persist else None),
     )
     log = open(paths["log"], "w", encoding="utf-8")

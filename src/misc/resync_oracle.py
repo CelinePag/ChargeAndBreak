@@ -62,21 +62,23 @@ def _differs(embedded: dict, cache: dict) -> bool:
 def resync(sol_dir: str, apply: bool,
            instance_filter: str | None, route_filter: str | None):
     caches = {}   # instance -> cache dict
-    for f in os.listdir(sol_dir):
+    # solutions/ is split into experiment buckets; scan_tree walks the root and
+    # every bucket and hands back (basename, path) pairs.
+    tree = _paths.scan_tree(sol_dir)
+    for f, fpath in tree:
         if f.startswith("oracle_") and f.endswith(".json"):
             inst = f[len("oracle_"):-len(".json")]
             try:
-                caches[inst] = _load(os.path.join(sol_dir, f))
+                caches[inst] = _load(fpath)
             except Exception as e:
                 print(f"  SKIP cache {f}: {e}", file=sys.stderr)
 
     n_scanned = n_update = n_nocache = n_insync = 0
     per_instance = {}
 
-    for f in sorted(os.listdir(sol_dir)):
+    for f, path in tree:
         if not f.endswith(".json") or f.startswith("oracle_"):
             continue
-        path = os.path.join(sol_dir, f)
         try:
             d = _load(path)
         except Exception as e:

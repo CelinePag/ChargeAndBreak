@@ -74,11 +74,8 @@ EPS = 1e-3
 # class, Whf ≈ Wha + 2e7) and are not drawn.
 WINDOW_MAX_DRAW_WIDTH_H = 100.0
 
-FIGURES_DIR = _paths.figures()
-
-
 def _ensure_fig_dir():
-    os.makedirs(FIGURES_DIR, exist_ok=True)
+    _paths.ensure_dirs()
 
 
 # ── Low-level drawing primitives ─────────────────────────────────────────────
@@ -447,7 +444,7 @@ def plot_solution(sol, data, title="solution"):
 
     plt.tight_layout()
     _ensure_fig_dir()
-    fname = os.path.join(FIGURES_DIR, f"solution_{title}_{int(time.time())}.png")
+    fname = _paths.figure_out(f"solution_{title}_{int(time.time())}.png")
     plt.savefig(fname, dpi=150, bbox_inches="tight")
     print(f"  Plot saved: {fname}")
     plt.close()
@@ -990,8 +987,8 @@ def plot_simulation_results(results, full_data, title="simulation", save=True, s
         if results.get("fig_path"):
             fname = results["fig_path"]
         else:
-            fname = os.path.join(FIGURES_DIR,
-                                 f"simulation_{title}_{int(time.time())}.png")
+            fname = _paths.figure_out(
+                f"simulation_{title}_{int(time.time())}.png")
         plt.savefig(fname, dpi=150, bbox_inches="tight")
         print(f"  Plot saved: {fname}")
 
@@ -1029,33 +1026,36 @@ def _resolve_solution_paths(run_ref: str, solutions_dir: str = SOLUTIONS_DIR):
       - a run_id (with or without .json)    <run_id>
       - a run_id / instance-name prefix     RshortCfewTlarge_10
         (matches every saved run of that instance)
+
+    solutions/ is split into experiment buckets, so every lookup but the two
+    that name a filesystem location outright (a literal path, a glob the caller
+    wrote) searches the tree root and all four buckets.
     """
     import glob as _glob
 
     if os.path.isfile(run_ref):
         return [run_ref]
     if any(ch in run_ref for ch in "*?["):
-        hits = sorted(_glob.glob(run_ref))
+        # A bare pattern is resolved against the buckets; one that already
+        # carries a directory part is the caller's own path and is left alone.
+        hits = (sorted(_glob.glob(run_ref)) if os.path.dirname(run_ref)
+                else _paths.in_tree(solutions_dir, run_ref))
         if not hits:
             raise FileNotFoundError(f"no files matched pattern '{run_ref}'")
         return hits
-    for cand in (os.path.join(solutions_dir, run_ref),
-                 os.path.join(solutions_dir, run_ref + ".json")):
-        if os.path.isfile(cand):
-            return [cand]
-    if os.path.isdir(solutions_dir):
-        hits = sorted(
-            os.path.join(solutions_dir, f)
-            for f in os.listdir(solutions_dir)
-            if f.startswith(run_ref) and f.endswith(".json")
-            and not f.startswith("oracle_")
-        )
-        if hits:
-            return hits
+    for cand in (run_ref, run_ref + ".json"):
+        hit = _paths.find_in(solutions_dir, cand)
+        if hit:
+            return [hit]
+    hits = sorted(path for name, path in _paths.scan_tree(solutions_dir)
+                  if name.startswith(run_ref) and name.endswith(".json")
+                  and not name.startswith("oracle_"))
+    if hits:
+        return hits
     raise FileNotFoundError(
         f"no solution file found for '{run_ref}' "
-        f"(looked in '{solutions_dir}/'; pass a run_id, an instance-name "
-        f"prefix, a glob pattern, or a JSON path)")
+        f"(looked in '{solutions_dir}/' and its experiment buckets; pass a "
+        f"run_id, an instance-name prefix, a glob pattern, or a JSON path)")
 
 
 def _pwl_e2t(full_data: dict):
@@ -1196,7 +1196,7 @@ def load_run(run_ref: str,
         metrics          = sol.get("metrics", {}),
         sol_path         = sol_path,
         run_id           = run_id,
-        fig_path         = os.path.join(FIGURES_DIR, f"{run_id}.png"),
+        fig_path         = _paths.figure_out(f"{run_id}.png"),
     )
     return results, full_data, run_id
 

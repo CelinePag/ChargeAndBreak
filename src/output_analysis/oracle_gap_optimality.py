@@ -16,14 +16,13 @@ interrupted (no Gurobi termination line) are skipped.
 Usage
 -----
   python -m src.output_analysis.oracle_gap_optimality
-  python -m src.output_analysis.oracle_gap_optimality --glob "logs/oracle_RmediumC*_gurobi.log"
+  python -m src.output_analysis.oracle_gap_optimality --glob "oracle_RmediumC*_gurobi.log"
   python -m src.output_analysis.oracle_gap_optimality --xmax 300 --ymin -25 --ymax 50
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 
 import matplotlib
@@ -51,7 +50,7 @@ def _termination(path: str):
 def build(glob_pat: str, out_base: str, xmax: float, ymin: float, ymax: float):
     fig, ax = plt.subplots(figsize=(7.6, 4.6))
     n_opt = n_not = n_skip = 0
-    for path in sorted(glob.glob(glob_pat)):
+    for path in _paths.expand_logs(glob_pat):
         term = _termination(path)
         if term is None:
             n_skip += 1
@@ -108,8 +107,9 @@ def build(glob_pat: str, out_base: str, xmax: float, ymin: float, ymax: float):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Oracle bounds coloured by optimality.")
-    ap.add_argument("--glob", default=_paths.logs("oracle_RmediumC*_gurobi.log"),
-                    help="glob of oracle Gurobi logs (default: medium)")
+    ap.add_argument("--glob", default="oracle_RmediumC*_gurobi.log",
+                    help="glob of oracle Gurobi logs, searched across logs/ "
+                         "and its experiment buckets (default: medium)")
     ap.add_argument("--out", default=_paths.figures("oracle_gap_optimality"),
                     help="output path base")
     ap.add_argument("--xmax", type=float, default=300.0)

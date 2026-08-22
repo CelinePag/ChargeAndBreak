@@ -110,7 +110,7 @@ def _read(fname: str) -> tuple[list, dict, list, float, float, float]:
     queue, charge, reposition off the bay, then the break or rest, then service.
     The order within a stop is cosmetic; the totals do not depend on it.
     """
-    d = json.load(open(_paths.solutions(fname), encoding="utf-8"))
+    d = json.load(open(_paths.solution_path(fname), encoding="utf-8"))
     traj, dur, td = d["sim_trajectory"], d["durations_list"], d["td_list"]
     inst = af._instance(str(d.get("instance") or "").split("__")[0]) or {}
     C = {int(i) for i in (inst.get("C") or [])}
@@ -362,7 +362,7 @@ def build(instance: str, low: str, high: str, alg: str = "GREEDY",
                  f"{abs(delta):.1f} h {verdict} than {kw(low)}",
                  x=0.012, ha="left", fontsize=9.5, y=0.985)
 
-    out = out or _paths.figures(
+    out = out or _paths.figure_out(
         f"check_power_timeline_{instance}_{alg}_{low}_{high}.png")
     fig.savefig(out, dpi=200)
     plt.close(fig)
