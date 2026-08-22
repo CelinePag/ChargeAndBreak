@@ -1538,15 +1538,17 @@
      [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
      [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
   -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=86.736h  td=86.736h  (mean=720000024.364h)  4.0s
-  [!] FORCED REST (r1) at stop 122
+  [!] NO FEASIBLE ACTION at stop 122 — run halted
+  [!] RUN HALTED at stop 122 of 123 (no_feasible_action) — no route duration is reported
 
 =================================================================
-  LA SIMULATION COMPLETE
-  Arrival  : 98.336 h  (98:20)
-  Duration : 90.336 h
-  Wall     : 3943.2 s
+  LA SIMULATION HALTED
+  Halted   : stop 122 of 123  (no_feasible_action)
+  Duration : not reported — the route was not completed
 =================================================================
 
-  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/RmediumCmanyTnone_5__kwh300_LA_20260818_233840_170_scenarios.json  (coverage=95.1%)
-  Metrics  : violations=0 (none)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
-  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/RmediumCmanyTnone_5__kwh300_LA_20260818_233840_170.json
+  [rewritten 2026-08-22: this run was made under the old forced-rest
+   safety net, which inserted a corrective rest here and carried on.
+   Under the halt semantics the run ends at this stop, so everything
+   that followed has been removed.]
+
