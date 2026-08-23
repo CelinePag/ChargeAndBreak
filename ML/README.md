@@ -341,6 +341,93 @@ Bash `ps` cannot see surviving Windows processes (it reported 0 while 20 were
 running). Use harness background tasks, and check with PowerShell
 `Get-CimInstance Win32_Process`.
 
+## DAgger round 1 — RESULTS (2026-08-23)
+
+Collected on the HPC: **530 shards, 17,941 teacher-labelled states** at the
+student's own visited states = 19.4 % of the merged training set (far more
+than the ~2,000 originally sized for; `--limit 0` took all train instances).
+
+**Covariate shift, measured.** At student-visited states the teacher wants
+MORE rest than in the base distribution: r1 0.33 % -> 0.81 % (2.5x),
+r2 1.63 % -> 2.33 %, charge+r1 0.10 % -> 0.20 %. Consistent with the cw=0
+model under-resting (must_rest fired 115x vs 20x). That table IS the
+covariate-shift measurement.
+
+**The aggregation weight had to be re-tuned.** `--dagger-weight 5` was sized
+for ~2,000 rows; with 17,941 rows it makes aggregated data 55 % of effective
+loss mass and over-corrects. Weight 1 is right at this collection size.
+
+Val, 129 instances, K=20 / cw=0 / guard 0.95 / no-split, CURRENT halt
+semantics, 3 training seeds each:
+
+| variant | median vs teacher | halts /129 | max | ms/dec |
+|---------|-------------------|-----------|-----|--------|
+| base, 3 seeds | **+0.435 ± 0.187** | **5.7 ± 0.9** | +19.5…+36.6 | 0.66 |
+| DAgger w=5 (1 seed) | +0.36 | 8 | +28.2 | 0.73 |
+| DAgger w=2 (1 seed) | +0.23 | 7 | +30.6 | 0.62 |
+| **DAgger w=1, 3 seeds** | **+0.186 ± 0.138** | **3.3 ± 1.7** | +14.9…+36.4 | 0.64 |
+| LA-MIP teacher | — | 0 | — | 72 263 |
+
+* Duration improvement +0.25 pp is **WITHIN 2x the base seed spread** — so on
+  the median DAgger is suggestive, NOT proven. Report it that way.
+* The robustness gain is the stronger signal: halts 5.7 -> 3.3 (-42 %), and
+  the best DAgger seed halts on 1 of 129 routes.
+* TW misses unchanged (~195-214 vs teacher 112) — DAgger did not touch the
+  window weakness, as expected: it corrects state-distribution mismatch, not
+  an objective the loss never emphasised.
+
+## REPO CHANGES THAT BROKE / CHANGED THIS WORK (2026-08-22)
+1. **solutions/ is bucketed** (basecase / LAconfig / sensitivity / usecase),
+   ZERO files at the tree root. Never glob the root — use
+   `paths.in_tree(dir, pattern)` / `paths.glob_solutions`. compare_runs.py and
+   plotML.py are already migrated.
+2. **halt-on-infeasible**: a breaching run ENDS at that stop and carries
+   `duration_h = None` plus `route_completed`, `halted_at_stop`,
+   `halt_reason`, `partial_duration_h`. A duration exists only for a
+   COMPLETED route, so halted runs are counted, never averaged.
+   1,042 pre-halt student runs were archived to `ML/solutions_stale_prehalt/`
+   because they completed routes that would now halt — they are NOT
+   comparable to anything produced after the change.
+3. **LP-tail LA no longer exists for the base grid** (MIPTAIL is now the
+   standard "LA"). The "vs LP-tail" column is gone; the teacher is the only
+   solver baseline. This actually simplifies the paper's claim to
+   "student ~= the standard look-ahead at 10^5 less online compute".
+
+## Figures regenerated 2026-08-23 (`--method=STUDENTDAGW1`)
+`python ML/code/plotML.py --method=STUDENTDAGW1 all`
+
+plotML.py was patched for the two repo changes: `_completed()` filters rows
+whose run halted (duration_h = None) out of every duration statistic — never
+averaged, only counted — and the LP-tail series is replaced by GREEDY, which
+is now the only other baseline on the base grid.
+
+* **ml_money** — STUDENT sits at ~0 % penalty at 0.6 ms, on the same
+  horizontal as LA-MIP at 72 s, with GREEDY at +2.4 % at 0.1 ms. Teacher
+  quality at greedy speed, which is the whole paper in one panel.
+* **ml_paired** — now vs. teacher AND vs. greedy, by route class. Medians sit
+  on zero against the teacher and clearly below zero against greedy; the
+  remaining outliers are the handful of halted/near-halted routes.
+* **ml_failures** — STUDENT's 5 failures are ALL `hos_spread`; greedy has 1
+  `hos_sd`; teacher 0. The failure mode is now single and specific (the 15 h
+  spread ceiling), not diffuse.
+* **ml_schedule** — `RlongCmediumTtight_20`: student 99.7 h vs teacher 99.7 h,
+  rest blocks and SoC traces essentially superimposed.
+
+**OVER-CHARGING IS FIXED.** It was the standing weakness (student +6.1 %
+charge hours, mean SoC 60.9 vs 57.2 %). Now:
+
+| | student | teacher |
+|---|---|---|
+| mean SoC at arrival | 56.9 % | 57.0 % |
+| 5th-pct SoC | 29.5 % | 28.2 % |
+| charge events / route | 9.2 | 9.5 |
+| total charge hours | 6.74 h | **6.80 h (−0.9 %)** |
+
+The student now charges marginally LESS than the teacher and runs the pack to
+the same depth. Credit is shared between cw=0 (which stopped the loss from
+ignoring the majority class) and DAgger (which labelled the states the
+student actually reaches).
+
 ## Open items
 - [ ] Recompile LA stats including the new long-route MIPTAIL batch
       (long-route rows of the motivation table).

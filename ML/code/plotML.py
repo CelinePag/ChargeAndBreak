@@ -108,8 +108,10 @@ def collect_runs(method: str | None = None) -> list[dict]:
                    student_infeas=bool(m.get("run_infeasible")),
                    student_tw=m.get("tw_n_misses"),
                    student_viol=m.get("violations_by_type") or {})
-        for tag, key in (("LA_MIPTAIL", "teacher"), ("LA_2026", "la_lp"),
-                         ("GREEDY", "greedy")):
+        # LA_MIPTAIL is now the STANDARD look-ahead; the LP-tail variant no
+        # longer exists for the base grid, so the teacher and greedy are the
+        # only solver-side baselines available.
+        for tag, key in (("LA_MIPTAIL", "teacher"), ("GREEDY", "greedy")):
             g = _latest(REF_SOLS, f"{inst}_{tag}*.json")
             if g:
                 t = json.load(open(g))
@@ -122,6 +124,21 @@ def collect_runs(method: str | None = None) -> list[dict]:
 
 
 # ── figures ──────────────────────────────────────────────────────────────────
+def _completed(rows, *keys):
+    """Rows where every named run finished its route.
+
+    Since the halt-on-infeasible change a breaching run ENDS at that stop and
+    stores duration_h = None, so a duration exists only for a completed
+    route.  Every duration statistic below filters through this first —
+    a None would otherwise poison a median or raise on subtraction.
+    """
+    out = []
+    for r in rows:
+        if all(r.get(k) is not None for k in keys):
+            out.append(r)
+    return out
+
+
 def fig_money(rows):
     """Quality vs. online latency — the paper's headline figure.
 
@@ -129,13 +146,13 @@ def fig_money(rows):
        (0% = teacher quality; higher = worse).
     x: median seconds per decision, log scale.
     """
-    series = [("STUDENT", "student"), ("LA-LP", "la_lp"),
-              ("LA-MIP", "teacher"), ("GREEDY", "greedy")]
+    series = [("STUDENT", "student"), ("LA-MIP", "teacher"),
+              ("GREEDY", "greedy")]
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     for label, key in series:
         pts = [(r[key + "_dec"], 100 * (r[key] - r["teacher"]) / r["teacher"])
-               for r in rows
-               if r.get(key) and r.get("teacher") and r.get(key + "_dec") is not None]
+               for r in _completed(rows, key, "teacher")
+               if r.get(key + "_dec") is not None]
         if not pts:
             continue
         x = np.median([p[0] for p in pts]); y = np.median([p[1] for p in pts])
@@ -157,11 +174,11 @@ def fig_paired(rows):
     """Paired per-instance deltas by route class: median AND tail."""
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.2), sharey=True)
     for ax, (ref, title) in zip(axes, [("teacher", "vs. exact-tail teacher"),
-                                       ("la_lp", "vs. LP-tail look-ahead")]):
+                                       ("greedy", "vs. greedy heuristic")]):
         data, labels = [], []
         for rc in ROUTE_ORDER:
-            d = [100 * (r["student"] - r[ref]) / r[ref] for r in rows
-                 if r["route"] == rc and r.get(ref) and r.get("student")]
+            d = [100 * (r["student"] - r[ref]) / r[ref]
+                 for r in _completed(rows, "student", ref) if r["route"] == rc]
             if d:
                 data.append(d); labels.append(f"{rc}\n(n={len(d)})")
         if not data:
@@ -181,7 +198,7 @@ def fig_failures(rows):
     """Failure counts by cause — the honest half of the story."""
     causes = ["stranding", "hos_cd", "hos_sd", "hos_spread"]
     methods = [("STUDENT", "student_viol"), ("LA-MIP", "teacher_viol"),
-               ("LA-LP", "la_lp_viol")]
+               ("GREEDY", "greedy_viol")]
     fig, ax = plt.subplots(figsize=(5.2, 3.2))
     width, xs = .25, np.arange(len(causes))
     for i, (label, key) in enumerate(methods):
@@ -262,7 +279,7 @@ def fig_schedule(rows, instance: str | None = None):
     the break inside the charge) is visible rather than inferred from a
     duration delta.
     """
-    cand = [r for r in rows if r.get("teacher") and r.get("student")]
+    cand = _completed(rows, "teacher", "student")
     if not cand:
         print("[skip] schedule: need student and teacher runs for one instance")
         return

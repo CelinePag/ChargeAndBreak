@@ -1,0 +1,23 @@
+\begin{table}[htbp]\centering
+\caption{Look-ahead configuration sensitivity.  Gap is the median gap to the hindsight optimum; $\Delta$ is the median paired change in route duration with respect to the base cell ($|\Xi| = 25$, $L = 24$\,h), positive meaning slower; $t_{\text{dec}}$ is the median per-stop decision time, taken as run wall clock over the number of stops and uncorrected for parallelism.  Every cell is quoted over seeds 1--10.  Cells shown as ``--'' have no runs yet.}
+\label{tab:la-config}
+\begin{tabular}{rrlrrrrrr}
+\toprule
+\multicolumn{3}{c}{\textbf{Configuration}} & \multicolumn{3}{c}{\textbf{Medium route}} & \multicolumn{3}{c}{\textbf{Long route}} \\
+\cmidrule(lr){1-3}\cmidrule(lr){4-6}\cmidrule(lr){7-9}
+$|\Xi|$ & $L$ (h) & Windows & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) & Gap (\%) & $\Delta$ (\%) & $t_{\text{dec}}$ (s) \\
+\midrule
+25 & 24 & None\rlap{\,\tiny base} & 1.9$^{\dagger}$ & -- & 68 & -- & -- & -- \\
+25 & 24 & Tight\rlap{\,\tiny base} & 3.2 & -- & 90 & -- & -- & -- \\
+25 & 12 & None & 3.8$^{\dagger}$ & +1.9 & 21 & -- & -- & -- \\
+25 & 12 & Tight & 4.2 & +1.0 & 26 & -- & -- & -- \\
+25 & 48 & None & -- & -- & -- & -- & -- & -- \\
+25 & 48 & Tight & -- & -- & -- & -- & -- & -- \\
+10 & 24 & None & 1.8$^{\dagger}$ & -0.0 & 27 & -- & -- & -- \\
+10 & 24 & Tight & 2.4 & -0.8 & 32 & -- & -- & -- \\
+50 & 24 & None & 1.9$^{\dagger}$ & +0.0 & 134 & -- & -- & -- \\
+50 & 24 & Tight & 3.7 & +0.6 & 158 & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\\[2pt]{\footnotesize $^{\dagger}$ fewer than 60\% of the runs the best-covered cell of the table has, so the median is thin: $|\Xi| = 10$, $L = 24$, none windows, medium ($n = 1$); $|\Xi| = 25$, $L = 12$, none windows, medium ($n = 1$); $|\Xi| = 25$, $L = 24$, none windows, medium ($n = 1$); $|\Xi| = 50$, $L = 24$, none windows, medium ($n = 1$).}
+\end{table}

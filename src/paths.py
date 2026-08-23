@@ -278,15 +278,16 @@ def effective_variant(method: str | None, variant: str | None,
         eff = None
     else:
         eff = variant or LA_LEGACY_VARIANT
-    # The committed-charge energy guard splits the cell only on the SUPERSEDED
-    # LP side.  On the MILP side it is being adopted as part of the standard
-    # configuration, so a guarded and an unguarded MILP run are two samples of
-    # one cell rather than two cells — and where an instance has both, the
-    # report keeps the guarded one (see _prefer_energy_guard).  Leaving the tag
-    # off here is what merges them; the preference rule is what stops the pair
-    # being averaged.
-    if energy_q and (mode == "lp" or (eff or "").endswith(LA_LEGACY_VARIANT)):
-        eff = f"{eff}+EQ{int(round(float(energy_q) * 100))}" if eff               else f"EQ{int(round(float(energy_q) * 100))}"
+    # The committed-charge energy guard USED to split the cell on the LP side:
+    # the MILP arm had adopted the guard while the stored LP corpus had not, so
+    # an "+EQ50" tag kept the two populations apart.  That split is retired
+    # (2026-08-23).  The whole LP corpus was deleted and the sweep is being
+    # re-run with the guard on in BOTH arms, so the tag now only ever appends a
+    # suffix that every consumer would have to be taught about — and would not
+    # be: the ladder figures look up "<TAG>+LPTAIL" exactly, so an LP cell
+    # arriving as "S25H12+LPTAIL+EQ50" would silently vanish from every figure
+    # rather than error.  `energy_q` is kept in the signature because callers
+    # pass it positionally and because a future split may need it again.
     return eff
 
 

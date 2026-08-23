@@ -825,37 +825,72 @@ def cmd_la(args) -> None:
     seeds  = _expand_seeds(args.seeds)
     combos = args.combos.split(",")
     tws    = args.tw.split(",")
+    tails  = [t.strip().lower() for t in args.solve_mode.split(",") if t.strip()]
+    for t in tails:
+        if t not in ("mip", "lp"):
+            raise SystemExit(f"bad --solve-mode '{t}': expected mip, lp, or "
+                             f"mip,lp")
 
+    files = []
+    for combo in combos:
+        route, cust = _split_combo(combo)
+        for tw in tws:
+            for seed in seeds:
+                p = _base_instance_path(route, cust, tw, seed)
+                if not os.path.isfile(p):
+                    print(f"missing  {p} (skipped)")
+                    continue
+                files.append(p)
+    if not files:
+        raise SystemExit("no instances matched --combos/--tw/--seeds")
+
+    # One unit of work per (config, tail).  Both arms of a cell carry the SAME
+    # --variant tag: paths.effective_variant files the LP-solved one as
+    # "<TAG>+LPTAIL" at read time, so they never collide in the dedup and the
+    # figures find both without the launcher having to invent a second tag.
+    units = []
     for cfg in [c.strip() for c in args.configs.split(",") if c.strip()]:
         n_scen, horizon = _parse_la_config(cfg)
-        if (n_scen, horizon) == (LA_BASE_SCEN, LA_BASE_HORIZON):
-            print(f"skip     {cfg}: that is the base case — the standard-"
-                  f"configuration runs already in solutions/ are this cell")
-            continue
-        files = []
-        for combo in combos:
-            route, cust = _split_combo(combo)
-            for tw in tws:
-                for seed in seeds:
-                    p = _base_instance_path(route, cust, tw, seed)
-                    if not os.path.isfile(p):
-                        print(f"missing  {p} (skipped)")
-                        continue
-                    files.append(p)
-        if not files:
-            print(f"skip     {cfg}: no instances matched")
-            continue
-        print(f"\n=== LA {cfg}: n_scenarios={n_scen} horizon={horizon:g}h "
-              f"on {len(files)} instance(s) ===")
+        for tail in tails:
+            units.append((cfg, n_scen, horizon, tail))
+
+    print(f"\n=== LA sweep: {len(units)} cell(s) x {len(files)} instance(s) "
+          f"= {len(units) * len(files)} run(s) ===")
+    for cfg, n_scen, horizon, tail in units:
+        base = " (base cell, run under its own tag)" if (
+            (n_scen, horizon) == (LA_BASE_SCEN, LA_BASE_HORIZON)) else ""
+        print(f"     {cfg:<8} |Xi|={n_scen:<3} L={horizon:g}h  {tail}-tail{base}")
+
+    def _launch(unit):
+        cfg, n_scen, horizon, tail = unit
         # prune_quantile is NOT passed: the flag drives LA's action pruning and
         # every base LA run was made without it, so passing it would confound
         # the configuration axis with a guard change.
         _dispatch(",".join(files), "LA", args.jobs, args.dry_run,
                   extra=["--variant", cfg,
                          "--n_scenarios", str(n_scen),
-                         "--horizon", f"{horizon:g}"],
+                         "--horizon", f"{horizon:g}",
+                         "--solve_mode", tail],
                   guard=None, la_energy_quantile=args.la_energy_quantile,
                   resume=args.resume)
+
+    # Two nested levels of concurrency, and they multiply.  runner_dispatch
+    # parallelises INSTANCES within one cell (--jobs); this parallelises the
+    # CELLS on top (--config-jobs).  One level alone leaves cores idle: a cell
+    # of 8 instances at --jobs 8 finishes its slowest run with seven cores
+    # already free, and with the cells serialised that tail is paid once per
+    # cell.  Since n_workers is 1 per run, the product is the number of
+    # concurrent LA processes — keep --jobs x --config-jobs at or below the
+    # core count.
+    if args.config_jobs <= 1 or len(units) <= 1:
+        for u in units:
+            _launch(u)
+        return
+    print(f"     [{args.config_jobs} cell(s) in flight x --jobs {args.jobs} "
+          f"= up to {args.config_jobs * args.jobs} concurrent run(s)]")
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=args.config_jobs) as ex:
+        list(ex.map(_launch, units))
 
 
 def _fmt_seeds(seeds: list) -> str:
@@ -1866,10 +1901,11 @@ def main() -> None:
     def _add_la_common(pp) -> None:
         pp.add_argument("--configs", default=LA_DEFAULT_CONFIGS,
                         help="Comma-separated S<scenarios>H<horizon> cells "
-                             f"(default: {LA_DEFAULT_CONFIGS}).  The base case "
-                             f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g} is skipped: "
-                             f"the standard-configuration runs already in "
-                             f"solutions/ ARE that cell.")
+                             f"(default: {LA_DEFAULT_CONFIGS}).  The base cell "
+                             f"S{LA_BASE_SCEN}H{LA_BASE_HORIZON:g} may be named "
+                             f"like any other: it then runs under its own tag "
+                             f"and is filed in the LAconfig bucket, so it "
+                             f"cannot displace the unlabelled base-case runs.")
         pp.add_argument("--combos", default=",".join(LA_COMBOS),
                         help=f"Route+customer combos (default: "
                              f"{','.join(LA_COMBOS)})")
@@ -1891,6 +1927,18 @@ def main() -> None:
                         "nominal).  Match the base cell, or the ladder mixes "
                         "the guard with the configuration.  Unset = off "
                         "(settings.LA_ENERGY_QUANTILE).")
+    p.add_argument("--solve-mode", dest="solve_mode", default="mip",
+                   help="Look-ahead TAIL solver: 'mip' (the standard), 'lp', "
+                        "or 'mip,lp' to launch both arms of every cell.  Both "
+                        "arms carry the same --variant tag; the LP one is "
+                        "filed as '<TAG>+LPTAIL' at read time, so they never "
+                        "collide and both reach the figures.")
+    p.add_argument("--config-jobs", dest="config_jobs", type=int, default=1,
+                   help="How many CELLS to have in flight at once (default: "
+                        "1, i.e. cells run one after another).  Multiplies "
+                        "with --jobs, which parallelises instances WITHIN a "
+                        "cell: keep --jobs x --config-jobs at or below the "
+                        "core count, since n_workers is 1 per run.")
     p.add_argument("--jobs", type=int, default=8,
                    help="Concurrent runs (default: 8, matching the base LA "
                         "batch).  Keep it identical across every cell or the "
