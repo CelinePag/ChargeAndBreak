@@ -1715,7 +1715,8 @@ def cmd_la_report(args) -> None:
                       f"(from {n_gp} run(s) with an oracle bound)  "
                       f"delta={'—' if dl is None else f'{dl:+.2f}%':<7} "
                       f"(n={n_pair})  "
-                      f"t/stop={'—' if tps is None else f'{tps:.1f}s'}"
+                      f"t/CS={'—' if dcs is None else f'{dcs:.1f}s'}"
+                      f" (wall/stop {'—' if tps is None else f'{tps:.1f}s'})"
                       + (f" [{nbat} batches, x{brat:.1f} apart]"
                          if brat and brat > 1.5 else ""))
         print(f"  CSV saved   : {out}")
