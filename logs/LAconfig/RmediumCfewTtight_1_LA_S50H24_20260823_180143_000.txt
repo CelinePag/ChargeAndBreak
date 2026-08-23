@@ -1,0 +1,34 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-23 18:01:43)
+  Instance : RmediumCfewTtight_1   run_id=RmediumCfewTtight_1_LA_S50H24_20260823_180143_000
+  Route    : 85 stops  departure=8:00
+  Settings : N_scen=50  H=24.0h  cv=0.15  workers=1  LP-relax  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 73/85 stops done, continuing from stop 73
+
+[LA] stop 73 (LAYBY)  t=44.926h  soc=187kWh  cd=3.73h  sd=9.38h  sw=11.63h  phi=1  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [73->85]  travel=3.16h +1rest  4 actions × 50 scen  1w  [mean,lp]  pruned=2
+  y=0  brk=0    rst=0   1000000000.000h (0.000h)  ok=0/50  ws=0/50  tauc=0m  taub=0m  (5.0s)
+  y=0  brk=0    rst=r2  520000027.829h (0.106h)  ok=24/50  ws=0/50  tauc=0m  taub=0m  (5.3s)
+  y=0  brk=b45  rst=0   1000000000.000h (0.000h)  ok=0/50  ws=0/50  tauc=0m  taub=0m  (5.0s)
+  y=0  brk=b30  rst=0   1000000000.000h (0.000h)  ok=0/50  ws=0/50  tauc=0m  taub=0m  (5.0s)
+     [DIAG] max per-scenario delta spread across actions: 0.00 min  (constant shift)
+     [NOM-MIP] fixed-action infeasible, retrying free MIP...
+     [NOM-MIP] free MIP also infeasible, using first_feas LP sol
+     [NOM-MIP] y=0  brk=0  rst=r2  ok  hor_stops: brk=0 rst=0 chg=3 c+b=0 c+r=0  0.2s
+  -> CHOSEN y=0  brk=0  rst=r2  tauc=0m  taub=0m  ta=44.926h  td=54.092h  (mean=520000027.829h)  20.5s
+  [!] NO FEASIBLE ACTION at stop 73 — run halted
+
+=================================================================
+  LA SIMULATION COMPLETE
+  Arrival  : 44.926 h  (44:55)
+  Duration : 36.926 h
+  Wall     : 20.6 s
+=================================================================
+
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/LAconfig/RmediumCfewTtight_1_LA_S50H24_20260823_180143_000_scenarios.json
+  [!] RUN HALTED at stop 73 of 85 (no_feasible_action) — no route duration is reported
+  Metrics  : violations=1 (no_feasible_action:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/LAconfig/RmediumCfewTtight_1_LA_S50H24_20260823_180143_000.json
