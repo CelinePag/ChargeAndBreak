@@ -1,0 +1,28 @@
+
+=================================================================
+  LA SIMULATION START  (2026-08-23 14:57:05)
+  Instance : RlongCmanyTnone_3   run_id=RlongCmanyTnone_3_LA_S25H48_20260823_145704_006
+  Route    : 153 stops  departure=8:00
+  Settings : N_scen=25  H=48.0h  cv=0.15  workers=1  MIP  [mean]
+  Source   : precomputed realisations (D_real/E_real fixed)
+=================================================================
+  [RESUME] restored checkpoint: 47/153 stops done, continuing from stop 47
+
+[LA] stop 47 (CS)  t=37.172h  soc=337kWh  cd=0.72h  sd=2.55h  sw=5.31h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [47->137]  travel=23.19h +2rest  8 actions × 25 scen  1w  [mean,mip]  pruned=2
+  y=0  brk=0    rst=0   91.611h (0.273h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (547.2s)
+  y=1  brk=0    rst=0   91.781h (0.218h)  ok=25/25  ws=0/25  tauc=15m  taub=0m  (452.4s)
+  y=0  brk=0    rst=r2  102.354h (0.229h)  ok=25/25  ws=0/25  tauc=0m  taub=0m  (2737.0s)
+  y=1  brk=0    rst=r2  102.541h (0.223h)  ok=25/25  ws=0/25  tauc=15m  taub=0m  (3160.6s)
+  y=0  brk=b45  rst=0   92.545h (0.270h)  ok=25/25  ws=0/25  tauc=0m  taub=45m  (471.7s)
+  y=1  brk=b45  rst=0   92.687h (0.280h)  ok=25/25  ws=0/25  tauc=15m  taub=45m  (599.8s)
+  y=0  brk=b15  rst=0   91.955h (0.234h)  ok=25/25  ws=0/25  tauc=0m  taub=15m  (507.5s)
+  y=1  brk=b15  rst=0   91.766h (0.235h)  ok=25/25  ws=0/25  tauc=15m  taub=0m  (457.2s)
+     [DIAG] max per-scenario delta spread across actions: 33.24 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=0  brk=-  rst=-  skipped (no dwell)
+  -> CHOSEN y=0  brk=0  rst=0  tauc=0m  taub=0m  ta=37.172h  td=37.172h  (mean=91.611h)  8933.4s
+
+[LA] stop 48 (LAYBY)  t=37.451h  soc=306kWh  cd=1.00h  sd=2.83h  sw=5.59h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [48->138]  travel=23.18h +2rest  4 actions × 25 scen  1w  [mean,mip]  pruned=1  ws=prev
+     [FREE-MIP]  obj=91.841h  18.0s  ws=no  2658v/4851c
+  y=0  brk=0    rst=0   92.068h (0.195h)  ok=25/25  ws=25/25  tauc=0m  taub=0m  (220.1s)
