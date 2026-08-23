@@ -550,6 +550,98 @@ drifts into halting. If 400 iterations do not move the validation median, the
 honest report is that the clone is already at the achievable frontier for this
 action space — which is itself a result. Do NOT touch the test set for this.
 
+## RL RESULTS 2026-08-23 — PPO works, but does NOT beat the teacher
+3 seeds x 400 iters x 64 episodes, from `policy_K20_seedsplit_seed0_cw0.pt`.
+
+**Read the training log with care.** Two artifacts make its headline
+unusable: `--eval-n 40` takes the first 40 val instances alphabetically, which
+is **38 Rlong + 2 Rmedium** (long routes only), and halted instances DROP OUT
+of the median, so a policy that halts on its worst routes flatters itself.
+The log's "-0.2%, BEATS TEACHER" is a long-route-only, survivor-biased number.
+
+Proper evaluation, full val, on the **common set completed by all six
+policies** (n=101 of 129) so halt selection bias cannot leak in:
+
+| | duration vs teacher | penalised vs teacher | halts /129 |
+|---|---|---|---|
+| BC (3 seeds) | +0.453 ± 0.180 | +0.910 ± 0.193 | 5.7 ± 0.9 |
+| DAgger (3 seeds) | — | +0.559 ± 0.267 | 3.3 ± 1.7 |
+| **PPO (3 seeds)** | **+0.112 ± 0.044** | **+0.364 ± 0.146** | **9.7 ± 1.2** |
+| teacher | 0 (reference) | 0 | 0 |
+
+* **PPO closes 75% of the BC→teacher duration gap** (+0.453 → +0.112) and
+  more than halves the penalised gap. All three PPO seeds (+0.08…+0.17) beat
+  all three BC seeds (+0.20…+0.61), and the PPO spread is 4x tighter — this
+  is a real effect, not seed noise.
+* It also cut TW misses (202 → 188), which the reward does price.
+* **It does NOT beat the teacher.** +0.112% is parity-adjacent but positive.
+* **Halts got 70% worse (5.7 → 9.7)** — RL bought duration with feasibility.
+
+**Diagnosed cause: the halt penalty is too weak.** 27 of 29 PPO halts are
+`hos_spread`. A 100 h route halted at 50 h costs 50 + 24 + ~40 = 114 against
+~100 for completing — only ~14% worse, which is not a deterrent given the
+variance. Fix before any rerun: make the penalty multiplicative (e.g. 2x the
+expected completion cost) rather than additive, and/or raise the guard
+quantile for the spread check specifically, since that is the single
+constraint doing the damage.
+
+**Do not report PPO as a headline until halts are fixed** — a policy that is
+faster because it abandons more routes is the same trap as comparing durations
+at unequal feasibility. And RL selection has used validation only; the test
+set has been spent once already and a PPO test number would be a second look.
+
+## RERUN PREP 2026-08-23 — three fixes, one of them substantive
+
+### 1. Halt penalty is now MULTIPLICATIVE (`rl_env.py`)
+v1 charged a fixed 24 h plus the unfinished remainder. Measured, that was only
+~14% worse than completing a 100 h route — no deterrent. v2 makes a halt cost
+`HALT_MULT = 2.0` times an ESTIMATE of completion, where remaining nominal
+drive hours are converted to full cost by `DWELL_INFLATION = 2.44` — measured,
+not guessed (realised duration / nominal drive hours over completed routes:
+median 2.44, p10 2.23, p90 2.56). The deterrent now scales with route length
+instead of being a constant long routes can absorb.
+
+### 2. Spread-specific guard quantile (`--spread-q`, in rollout.py and rl_env.py)
+`compute_flags` folds the shift-driving limit and the 15 h spread ceiling into
+one `must_rest`; re-evaluating at a stricter quantile and OR-ing tightens
+exactly the spread test. **Tested on BC first, before spending 2 h retraining:**
+halts 5 → 4, duration +0.56 → +0.49. Real but marginal — the spread ceiling is
+breached by ACCUMULATION over a shift, which a one-step check cannot foresee.
+Keep it, but it is not the lever.
+
+### 3. THE LEVER: the policy could not see the spread clock
+27 of 29 v1 PPO halts were `hos_spread` — and `h` was **not in the feature
+vector at all**. The policy was being asked to respect a limit it could not
+observe. `h` is also absent from `sim_trajectory`, but BEHDV's rule is
+`h_new = (0 if rest else h + dwell) + D_act` and the JSON stores `td_list`, so
+it is EXACTLY reconstructable offline; at deployment `rollout.py`/`rl_env.py`
+read the live `vehicle.h`.
+Added `h_spread` and `spread_margin` (= 15 − h) at indices **21–22**, appended
+so every earlier index — and therefore every mask rule in `model.py` — keeps
+its meaning. Features 141 → 143.
+**Validation:** reconstructed `h` over 74,380 rows spans 0.01–14.89 and never
+exceeds the ceiling, which is exactly how a teacher that never breaches spread
+should look.
+
+Result (val, common completed set n=110, 3 seeds, BC only — no RL yet):
+
+| | duration vs teacher | halts /129 | halt causes |
+|---|---|---|---|
+| BC without spread features | +0.428 ± 0.221 | 5.7 ± 0.9 | 16 spread, 1 sd |
+| **BC with spread features** | **+0.271 ± 0.246** | **4.0 ± 0.8** | 12 spread, 0 sd |
+
+Better on both axes at once, before any RL. Note `t_dec` rises 0.65 → 1.15 ms
+(two extra features plus the second `compute_flags` call) — still ~10^4x faster
+than the teacher.
+
+### Ready to rerun
+The PPO rerun should start from a spread-aware BC checkpoint, with the
+multiplicative halt penalty, and fix the eval subset (v1's `--eval-n 40` took
+the first 40 val instances alphabetically = 38 Rlong + 2 Rmedium, and halted
+instances dropped out of the median — its "BEATS TEACHER" was long-route-only
+and survivor-biased). Always re-evaluate with rollout.py + compare_runs.py on
+a COMMON completed set.
+
 ## Open items
 - [ ] Recompile LA stats including the new long-route MIPTAIL batch
       (long-route rows of the motivation table).

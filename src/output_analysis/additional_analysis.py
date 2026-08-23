@@ -723,11 +723,22 @@ def _norm_la_tag(cfg: str) -> str:
     """
     if not cfg or cfg == "base":
         return "base"
+    # A tag can be COMPOSED: "S25H12+LPTAIL" is the ladder rung crossed with the
+    # tail solver.  Normalise the rung and keep the rest, or a composed tag
+    # never normalises at all — which is how the base cell launched under its
+    # own --variant arrived as "S25H24+LPTAIL" while the pre-existing name for
+    # that same cell is "LPTAIL", splitting one cell into two half-empty ones
+    # and rendering the unknown half as a fallback marker.
+    head, sep, rest = cfg.partition("+")
     try:
-        n_scen, horizon = _parse_la_config(cfg)
+        n_scen, horizon = _parse_la_config(head)
     except SystemExit:
         return cfg
-    return f"S{n_scen}H{horizon:g}"
+    head = f"S{n_scen}H{horizon:g}"
+    if (n_scen, horizon) == (LA_BASE_SCEN, LA_BASE_HORIZON):
+        # the base cell written the long way; "base+LPTAIL" is just "LPTAIL"
+        return rest if sep and rest else "base"
+    return head + (sep + rest if sep else "")
 
 
 _N_STOPS_CACHE: dict = {}
@@ -795,6 +806,8 @@ def _t_per_stop_s(r) -> float | None:
     comparable — that is a property of the measurement, and it is stated
     rather than modelled away.
     """
+    if _is_resumed(r.get("run_id")):
+        return None            # the clock covers only the post-checkpoint tail
     wall = r.get("wall_clock_s")
     # Stops actually EXECUTED, falling back to the route length for runs made
     # before the halt semantics landed.  A halted run decided fewer stops than
@@ -1140,6 +1153,42 @@ _LA_LOG_CHOSEN = re.compile(r"-> CHOSEN .*?([\d.]+)s\s*$")
 _LA_CS_CACHE: dict = {}
 
 
+_RESUMED_CACHE: dict = {}
+
+
+def _is_resumed(run_id: str | None) -> bool:
+    """True when this run continued from a checkpoint.
+
+    A resumed run writes a FRESH log starting at the checkpoint, and its
+    wall_clock_s covers only the stops after it — 8 seconds for a 96-stop
+    route, in the case that exposed this.  Both of the cost columns are
+    therefore meaningless for such a run, while everything the vehicle
+    accumulated (durations, gaps, the stored decision mean) is intact, because
+    the checkpoint restores the event lists.  So a resumed run keeps its
+    quality numbers and loses its cost ones.
+    """
+    if not run_id:
+        return False
+    if run_id in _RESUMED_CACHE:
+        return _RESUMED_CACHE[run_id]
+    out = False
+    try:
+        with open(_paths.log_path(f"{run_id}.txt"), encoding="utf-8",
+                  errors="replace") as fh:
+            for line in fh:
+                if "[RESUME] restored checkpoint" in line:
+                    out = True
+                    break
+                m = _LA_LOG_HDR.match(line)
+                if m:                      # first stop header settles it
+                    out = int(m.group(1)) > 1
+                    break
+    except OSError:
+        out = False
+    _RESUMED_CACHE[run_id] = out
+    return out
+
+
 def _cs_decision_mean_s(run_id: str | None):
     """Mean decision time over CS stops only, parsed from logs/<run_id>.txt.
 
@@ -1153,17 +1202,30 @@ def _cs_decision_mean_s(run_id: str | None):
     path = _paths.log_path(f"{run_id}.txt")
     out, cur = None, None
     try:
-        vals = []
+        vals, first_stop = [], None
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 m = _LA_LOG_HDR.match(line)
                 if m:
                     cur = m.group(2)
+                    if first_stop is None:
+                        first_stop = int(m.group(1))
                     continue
                 if cur == "CS":
                     m = _LA_LOG_CHOSEN.search(line)
                     if m:
                         vals.append(float(m.group(1)))
+        # A RESUMED run writes a fresh log covering only the stops after the
+        # checkpoint, so its CS mean would describe the tail of the route
+        # instead of the route — and the tail is systematically CHEAPER,
+        # because the look-ahead horizon runs out of route to reach into.  One
+        # such run (RmediumCmanyTnone_4, S25H48) resumed at stop 95 of 96 and
+        # its log holds a single stop.  The stored decision_time_mean_s IS
+        # correct across a resume (the checkpoint restores events), but the
+        # CS-only figure can only come from the log, so a partial log yields
+        # no CS mean at all rather than a biased one.
+        if first_stop is not None and first_stop > 1:
+            vals = []
         # A forced rest short-circuits decide_stop and prints no CHOSEN line, so
         # a stop can be missing here; the mean is over the CS stops that were
         # actually decided, which is the quantity being reported.
@@ -1311,7 +1373,30 @@ def _la_panel(by_cell: dict, exclude: set) -> tuple[set, list]:
     cells = [c for c in by_cell if c not in exclude and by_cell[c]]
     if not cells:
         return set(), []
-    return set.intersection(*[by_cell[c] for c in cells]), sorted(cells)
+    keep = set.intersection(*[by_cell[c] for c in cells])
+    if keep:
+        return keep, sorted(cells)
+    # AUTO-RELAX.  A strict intersection is the right rule for a finished
+    # sweep and useless during one: a cell two runs old shrinks the panel to
+    # nothing, the report writes no CSV at all, and the figures silently redraw
+    # whatever stale file was there.  So when the intersection comes out empty,
+    # drop the thinnest cell and try again, until something survives.  The
+    # dropped cells are still REPORTED and still filtered to the panel — they
+    # simply stop constraining it, exactly as --panel-exclude does — and every
+    # removal is printed, so a relaxed panel can never be mistaken for a full
+    # one.
+    order = sorted(cells, key=lambda c: len(by_cell[c]))
+    dropped = []
+    while order and not keep:
+        thin = order.pop(0)
+        dropped.append(thin)
+        if not order:
+            break
+        keep = set.intersection(*[by_cell[c] for c in order])
+    for c in dropped:
+        print(f"            [auto-relax] {c} ({len(by_cell[c])} instance(s)) "
+              f"no longer constrains the panel — too thin to intersect")
+    return keep, sorted(order)
 
 
 def _panel_breakdown(stems, cs) -> str:
@@ -1976,13 +2061,18 @@ def main() -> None:
                         f"{_fmt_seeds(list(LA_REPORT_SEEDS))}, fixed so every "
                         f"cell stands on one population; what is missing inside "
                         f"that window is printed as coverage)")
-    p.add_argument("--panel", default="common", choices=["common", "all"],
-                   help="'common' (default) reports every cell on the BALANCED "
-                        "PANEL — only instances with an OK run in every cell — "
-                        "so each cell is the same population and every "
-                        "comparison is exactly paired.  'all' reports each cell "
-                        "on whatever it has, which lets route mix differ "
-                        "between cells")
+    p.add_argument("--panel", default="all", choices=["common", "all"],
+                   help="'all' (default) reports every cell on whatever runs "
+                        "it has.  'common' restricts every cell to the "
+                        "BALANCED PANEL — only instances with an OK run in "
+                        "every cell — so each cell is the same population and "
+                        "every comparison is exactly paired.  The panel "
+                        "existed to kill a route-mix confound in the pooled "
+                        "rows; the figures now facet by route class, which "
+                        "removes that confound directly, so 'all' costs much "
+                        "less than it used to.  What it still costs: cells can "
+                        "rest on different SEEDS within a route class, so a "
+                        "paired delta is paired only where both runs exist")
     p.add_argument("--panel-exclude", default=None,
                    help="Cells that may NOT constrain the panel, comma "
                         "separated (e.g. 'S25H48').  They are still reported, "

@@ -24,15 +24,17 @@ TWO DESIGN POINTS THAT MATTER
 
 2. **Halting must never be attractive.**  Reward is negative elapsed time, so a
    policy that ends the route early stops accumulating cost.  Left alone, the
-   optimal policy would be to breach a regulation immediately.  On a halt we
-   therefore charge the remaining nominal drive time PLUS a fixed penalty
-   (`HALT_PENALTY_H`), which makes any halt strictly worse than any completion.
+   optimal policy would be to breach a regulation immediately.  The v1 fixed
+   surcharge proved too weak in practice (see HALT_MULT below); the penalty is
+   now MULTIPLICATIVE in an estimate of what completing would have cost.
 
 REWARD
 ------
     r_i = -(t_arr_{i+1} - t_arr_i)              per step: elapsed hours
         - beta                                   for each window missed at i
-    r_terminal = -(HALT_PENALTY_H + remaining nominal drive time)   if halted
+    on halt: the episode return becomes -HALT_MULT x (estimated completion),
+    so abandoning a route is always about HALT_MULT times worse than finishing
+    it, whatever the route length.
 
 Summed over a completed episode this is exactly -(duration + beta * misses),
 i.e. the negative of the benchmark's own objective.  Training and evaluation
@@ -51,7 +53,21 @@ from extract_dataset import build_instance_context, features_at
 from model import build_mask
 from rollout import charge_time_to, energy_to_next_cs_at_q
 
-HALT_PENALTY_H = 24.0     # fixed surcharge on top of the unfinished remainder
+# ── Halt penalty ────────────────────────────────────────────────────────────
+# v1 used a FIXED surcharge (24 h) on top of the unfinished remainder.  That
+# was measurably too weak: halting a 100 h route at 50 h cost 50 + 24 + ~40 =
+# 114 against ~100 for completing, i.e. only ~14% worse, and PPO duly bought
+# duration with feasibility (halts 5.7 -> 9.7 per 129 routes, 27 of 29 of them
+# spread-ceiling breaches).
+#
+# v2 is MULTIPLICATIVE: a halt costs HALT_MULT times an ESTIMATE of what
+# completing would have cost, so the deterrent scales with the route instead
+# of being a constant that long routes can absorb.  The estimate converts the
+# remaining nominal drive time into a full cost using DWELL_INFLATION, which
+# is measured, not guessed: over completed routes,
+# duration / nominal-drive-hours has median 2.44 (p10 2.23, p90 2.56).
+DWELL_INFLATION = 2.44    # measured: realised duration per nominal drive hour
+HALT_MULT       = 2.0     # a halt costs 2x an estimated completion
 
 
 class RouteEnv:
@@ -60,7 +76,7 @@ class RouteEnv:
     indirection would only obscure the transition."""
 
     def __init__(self, full_data, raw_inst, classes, k_look,
-                 energy_q=0.5, guard_q=0.95, cv=0.15, seed=None):
+                 energy_q=0.5, guard_q=0.95, spread_q=None, cv=0.15, seed=None):
         self.fd, self.classes, self.k = full_data, classes, k_look
         self.ctx = build_instance_context(raw_inst)
         self.Ebar = [float(raw_inst["Ebar"][str(i)]) for i in range(len(raw_inst["Ebar"]))]
@@ -68,6 +84,11 @@ class RouteEnv:
         self.Emin, self.Ecap = float(raw_inst["Emin"]), float(raw_inst["Ecap"])
         self.beta = float(raw_inst.get("beta", 0.5))
         self.energy_q, self.guard_q, self.cv = energy_q, guard_q, cv
+        # A STRICTER quantile applied to the spread ceiling only.  27 of 29
+        # halts in the v1 PPO run were `hos_spread`, so that one constraint —
+        # not the guard in general — is what the policy keeps walking into.
+        # None = use guard_q for everything (v1 behaviour).
+        self.spread_q = spread_q
         self.rng = np.random.default_rng(seed)
         self.N = int(full_data["N"])
         self.C = set(full_data["C"])
@@ -101,7 +122,8 @@ class RouteEnv:
         st = dict(stop=self.v.stop, t_arr=self.v.t_arr, e_arr=self.v.e_arr,
                   cd=self.v.cd, sd=self.v.sd, sw=self.v.sw, phi=self.v.phi,
                   rho2_used=self.v.rho2_used,
-                  ext_shift_used=self.v.ext_shift_used)
+                  ext_shift_used=self.v.ext_shift_used,
+                  h=self.v.h)           # live spread clock
         return np.asarray(features_at(self.ctx, st, self.k), dtype=np.float32)
 
     def action_mask(self):
@@ -112,6 +134,17 @@ class RouteEnv:
         m = build_mask(x, self.classes)[0].numpy().copy()
         flags = compute_flags(self.fd, self.v.stop, self.v, cv=self.cv,
                               quantile=self.guard_q)
+        if self.spread_q is not None and self.spread_q != self.guard_q:
+            # compute_flags folds the sd limit and the spread ceiling into one
+            # must_rest; evaluating it again at a stricter quantile and OR-ing
+            # tightens the spread test without touching the energy guard.  The
+            # stricter D_next_wc also feeds the action-level spread check in
+            # action_passes.
+            f2 = compute_flags(self.fd, self.v.stop, self.v, cv=self.cv,
+                               quantile=self.spread_q)
+            flags = dict(flags)
+            flags["must_rest"] = bool(flags["must_rest"] or f2["must_rest"])
+            flags["D_next_wc"] = max(flags["D_next_wc"], f2["D_next_wc"])
         if flags["must_charge"] or flags["must_reset_cd"] or flags["must_rest"]:
             allow = np.zeros_like(m)
             for j, (y, brk, rst) in enumerate(self.classes):
@@ -161,7 +194,12 @@ class RouteEnv:
 
         if self.v.is_halted:
             self.done = self.halted = True
-            reward -= HALT_PENALTY_H + float(self.suf_D[min(self.v.stop, self.N)])
+            # Total episode return becomes -HALT_MULT * est_total, where
+            # est_total is what a completed route would plausibly have cost.
+            elapsed_total = self.v.t_arr - self.t0
+            est_rem   = float(self.suf_D[min(self.v.stop, self.N)]) * DWELL_INFLATION
+            est_total = elapsed_total + est_rem
+            reward -= est_rem + (HALT_MULT - 1.0) * est_total
         elif self.v.stop >= self.N:
             self.done = True
         info = dict(halted=self.halted, stop=self.v.stop,

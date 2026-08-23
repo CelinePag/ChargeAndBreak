@@ -56,8 +56,11 @@ K_LOOK   = 10          # DEFAULT number of upcoming nodes given detailed
                        # the ablation answers.  Pass --k to sweep it.
 SLACK_CAP = 48.0       # clip "hours until latest arrival" at 48 h (beyond that
                        # the exact value carries no decision information)
-N_BASE    = 21         # dashboard features, independent of K (the mask in
-                       # model.py indexes into this block only)
+N_BASE    = 23         # dashboard features, independent of K (the mask in
+                       # model.py indexes into this block only).  h and
+                       # spread_margin were APPENDED at indices 21-22 so that
+                       # every earlier index — and therefore every mask rule in
+                       # model.py — keeps its meaning.
 
 # ── label helpers ────────────────────────────────────────────────────────────
 def _norm(v) -> str:
@@ -107,7 +110,8 @@ def build_instance_context(inst: dict):
                 is_lay=is_lay, Q=Q, ub_t=ub_t, e_next_cs=e_next_cs,
                 d_next_cs=d_next_cs, suf_D=suf_D, suf_E=suf_E, suf_km=suf_km,
                 Ecap=float(inst["Ecap"]), Emin=float(inst["Emin"]),
-                allow_split=float(bool(inst.get("allow_split", True))))
+                allow_split=float(bool(inst.get("allow_split", True))),
+                Tspr2=float(inst.get("Tspr2", 15.0)))
 
 def features_at(ctx: dict, st: dict, k_look: int = K_LOOK) -> list:
     """One feature vector: current vehicle state + relative view of the future."""
@@ -137,6 +141,14 @@ def features_at(ctx: dict, st: dict, k_look: int = K_LOOK) -> list:
     # -- tightest deadline ahead: min over remaining nodes of (ub_t - t) --
     slack = ctx["ub_t"][i:] - t
     f.append(min(float(slack.min()), SLACK_CAP) if len(slack) else SLACK_CAP)
+    # -- SHIFT SPREAD (M5): hours since the current shift began, and the
+    #    headroom left under the 15 h ceiling.  Added after the v1 RL run
+    #    showed 27 of 29 halts were `hos_spread` breaches while the policy
+    #    could not observe the spread clock at all — it was being asked to
+    #    respect a limit it could not see.
+    h_spread = float(st.get("h", 0.0))
+    f.append(h_spread)
+    f.append(ctx["Tspr2"] - h_spread)
     # -- detailed look at the next K nodes (zero-padded near route end);
     #    the network learns how far ahead actually matters (K is an ablation) --
     for j in range(1, k_look + 1):
@@ -153,7 +165,7 @@ BASE_NAMES = [
     "soc", "soc_margin", "cd", "sd", "sw", "phi", "rho2_used", "ext_used",
     "at_cs", "at_cust", "at_lay", "queue_here", "e_to_next_cs", "km_to_next_cs",
     "stops_left", "driveh_left", "energy_left", "km_left", "cust_left",
-    "allow_split", "min_slack"]
+    "allow_split", "min_slack", "h_spread", "spread_margin"]
 assert len(BASE_NAMES) == N_BASE
 
 def feature_names(k_look: int = K_LOOK) -> list:
@@ -220,6 +232,17 @@ def main(k_look: int = K_LOOK, mode: str = "family"):
         ctx  = build_instance_context(inst)
         family, seed = inst_name.rsplit("_", 1)
         traj, acts, durs = run["sim_trajectory"], run["actions"], run["durations_list"]
+        # ── reconstruct the shift-spread clock h ──────────────────────────
+        # BEHDV: h_new = (0 if rest else h + dwell) + D_act, where the dwell at
+        # a stop is td - t_arr and the leg is t_arr[i+1] - td.  h is NOT stored
+        # in sim_trajectory, but td_list is, so it is exactly recoverable.
+        td = run.get("td_list") or []
+        h_seq = [0.0] * len(traj)
+        for j in range(min(len(acts), len(traj) - 1, len(td))):
+            dwell = float(td[j]) - float(traj[j]["t_arr"])
+            leg   = float(traj[j + 1]["t_arr"]) - float(td[j])
+            rest  = _norm(acts[j].get("rest_type")) != "none"
+            h_seq[j + 1] = (0.0 if rest else h_seq[j] + dwell) + leg
         # stop 0 = forced no-op at departure -> not a decision, skip
         for i in range(1, len(acts)):
             st = traj[i]
@@ -227,6 +250,7 @@ def main(k_look: int = K_LOOK, mode: str = "family"):
                 raise RuntimeError(f"stop index mismatch in {f} @ {i}")
             key = action_key(acts[i])
             combo_count[key] = combo_count.get(key, 0) + 1
+            st = dict(st, h=h_seq[i] if i < len(h_seq) else 0.0)
             X.append(features_at(ctx, st, k_look))
             y_cls.append(key)
             y_tauc.append(float(durs[i].get("tauc", 0.0)))

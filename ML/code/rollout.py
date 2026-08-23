@@ -136,7 +136,8 @@ def make_policy(ckpt_path: str, raw_inst: dict, full_data: dict, stats: dict,
                 energy_q: float | None = ENERGY_Q_DEFAULT,
                 guard_q: float | None = GUARD_Q_DEFAULT,
                 cv: float = TRAVEL_TIME_CV_TARGET,
-                no_split: bool = False):
+                no_split: bool = False,
+                spread_q: float | None = None):
     ck  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     classes = [tuple(c) for c in ck["classes"]]
     k_look  = int(ck.get("k_look", 10))    # features must be built the same
@@ -154,7 +155,9 @@ def make_policy(ckpt_path: str, raw_inst: dict, full_data: dict, stats: dict,
         st = dict(stop=stop, t_arr=vehicle.t_arr, e_arr=vehicle.e_arr,
                   cd=vehicle.cd, sd=vehicle.sd, sw=vehicle.sw,
                   phi=vehicle.phi, rho2_used=vehicle.rho2_used,
-                  ext_shift_used=vehicle.ext_shift_used)
+                  ext_shift_used=vehicle.ext_shift_used,
+                  h=vehicle.h)          # live spread clock (reconstructed
+                                        # from td_list when training offline)
         x_raw = torch.tensor([features_at(ctx, st, k_look)], dtype=torch.float32)
         mask  = build_mask(x_raw, classes)
 
@@ -177,6 +180,16 @@ def make_policy(ckpt_path: str, raw_inst: dict, full_data: dict, stats: dict,
         #    override, so the network still chooses freely among the actions
         #    that comply — the rules constrain, they do not decide.
         flags = compute_flags(fd, stop, vehicle, cv=cv, quantile=guard_q)
+        if spread_q is not None and spread_q != guard_q:
+            # Stricter quantile on the spread ceiling only.  compute_flags
+            # folds the shift-driving limit and the 15 h spread ceiling into a
+            # single must_rest, so re-evaluating at a tighter quantile and
+            # OR-ing tightens exactly that test; the larger D_next_wc also
+            # feeds the action-level spread check inside action_passes.
+            f2 = compute_flags(fd, stop, vehicle, cv=cv, quantile=spread_q)
+            flags = dict(flags)
+            flags["must_rest"] = bool(flags["must_rest"] or f2["must_rest"])
+            flags["D_next_wc"] = max(flags["D_next_wc"], f2["D_next_wc"])
         if flags["must_charge"] or flags["must_reset_cd"] or flags["must_rest"]:
             allow = torch.zeros_like(mask)
             for j, (yy, bb, rr) in enumerate(classes):
@@ -293,7 +306,7 @@ def main(a):
             os.path.join(INST_DIR, name + ".json"))
         pol = make_policy(a.model, raw["instance"], full_data, stats,
                           energy_q=a.energy_q, guard_q=guard_q, cv=cv,
-                          no_split=a.no_split)
+                          no_split=a.no_split, spread_q=a.spread_q)
         t0 = time.perf_counter()
         res = run_simulation_precomputed(
             full_data, D_real, E_real,
@@ -331,6 +344,9 @@ if __name__ == "__main__":
                    default=ENERGY_Q_DEFAULT,
                    help="quantile of CONSUMPTION for charge sizing "
                         "(teacher used 0.5); 0 = nominal energies")
+    p.add_argument("--spread-q", dest="spread_q", type=float, default=None,
+                   help="stricter quantile for the 15 h spread ceiling only "
+                        "(None = use --guard-q for everything)")
     p.add_argument("--no-split", dest="no_split", action="store_true",
                    help="forbid b15/b30 at deployment (policy restriction; "
                         "the model is still trained on the teacher's full set)")
