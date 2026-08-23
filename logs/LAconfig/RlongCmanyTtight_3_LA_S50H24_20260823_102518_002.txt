@@ -805,3 +805,14 @@
   y=0  brk=0    rst=r2  67.135h (0.278h)  ok=50/50  ws=50/50  tauc=0m  taub=0m  (15.7s)
   y=1  brk=0    rst=r2  66.995h (0.277h)  ok=50/50  ws=50/50  tauc=15m  taub=0m  (15.6s)
   y=0  brk=b45  rst=0   64.566h (0.177h)  ok=50/50  ws=50/50  tauc=0m  taub=45m  (16.6s)
+  y=1  brk=b45  rst=0   63.865h (0.179h)  ok=50/50  ws=50/50  tauc=45m  taub=0m  (16.8s)
+  y=0  brk=b30  rst=0   64.316h (0.177h)  ok=50/50  ws=50/50  tauc=0m  taub=30m  (16.7s)
+  y=1  brk=b30  rst=0   63.691h (0.177h)  ok=50/50  ws=50/50  tauc=30m  taub=0m  (16.9s)
+     [DIAG] max per-scenario delta spread across actions: 22.85 min  (non-constant -- downstream decisions differ)
+     [NOM-MIP] y=1  brk=0  rst=0  CONC  ok  hor_stops: brk=0 rst=1 chg=3 c+b=0 c+r=0  1.2s
+     [POST-HOC] tauc=44m >= 30m → b30 injected (free, concurrent)
+  -> CHOSEN y=1  brk=b30  rst=0  tauc=44m (+201kWh)  taub=0m  [CONC]  ta=42.185h  td=43.116h  (mean=63.596h)  133.8s
+
+[LA] stop 66 (LAYBY)  t=43.398h  soc=446kWh  cd=0.28h  sd=6.62h  sw=10.20h  phi=0  r2=1  ext_sh=1/2  sd_lim=9h
+     horizon [66->108]  travel=11.54h +2rest  4 actions × 50 scen  1w  [mean,lp]  pruned=1  ws=prev
+     [FREE-LP]  obj=64.172h  0.3s  ws=yes  1260v/2309c

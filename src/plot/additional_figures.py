@@ -29,8 +29,10 @@ the cost/quality FRONTIER (its content is the la_all plane), the two POLICY bar
 figures (dur and pen — the tables carry them), and the LOCAL plane (five runs on
 axes built for twelve cells).  The policy and LOCAL TABLES are unchanged.
 
-Every LA cost axis is decision time per stop = run wall clock / number of
-stops, uncorrected for --jobs or n_workers (la-report's t_per_stop_s_median).
+Every LA cost axis is the MEASURED decision time at charging-station stops
+(la-report's decision_cs_mean_s_median), parsed per stop from the run logs.
+The wall-clock-over-stops figure is still written to the CSV as
+t_per_stop_s_median, for diagnosis only.
 LA figures and tables are quoted over seeds 1-10 only; la-report prints what is
 missing inside that window and writes data_output/additional_la_coverage.csv.
   tex/tables/additional_vss.tex              §8.5 VSS/EVPI (skeleton until
@@ -2141,7 +2143,7 @@ _LBL_SCEN         = r"Scenarios $|\Xi|$"
 _LBL_HORIZON_HELD = _LBL_HORIZON + r"   [$|\Xi| = 25$]"
 _LBL_SCEN_HELD    = _LBL_SCEN + r"   [$L = 24$ h]"
 _LBL_GAP          = "Gap to hindsight optimum (%)"
-_LBL_COST         = "Decision time per stop (s)"
+_LBL_COST         = "Decision time per CS stop (s)"
 
 # When a cell is too thin to read as an estimate.  ABSOLUTE, and the same
 # number in every figure of the section.  It used to be a relative rule (below
@@ -2297,7 +2299,7 @@ def section_la():
                 xs, gq, gc, nn = [], [], [], []
                 for v in ladder:
                     q = _cell(v, is_h, lptail, route, "gap_pen_median_pct")
-                    c = _cell(v, is_h, lptail, route, "t_per_stop_s_median")
+                    c = _cell(v, is_h, lptail, route, "decision_cs_mean_s_median")
                     if q is None and c is None:
                         continue
                     xs.append(v); gq.append(q); gc.append(c)
@@ -2466,7 +2468,7 @@ def section_la():
     _cb.set_label("Infeas. %", fontsize=5, labelpad=1)
     _cb.ax.tick_params(labelsize=4.4, length=1.5, width=0.3, pad=1)
     fig.text(0.005, 0.008,
-             "Balanced panel; window classes pooled; short routes excluded."
+             "Balanced panel; window classes pooled; short routes excluded.  Cost is the measured decision time at CS stops."
              + _thin_note(thin_seen),
              fontsize=4.6, color=MUT, ha="left")
 
@@ -2507,7 +2509,7 @@ def section_la():
                 row = stats.get((cfg, route, tw))
                 gap = _la_num(row, "gap_pen_median_pct")
                 dlt = _la_num(row, "delta_vs_base_pct")
-                dec = _la_num(row, "t_per_stop_s_median")
+                dec = _la_num(row, "decision_cs_mean_s_median")
                 n   = _la_num(row, "n_runs")
                 mark = ""
                 if n and n_max and n < 0.6 * n_max:
@@ -2530,9 +2532,9 @@ def section_la():
         r"gap to the hindsight optimum; $\Delta$ is the median paired change "
         r"in route duration with respect to the base cell "
         r"($|\Xi| = 25$, $L = 24$\,h), positive meaning slower; $t_{\text{dec}}$ "
-        r"is the median per-stop decision time, taken as run wall clock over "
-        r"the number of stops and uncorrected for parallelism.  Every cell is "
-        r"quoted over seeds 1--10.  Cells shown as ``--'' have no runs yet.}",
+        r"is the median decision time at charging-station stops, measured per "
+        r"stop in the run logs.  Every cell is quoted over seeds 1--10.  Cells "
+        r"shown as ``--'' have no runs yet.}",
         r"\label{tab:la-config}",
         r"\begin{tabular}{rrl" + "rrr" * len(routes) + "}",
         r"\toprule",
@@ -2686,7 +2688,7 @@ def section_la_policy(effect: str = "dur"):
                 cells += [_fmt(cell(cfg, route, tw, "gap_pen_median_pct"), ".1f"),
                           "--" if cfg == "base"
                           else _fmt(cell(cfg, route, tw, eff["col"]), "+.2f"),
-                          _fmt(cell(cfg, route, tw, "t_per_stop_s_median"),
+                          _fmt(cell(cfg, route, tw, "decision_cs_mean_s_median"),
                                ".0f")]
             body.append((f"{cfg} & {ps.TW_LBL[tw]}", cells))
 
@@ -2699,10 +2701,9 @@ def section_la_policy(effect: str = "dur"):
         r"median gap to the hindsight optimum, $\Delta$ the median paired "
         r"change in "
         + eff["tex"] +
-        r" (positive = worse), $t_{\text{dec}}$ the median decision time per "
-        r"stop, taken as run wall clock over the number of stops and "
-        r"uncorrected for parallelism.  Every cell is quoted over seeds "
-        r"1--10.}",
+        r" (positive = worse), $t_{\text{dec}}$ the median decision time at "
+        r"charging-station stops, measured per stop in the run logs.  Every "
+        r"cell is quoted over seeds 1--10.}",
         r"\label{tab:la_policy" + eff["sfx"] + r"}",
         r"\resizebox{\textwidth}{!}{%",
         r"\begin{tabular}{ll" + "rrr" * len(routes) + r"}", r"\toprule",
@@ -2868,10 +2869,13 @@ def section_la_all(csv_name="additional_la_stats.csv",
                    banner="cost/quality plane by solver cluster"):
     """8.3 - every LA configuration on one cost/quality plane, in solver clusters.
 
-    Cost is DECISION TIME PER STOP: the run's wall clock over the number of
-    stops it decided (la-report's t_per_stop_s_median), with no correction for
-    --jobs or n_workers.  It is what the truck waits, batch contention and all,
-    rather than a modelled solver effort no run was observed to spend.
+    Cost is the MEASURED DECISION TIME AT CS STOPS (la-report's
+    decision_cs_mean_s_median), parsed per stop from the run logs.  Charging
+    stations are the stops where the decision actually has branching structure
+    — charge or not, how long, and the break/rest interaction on top — so their
+    cost is the wait an operator would feel.  Averaging over every stop dilutes
+    that with laybys and customers, which enumerate far fewer actions and run
+    about half as long.
 
     One panel per route class, window classes pooled.  Each configuration family
     (LP subproblem, MILP subproblem, MILP + energy guard, ...) forms a cluster:
@@ -2899,7 +2903,7 @@ def section_la_all(csv_name="additional_la_stats.csv",
     # marker and the n= label do (the same convention the ladder figure uses).
     def cell(cfg, route):
         row = stats.get((cfg, route, TW))
-        c = _la_num(row, "t_per_stop_s_median")
+        c = _la_num(row, "decision_cs_mean_s_median")
         q = _la_num(row, "gap_pen_median_pct")
         if c is None or q is None:
             return None
@@ -3043,8 +3047,8 @@ def section_la_all(csv_name="additional_la_stats.csv",
     _cb.set_label("Marker fill: infeasible runs (%)", fontsize=5.4, labelpad=2)
     _cb.ax.tick_params(labelsize=4.6, length=1.5, width=0.3, pad=1)
     fig.text(0.005, 0.008,
-             "Cost is run wall clock / number of stops, uncorrected for "
-             "parallelism." + _thin_note(thin_seen),
+             "Cost is the measured decision time at CHARGING-STATION stops, "
+             "from the run logs." + _thin_note(thin_seen),
              fontsize=4.6, color=MUT, ha="left")
     _save(fig, outname)
 
@@ -3415,11 +3419,11 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
     time), and whether it strands the truck (infeasibility).  Two series per
     panel, one per tail solver.
 
-    Cost is DECISION TIME PER STOP — the run's wall clock over the number of
-    stops — uncorrected for --jobs or n_workers.  A cell launched under heavier
-    batch contention therefore reads slower, which is a property of the
-    measurement rather than of the configuration; the ladder shape is what the
-    panel is read for, not the absolute level.
+    Cost is the MEASURED DECISION TIME AT CS STOPS, parsed per stop from the
+    run logs rather than derived from the run's wall clock.  It is the quantity
+    the policy actually spends at the stops where the decision branches, and it
+    is immune to batch contention and to --jobs, which the wall-clock measure
+    was not.
 
     Coverage is NOT uniform across the ladder — the MILP-tail rungs are still
     filling in — and pooling the route classes makes an uneven mix invisible
@@ -3459,7 +3463,7 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
                 inf = _la_num(row, "n_infeasible")
                 xs.append(float(v))
                 qs.append(_la_num(row, "gap_pen_median_pct"))
-                cs_.append(_la_num(row, "t_per_stop_s_median"))
+                cs_.append(_la_num(row, "decision_cs_mean_s_median"))
                 is_.append(100.0 * inf / n if (n and inf is not None) else None)
                 nn.append(_cover(cfg, route))
             if not xs:

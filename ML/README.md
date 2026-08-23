@@ -207,8 +207,13 @@ imitation is worst; mispredicting them costs time. Forbidden, the policy
 falls back on well-learned b45 (176 → 266 uses) and rests. The teacher can
 afford a rich action set because it OPTIMISES; the student cannot because it
 APPROXIMATES, and its approximation is weakest where data is thinnest.
-=> Paper-worthy: the cloned policy wants a SMALLER action space than its
-teacher. Carry `--no-split` forward as the default student configuration.
+=> Paper-worthy IF it replicates. **CORRECTION 2026-08-23: it was NOT
+carried forward.** `--no-split` in rollout.py is `store_true` with
+default False, and the final val/test runs never passed it, so the
+reported student DOES use split breaks (test: b30 x183, b15 x161).
+These numbers were measured under the superseded pre-halt semantics and
+have not been re-validated. Treat the split-break restriction as an
+untested idea, not a result; main.tex is written accordingly.
 
 ## Two split designs — both kept, they answer different questions
 `extract_dataset.py --split-mode {family,seed}` (train.py / rollout.py /
@@ -427,6 +432,123 @@ The student now charges marginally LESS than the teacher and runs the pack to
 the same depth. Credit is shared between cw=0 (which stopped the loss from
 ignoring the majority class) and DAgger (which labelled the states the
 student actually reaches).
+
+## PAPER DRAFTED 2026-08-23 — `paper/main.tex` + `paper/refs.bib`
+Full 4-page draft, ~2,310 words, 3 tables, 2 figures, 9 references. Validated
+structurally (environments/braces balanced, no dangling refs, no missing or
+unused bib keys, both figure PDFs resolve). pdflatex is NOT installed locally
+— compile on the HPC or Overleaf. Still TODO: `neurips_2026.sty` and the
+author block (non-anonymous venue).
+
+**TEST SET WAS SPENT** (108 instances, evaluated once, config frozen first):
+
+| policy | duration vs teacher | halts /108 | TW | t_dec | solver |
+|--------|--------------------|-----------|-----|-------|--------|
+| greedy | +2.74 % | 0 | 166 | 0.03 ms | no |
+| **student (cloned)** | **+0.43 ± 0.18 %** | 2.7 ± 0.5 | 128 | **0.74 ms** | no |
+| student + DAgger | +0.48 ± 0.31 % | 4.7 ± 0.9 | 126 | 0.79 ms | no |
+| teacher (exact tail) | reference | 0 | 53 | 70,446 ms | yes |
+
+**DAGGER IS A NEGATIVE RESULT.** It looked better on val (+0.19 vs +0.44 %,
+halts 3.3 vs 5.7) but REVERSED on test: +0.48 vs +0.43 %, and MORE halts
+(4.7 vs 2.7). The val gain was inside 2x the seed spread and did not
+transfer. Reported honestly in the paper — it is the reason the test set is
+held back. Do not quote the val DAgger numbers as a result.
+
+Ablations re-measured under CURRENT halt semantics (val, the earlier ones
+were pre-halt and not comparable):
+
+| decision | setting | balanced acc | duration vs teacher |
+|----------|---------|--------------|---------------------|
+| class weighting | inverse-freq p=0.5 | **0.477** | +3.17 % |
+| class weighting | **unweighted p=0** | 0.299 | **+0.56 %** |
+| features | K=40 (261) | 0.452 | +2.86 % |
+| features | **K=20 (141)** | 0.299 | **+0.56 %** |
+
+In both rows the offline metric prefers the WORSE policy — this is the
+paper's spine, and it now rests on current-semantics numbers.
+
+## COMPILED 2026-08-23 — `paper/main.pdf` (5 pp: 4 body + 1 references)
+Compiled with Tectonic 0.17.0 (single binary fetched to the scratch dir; no
+system TeX install). Body ends on p.4 and References run to p.5, so the
+4-page main-body limit is met.
+
+Three preamble bugs found only by compiling:
+1. `allcolors=blue!60!black` needs **xcolor** — hyperref pulls in plain
+   `color`, which has no colour-expression syntax.
+2. `newtxtext,newtxmath` replaces the legacy `times` package, which leaves
+   `TU/ptm/b/n` undefined (no bold) under XeTeX.
+3. **amssymb removed** — it and newtxmath both define `\Bbbk`. No
+   amssymb-only symbol was used.
+4. The author block must not put `[` right after `\` — LaTeX reads it as
+   the optional length argument of `\`, giving the opaque
+   "Missing number, treated as zero".
+
+Rebuild:  `tectonic -X compile main.tex`  (from `paper/build/`, flat figure
+paths), or upload `paper/mlxor_paper.zip` to Overleaf.
+
+## RL (PPO) — built 2026-08-23, NOT yet run at scale
+Goal: exceed the teacher. Behaviour cloning is bounded by it by construction;
+RL optimises the realised objective, and the teacher is itself +2.24% from the
+hindsight oracle and myopic in known ways (24 h horizon, mean-over-scenarios).
+
+`code/rl_env.py` — lightweight episode runner. Drives the SAME `BEHDV` through
+the SAME `advance()`, but with no disk I/O (the full simulator writes a JSON,
+a log, a scenario file and hits the oracle cache every call). 41-126 ms per
+episode. **Validated: 10/10 exact duration matches vs the real simulator** on
+recorded realisations — RL optimises the world we evaluate in.
+
+Two design points that decide whether this works at all:
+* **Fresh realisation every training episode** (via `generate_scenarios`).
+  Each instance ships ONE recorded realisation and that is what evaluation
+  uses; training on it repeatedly would learn a PLAN, not a policy, and look
+  brilliant in training and useless out of sample.
+* **Halting must never pay.** Reward is negative elapsed time, so ending the
+  route early stops accruing cost — the unshaped optimum is to breach a
+  regulation immediately. On a halt we charge the remaining nominal drive time
+  plus `HALT_PENALTY_H = 24 h`.
+
+`code/rl_ppo.py` — PPO from the BC checkpoint (never from scratch), with:
+* a value head on the shared trunk (the features that predict the teacher's
+  action also predict remaining time);
+* a **KL penalty to the frozen clone** on top of PPO clipping — the standard
+  stabiliser when starting from a good prior;
+* per-instance return scaling (routes differ 10x in length) + batch advantage
+  normalisation;
+* **only the discrete head is trained**; the tau_c head is frozen (already
+  within 0.9% of teacher charge hours; a continuous action would double
+  gradient variance for a second-order lever);
+* `gamma = 1.0` — the objective is undiscounted total time;
+* the same mask AND forcing rules as evaluation, so exploration cannot
+  "discover" a regulatory breach as a shortcut;
+* **in-training validation against the real metric** every `--eval-every`
+  iterations: deterministic rollouts on RECORDED realisations, paired against
+  the stored teacher. Prints `<-- BEATS TEACHER` if the median goes negative.
+  Without this we would be watching training return, which is comparable to
+  nothing published.
+
+Sizing: ~2-3 s per 8 episodes, so 64 episodes/iter x 400 iters is **~2 h**
+single-core. Run several seeds in parallel.
+
+```bash
+for s in 0 1 2; do
+  python ML/code/rl_ppo.py       --model ML/models/policy_K20_seedsplit_seed0_cw0.pt       --iters 400 --episodes-per-iter 64 --seed $s       --eval-every 10 --eval-n 40       > ML/logs/ppo_seed$s.log 2>&1 &
+done; wait
+grep -h "VAL vs teacher" ML/logs/ppo_seed0.log | tail -20
+```
+Then evaluate the winner exactly like any other policy:
+```bash
+python ML/code/rollout.py --split val --split-mode seed --guard-q 0.95     --model ML/models/policy_ppo_seed0.pt --alg STUDENTPPO
+python ML/code/compare_runs.py --split val --split-mode seed
+```
+
+**Honest odds.** The baseline to beat is +0.43% (test) / +0.44% (val) and the
+oracle sits 2.24% below the teacher, so headroom exists. But RL fine-tuning
+from a strong clone usually yields modest gains, and the two failure modes are
+symmetric: too much KL anchoring and nothing moves, too little and the policy
+drifts into halting. If 400 iterations do not move the validation median, the
+honest report is that the clone is already at the achievable frontier for this
+action space — which is itself a result. Do NOT touch the test set for this.
 
 ## Open items
 - [ ] Recompile LA stats including the new long-route MIPTAIL batch

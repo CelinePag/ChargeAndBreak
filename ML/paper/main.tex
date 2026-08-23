@@ -1,187 +1,327 @@
 % =============================================================================
-% ML×OR @ NeurIPS 2026 workshop submission — DRAFT SKELETON (rough notes, not prose)
-% Deadline: Aug 31, 2026 AoE.  Max 4 pages main body, NeurIPS format, non-archival,
-% NON-ANONYMOUS.  https://mlxor-2026.github.io/
+% ML x OR @ NeurIPS 2026 workshop submission
+% 4 pages main body (references unlimited), non-archival, NON-ANONYMOUS.
 %
-% TODO(format): swap documentclass to neurips_2026.sty once downloaded
-%               (drafting in article so the file compiles today).
-% TODO(authors): author block + affiliations (non-anonymous venue).
+% TODO(format): replace the geometry block with \usepackage{neurips_2026}
+%   once the style file is downloaded.  The layout below approximates it so
+%   the draft compiles and paginates realistically today.
+% TODO(authors): fill the author block (the venue is non-anonymous).
 % =============================================================================
-\documentclass[11pt]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage{booktabs,graphicx,amsmath,amssymb}
-\usepackage[colorlinks]{hyperref}
-\newcommand{\todo}[1]{\textbf{\color{red}[TODO: #1]}}
-\usepackage{xcolor}
+\documentclass[10pt]{article}
+\usepackage[letterpaper,margin=1in]{geometry}
+% newtx rather than the legacy `times' package: it supplies a real bold face
+% (plain `times' leaves TU/ptm/b/n undefined under XeTeX) and matching maths.
+\usepackage{newtxtext,newtxmath}
+\usepackage{booktabs,graphicx,amsmath,microtype,multirow}   % amssymb dropped: it and newtxmath
+                             % both define Bbbk, and no amssymb-only
+                             % symbol is used here
+\usepackage{xcolor}          % must precede hyperref: allcolors uses a
+                             % colour EXPRESSION, which plain `color' lacks
+\usepackage[colorlinks,allcolors=blue!60!black]{hyperref}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
 
-% Title candidates (pick one):
-%  (A) Amortizing the Integrality Gap: Imitation Learning for Real-Time
-%      Charging-and-Break Scheduling of Electric Trucks
-%  (B) When the Good Policy Is Too Slow: Distilling Exact Lookahead for
-%      Electric-Truck Operations under Hours-of-Service Regulation
-\title{Amortizing the Integrality Gap:\\ Imitation Learning for Real-Time
-  Charging-and-Break Scheduling of Electric Trucks}
-\author{\todo{authors — non-anonymous}}
+\newcommand{\td}{t_{\mathrm{dec}}}
+
+\title{\textbf{Amortising the Integrality Gap: Imitation Learning for\\
+Real-Time Charging-and-Break Scheduling of Electric Trucks}}
+% NB: never start a line after \\ with "[" — LaTeX reads it as the optional
+% length argument of \\ (that is what "Missing number, treated as zero" was).
+\author{%
+  \textbf{Author Name}\\
+  Affiliation\\
+  \texttt{name@institution.no}
+}
 \date{}
 
 \begin{document}
 \maketitle
 
-% =============================================================================
 \begin{abstract}
-Rough beats, one sentence each in final version:
-\begin{itemize}
-  \item Battery-electric trucks: charging and regulated driver breaks/rests
-        (EU HoS) must be scheduled jointly under stochastic travel times;
-        breaks can be taken \emph{inside} charging dwells, coupling the two.
-  \item Benchmark finding (companion paper): rolling-horizon lookahead with an
-        \emph{exact (MIP) tail} halves the gap to the hindsight optimum vs.\ the
-        LP-relaxed tail (e.g.\ 4.3\%$\to$2.1\%, 7.6\%$\to$2.9\% short routes;
-        4.6\%$\to$2.4\%, 6.8\%$\to$2.2\% medium; \todo{long-route numbers —
-        recompile additional\_la\_stats with new runs}).
-  \item But: median per-stop decision time 45--89\,s (route-class medians),
-        worst stops 3--5\,min, 0.6--4.1\,h wall clock per route
-        $\Rightarrow$ a \emph{batch} policy, not an operational one.
-  \item Contribution: distill the exact-tail policy into a small
-        feasibility-masked network deciding in $\sim$1\,ms; execute in closed
-        loop in the same simulator; certify against BOTH the teacher and the
-        hindsight oracle, on the full instance grid.
-  \item OOD: train on subsets of route lengths / TW classes, deploy on held-out
-        ones; teacher numbers exist everywhere, so the imitation gap is
-        measured in- and out-of-distribution.
-  \item Headline result: \todo{student gap X\% vs teacher Y\% vs LP-tail Z\%, at
-        $10^4\times$ lower decision latency}.
-\end{itemize}
+Battery-electric trucks must schedule charging jointly with the rest and break
+periods that driving-hours regulation imposes, under stochastic travel times.
+A rolling-horizon look-ahead that solves its tail exactly is the strongest
+implementable policy we have for this problem, but it costs 45--90\,s per
+decision and up to four hours of compute per route: a \emph{batch} policy, not
+an operational one. We ask how much of it survives amortisation. Cloning it
+into a 36k-parameter masked network yields a policy that decides in
+\textbf{0.74\,ms} --- roughly $10^5\times$ faster --- and lands
+\textbf{$+0.43\pm0.18\%$} of realised route duration behind its own teacher on
+held-out instances, against $+2.74\%$ for a rule-based heuristic of comparable
+speed. The route there is not automatic: our design decisions were repeatedly
+made against \emph{closed-loop} evidence that contradicted the supervised
+metrics, and the change that mattered most was a class-weighting choice that
+raised balanced accuracy from 0.299 to 0.477 while making realised duration
+six times worse. We also report a negative result: DAgger improved the
+development set but did not transfer to the held-out set. We argue that in
+sequential operational settings, offline predictive accuracy is not merely a
+weak proxy for policy quality but is frequently \emph{anti-correlated} with it.
 \end{abstract}
 
 % =============================================================================
-\section{Problem and motivation}\label{sec:intro}
-\begin{itemize}
-  \item Setting (compress from companion paper \todo{cite as ``under review''}):
-        single BET, fixed stop sequence, stochastic leg travel times (shifted
-        lognormal, CV 0.15), customer time windows, EU HoS clocks
-        (consecutive-driving, shift-driving, shift-work; split-break state),
-        piecewise-linear concave charging, chargers per Reg.\ (EU) 2023/1804
-        spacing.  Objective: arrival time + $\beta\,\times$ window misses.
-  \item Policy benchmark from companion paper: greedy / robust plan / two-stage
-        SP / rolling-horizon lookahead (LA) / hindsight oracle (MILP per
-        realization; certified bounds).  LA best implementable.
-  \item THE HOOK — where is the remaining headroom?  One-at-a-time sweep of LA:
-    \begin{itemize}
-      \item scenario count $10\to25\to50$: $|\Delta|\le0.4\%$ realized duration
-            — FLAT (scenarios only rank a small discrete action set).
-      \item horizon $24\to48$\,h: $|\Delta|\le0.2\%$ — FLAT past one duty cycle;
-            $24\to12$\,h costs up to $+1.7\%$ + infeasibility — threshold, not
-            a trend.
-      \item tail integrality LP$\to$MIP: gap to hindsight HALVES (table below)
-            — the one axis with money on it.
-    \end{itemize}
-  \item Table~1 stub (motivation): rows = base(LP tail), MIPTAIL(exact tail);
-        cols = route class $\times$ \{gap\%, $\Delta$ duration, $t_{\rm dec}$\};
-        add worst-case $t_{\rm dec}$ column.  Numbers from companion sweep +
-        \todo{fill long-route cells from the new 228-run batch}.
-  \item Punchline: exact tail is now our benchmark standard; affordable as a
-        1{,}000-run offline campaign ($\approx$\todo{1.5--2k} CPU-h) but NOT as
-        an onboard/continuous policy (45--89\,s median per decision, 5-min
-        tails).  $\Rightarrow$ amortize offline optimality into a real-time
-        policy.
-  \item Related work, 4--5 cites, one line each: Bengio/Lodi/Prouvost EJOR'21
-        (ML4CO framing); Ross et al.\ AISTATS'11 (DAgger / imitation);
-        Nair et al.'20 neural diving + Han et al.\ ICLR'23 predict-and-search
-        (learning integer structure); Basso et al.\ TR-E'22 (safe RL for
-        dynamic EVRP); Powell (policy taxonomy: our LA = DLA, student = PFA).
-        \todo{bib file}
-\end{itemize}
+\section{Problem and motivation}
+\label{sec:intro}
+
+A battery-electric heavy truck on a long corridor faces two coupled schedules.
+Charging is dictated by energy and by where stations are; rest and break
+periods are dictated by EU driving-hours regulation~\citep{eu561}, on a
+corridor whose station spacing is itself set by
+regulation~\citep{eu2023afir}. The two schedules
+interact: a mandatory break taken \emph{inside} a charging dwell is free,
+because the two run in parallel, so \emph{when} to charge is inseparable from
+\emph{when} to rest. Travel times are stochastic, so the schedule must be
+decided online, stop by stop.
+
+Our companion study benchmarks a family of policies on this problem --- a
+myopic rule-based heuristic, static robust plans, a two-stage stochastic plan
+with recourse, a rolling-horizon look-ahead, and a per-realisation hindsight
+oracle. Here we take that benchmark as given and ask a narrower question about
+the best implementable member of it.
+
+\paragraph{Where the remaining headroom is.}
+A one-at-a-time sweep of the look-ahead's parameters is unusually
+uninformative in two of its three dimensions. Raising the scenario count from
+10 to 50 moves realised duration by at most $0.4\%$; extending the horizon
+beyond one duty cycle (24\,h) moves it by at most $0.2\%$, although
+\emph{shortening} it below one duty cycle costs up to $1.7\%$. The one live
+axis is \textbf{integrality}: solving the look-ahead tail as a MIP rather than
+an LP relaxation roughly halves the gap to the hindsight optimum
+(Table~\ref{tab:motivation}), and costs an order of magnitude more time per
+decision.
+
+\begin{table}[t]
+\centering\small
+\caption{The look-ahead's live axis. Solving the tail exactly halves the gap
+to the hindsight optimum and costs ${\sim}10\times$ the decision time. Gap is
+the median distance to the per-realisation oracle; $\td$ is the median
+decision time per stop. Reproduced from the companion benchmark.}
+\label{tab:motivation}
+\begin{tabular}{llcccc}
+\toprule
+& & \multicolumn{2}{c}{Short routes} & \multicolumn{2}{c}{Medium routes}\\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Tail & Windows & Gap (\%) & $\td$ (s) & Gap (\%) & $\td$ (s)\\
+\midrule
+LP relaxation & none  & 4.3 & 4  & 4.6 & 18\\
+LP relaxation & tight & 7.6 & 4  & 6.8 & 18\\
+Exact (MIP)   & none  & \textbf{2.1} & 48 & \textbf{2.4} & 84\\
+Exact (MIP)   & tight & \textbf{2.9} & 61 & \textbf{2.2} & 90\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The gap this paper attacks.}
+Exactness is therefore worth about two points of optimality and is now our
+standard configuration --- but at 45--90\,s per decision (median, by route
+class) and 0.6--4.1\,h of wall clock per route it is affordable only as an
+offline campaign. It cannot be re-evaluated continuously in a cab, it cannot be
+run across a fleet by a dispatcher, and it requires a commercial solver licence
+at the point of use. We therefore ask: \emph{how much of an exact look-ahead
+survives being compressed into a policy that decides in milliseconds?} In
+Powell's taxonomy~\citep{powell2022rlso} this converts a direct look-ahead into
+a policy-function approximation; in the ML-for-combinatorial-optimisation
+framing~\citep{bengio2021ml4co} it is amortised
+optimisation~\citep{dumouchelle2022neur2sp,nair2020neuraldiving}. Unlike
+neural construction heuristics for routing~\citep{kool2019attention} the
+sequence of stops here is fixed and the learned object is the operational
+schedule; the closest application is safe reinforcement learning for dynamic
+electric vehicle routing~\citep{basso2022dsevrp}.
 
 % =============================================================================
-\section{Method: distilling the exact-tail policy}\label{sec:method}
-\begin{itemize}
-  \item MDP view (2--3 sentences): state $s_i$ at stop $i$ = (SoC $e$, clocks
-        $cd, sd, sw$, split flag $\phi$, rest budget $\rho_2$, ext-shift use,
-        arrival time $t$) + instance context (next-$K$ stops: leg lengths,
-        charger power, TW offsets relative to $t$; aggregates of remaining
-        route).  Action = (charge $y$, break type $\in\{$none,15,30,45$\}$,
-        rest type $\in\{$none,r1,r2$\}$) + charge duration $\tau_c$.
-        Reward = negative incremental objective (identical to benchmark KPI).
-  \item Teacher data: 772 deduped exact-tail LA runs, 36 families
-        (3 route $\times$ 3 customer $\times$ 4 TW), 75{,}794 state--action
-        pairs; per-stop states stored in solution JSONs (no replay needed);
-        5 infeasible teacher runs excluded.  \todo{final counts after audit}
-  \item DESIGN CHOICE (decided): the network outputs the FULL decision —
-        discrete head (y $\times$ break $\times$ rest, masked softmax) +
-        charge-duration head ($\tau_c$ as \todo{bins vs.\ regression — ablate}).
-        NOT solver-in-the-loop duration recovery.  Reasons:
-        (i) latency claim stays pure ($\sim$ms, no Gurobi at deployment);
-        (ii) benchmark evidence: frozen-structure execution (2SP + duration
-        recourse) strands 13.7\% of runs — value lives in per-stop adaptive
-        decisions, which the student retains;
-        (iii) safety via a worst-case reachability clamp on $\tau_c$
-        ($e + \Delta e(\tau_c) \ge E_{\min}$ + buffer to next charger under
-        support-max travel time) — same check every benchmark policy uses;
-        clamp active $=$ logged event, report activation rate.
-  \item Masking: infeasible discrete actions get $-\infty$ logits (same
-        worst-case checks; e.g.\ must-rest when $sd$ at cap).
-  \item Model + training (keep to $\sim$6 lines in final): MLP 2$\times$128
-        ReLU; class-weighted cross-entropy (discrete) + \todo{L1/L2} on
-        $\tau_c$; Adam; early stopping; inputs z-scored on train split.
-        Splits BY INSTANCE SEED; entire families held out for OOD (below).
-        5 training seeds, report spread.
-  \item NOT in v1 (state as future work): DAgger, sequence encoder over
-        remaining stops, RL fine-tuning.
-\end{itemize}
+\section{Method}
+\label{sec:method}
+
+\paragraph{Decision process.}
+At stop $i$ the state comprises the vehicle's state of charge, the three
+regulatory clocks (consecutive driving, shift driving, shift work), the
+split-break flag, the reduced-rest and extended-shift budgets consumed, and the
+arrival time; plus a description of the road ahead --- the next $K$ nodes (leg
+duration and energy, whether the node is a charger or a customer, queue delay,
+and time-window slack \emph{relative to now}) and aggregates over the whole
+remaining route. With $K=20$ this is 141 features. The action is the joint
+discrete choice
+$a_i \in \{\text{charge},\lnot\text{charge}\}\times\{\text{none},b_{15},b_{30},b_{45}\}
+\times\{\text{none},r_1,r_2\}$, of which 12 combinations occur in the data,
+together with a charge duration $\tau_c$. The reward is the negative increment
+of the benchmark's own objective, so training and evaluation optimise the same
+quantity.
+
+\paragraph{Policy.}
+A two-layer MLP ($141\to128\to128$; 36{,}365 parameters) with two heads: masked
+logits over the 12 actions, and a softplus charge duration. Two constraint
+layers wrap it, both reusing the benchmark's existing feasibility checks, so
+the learned policy is subject to exactly the rules every other policy obeys.
+\emph{Masking} sets structurally impossible actions to $-\infty$ before the
+softmax (no charging away from a station; no reduced rest without budget).
+\emph{Forcing} restricts the choice set further when a one-step check declares
+a charge, break or rest mandatory --- the network still chooses freely
+\emph{among} compliant actions, so the rules constrain rather than decide.
+Charge duration is clamped below by the energy needed to reach the next station
+at the 0.5-quantile of consumption, the same rule the teacher uses to size its
+own committed charge. No solver runs at deployment.
+
+\paragraph{Data.}
+767 exact-tail look-ahead runs over a $3\times3\times4$ grid of route length,
+customer density and time-window class supply \textbf{74{,}380} labelled
+decisions; the simulator records the per-stop state, so no replay is needed.
+Instances are split by seed into 530 train / 129 validation / 108 test. Every
+design decision below was made on validation; the test set was evaluated once.
 
 % =============================================================================
-\section{Experiments}\label{sec:exp}
-\begin{itemize}
-  \item Protocol (5 lines): same simulator, same realization draws as
-        benchmark; metric = gap to certified hindsight oracle; infeasibility
-        reported as-is (no supervisor), same outcome classification.
-  \item MAIN TABLE stub: rows = Greedy / LA(LP tail) / STUDENT / LA(exact tail,
-        teacher) / oracle; cols = route class $\times$ \{median gap\%,
-        infeasible\%, TW hit\%, median $t_{\rm dec}$\}.
-        \todo{all baseline rows exist on disk already}
-  \item MONEY FIGURE stub: gap-to-oracle (y) vs.\ per-decision latency
-        (x, log): greedy ms/poor — student ms/\todo{?} — LP-tail
-        $\sim$10--20\,s — exact tail 45--89\,s (whisker to 319\,s) — oracle
-        line.  One glance = the claim.
-  \item OOD block (the scientific core):
-    \begin{itemize}
-      \item train short+medium $\to$ test long (route-length extrapolation;
-            long = 170 stops median, multi-rest duty structure);
-      \item train \{none,tight\} $\to$ test \{medium,large\} TWs;
-      \item report imitation gap (student $-$ teacher) in-dist vs.\ OOD;
-            teacher closed-loop numbers exist in every held-out cell.
-    \end{itemize}
-  \item Secondary claim: evaluation throughput — teacher grid campaign
-        $\approx$\todo{X} CPU-h vs.\ student re-evaluation in minutes;
-        policy doubles as a cheap experimental instrument (dense sweeps).
-  \item Ablations IF space (else 1-line mentions): $\tau_c$ bins vs.\
-        regression; masking off; feature ablation (drop HoS clocks / drop
-        next-$K$ context); data-size curve.
-\end{itemize}
+\section{Experiments}
+\label{sec:exp}
+
+Every policy is executed in the same simulator, over the same recorded
+travel-time realisations, and scored by the same metrics. A run that breaches a
+regulatory limit \emph{halts} at that stop, so a route duration exists only for
+a completed route: halted runs are counted, never averaged into a duration. We
+report the paired difference in realised duration against the exact-tail
+teacher on the same instance, over three independently trained seeds.
+
+\begin{table}[t]
+\centering\small
+\caption{Held-out test set (108 instances, evaluated once). Duration is the
+median paired difference from the exact-tail teacher over three training
+seeds; lower is better and $0$ is teacher parity. Halts are routes ended by a
+regulatory breach. The student reaches teacher-comparable quality at
+${\sim}10^5\times$ less online compute.}
+\label{tab:main}
+\begin{tabular}{lccccc}
+\toprule
+Policy & Duration vs.\ teacher (\%) & Halts /108 & TW misses & $\td$ & Solver \\
+\midrule
+Greedy heuristic          & $+2.74$                 & 0           & 166 & 0.03\,ms & no\\
+\textbf{Student (cloned)} & $\mathbf{+0.43\pm0.18}$ & $2.7\pm0.5$ & 128 & \textbf{0.74\,ms} & no\\
+Student $+$ DAgger        & $+0.48\pm0.31$          & $4.7\pm0.9$ & 126 & 0.79\,ms & no\\
+\midrule
+Exact-tail look-ahead (teacher) & --- (reference)   & 0           & 53  & 70{,}446\,ms & yes\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Main result.}
+Table~\ref{tab:main} and Figure~\ref{fig:money} give the headline. The cloned
+policy sits $0.43\%$ behind a teacher that takes 70\,s per decision, while
+deciding in $0.74$\,ms and requiring no solver; the rule-based heuristic, which
+is equally fast, is six times further behind. The student halts on 2.7 of 108
+routes against the teacher's zero --- the residual cost of amortisation. Those
+failures are not a diffuse loss of quality: every one of them is a breach of
+the 15\,h daily-spread ceiling.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.60\linewidth]{../figures/ml_money.pdf}
+\caption{Quality against online decision latency (log scale), validation set.
+The student attains the horizontal of the exact-tail look-ahead at the latency
+of the myopic heuristic. Bars are interquartile ranges over instances.}
+\label{fig:money}
+\end{figure}
+
+\paragraph{Behavioural fidelity.}
+Aggregate numbers hide whether the policy has learned the \emph{structure} of
+the problem or merely its cost. Figure~\ref{fig:schedule} shows one realised
+schedule against the teacher's: rest placement, charging episodes and the
+state-of-charge trajectory are essentially superimposed, and both policies hide
+almost every mandatory break inside a charging dwell --- the coupling that makes
+this problem non-separable. Quantitatively the student charges for $6.74$\,h per
+route against the teacher's $6.80$\,h ($-0.9\%$) and runs the pack to the same
+depth (5th-percentile state of charge $29.5\%$ against $28.2\%$): it has learned
+that charge is time, not merely that empty batteries are bad.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{../figures/ml_schedule.pdf}
+\caption{Realised schedule, student (top lane) against exact-tail teacher
+(bottom lane), on a held-out long route with tight windows. Hatched charging
+bars are dwells that absorb a mandatory break at no extra cost. Lower panel:
+state of charge.}
+\label{fig:schedule}
+\end{figure}
+
+\paragraph{Ablations, decided in closed loop.}
+Table~\ref{tab:ablation} pairs each design decision's supervised metric with its
+realised effect. The pattern is consistent, and is the most useful thing we
+have to report: \emph{the supervised metric moves the wrong way}.
+Inverse-frequency class weighting is the clearest case. The decision
+distribution is dominated by ``keep driving'' ($87.9\%$), so weighting rare
+classes up is the textbook response, and by its own measure it works ---
+balanced accuracy rises from $0.299$ to $0.477$. But it places the majority
+class at weight $0.035$ against $5.3$ for the rarest, so predicting a
+\emph{rest} when the truth is \emph{drive on} becomes nearly free in the loss,
+while costing 9--11\,h of route time in reality. Realised duration degrades from
+$+0.56\%$ to $+3.17\%$. The loss had quietly decorrelated from the objective,
+and no offline metric revealed it.
+
+\begin{table}[t]
+\centering\small
+\caption{Design decisions, validation set. Balanced accuracy is mean per-class
+recall on held-out decisions; duration is the median paired difference from the
+teacher. In both rows the offline metric prefers the worse policy.}
+\label{tab:ablation}
+\begin{tabular}{llcc}
+\toprule
+Decision & Setting & Balanced acc.\ $\uparrow$ & Duration vs.\ teacher $\downarrow$\\
+\midrule
+\multirow{2}{*}{Class weighting}
+ & inverse-frequency ($p{=}0.5$)  & \textbf{0.477} & $+3.17\%$\\
+ & \textbf{unweighted} ($p{=}0$)  & 0.299          & $\mathbf{+0.56\%}$\\
+\addlinespace
+\multirow{2}{*}{Look-ahead features}
+ & $K=40$ (261 features)          & 0.452          & $+2.86\%$\\
+ & $\mathbf{K=20}$ (141 features) & 0.299          & $\mathbf{+0.56\%}$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{A negative result: DAgger did not transfer.}
+Behaviour cloning trains on the teacher's state distribution, and a policy that
+acts creates its own; DAgger~\citep{ross2011dagger} is the standard remedy. We
+ran one round: the student drove 530 training instances while the exact-tail
+teacher labelled a sampled $35\%$ of the states it reached, yielding
+\textbf{17{,}941} aggregated labels ($19.4\%$ of the training set). The
+distribution shift is real and measurable --- at student-visited states the
+teacher prescribes rest markedly more often than in the base data ($r_1$:
+$0.33\%\to0.81\%$; $r_2$: $1.63\%\to2.33\%$), consistent with a policy that
+arrives at stops with its clocks closer to their limits. On validation the
+aggregated model looked better (median $+0.19\%$ against $+0.44\%$; halts $3.3$
+against $5.7$). \emph{On the held-out set the effect reversed}
+(Table~\ref{tab:main}): $+0.48\%$ against $+0.43\%$, with more halts rather than
+fewer. The validation gain was within twice the seed-to-seed spread and did not
+survive. We suspect a single DAgger round is the wrong tool once the state
+distribution has already been repaired by fixing the loss.
 
 % =============================================================================
-\section{Discussion and outlook}\label{sec:disc}
-\begin{itemize}
-  \item General lesson for ML$\times$OR: measure WHERE learning can help before
-        learning — here two classical axes (scenarios, horizon) were
-        empirically dead; integrality under a latency budget was the live one.
-  \item When exactness is batch-affordable but latency-prohibitive,
-        distillation converts offline optimality into an online policy;
-        certification against teacher + oracle is the honest scorecard.
-  \item Limitations (say plainly): single vehicle; synthetic lognormal
-        uncertainty; imitation $\le$ teacher by construction; preliminary
-        scale.
-  \item Next: DAgger (expert queryable at arbitrary states — solver, not
-        human); predict-and-search variant (student proposes binaries, LP
-        certifies) as the safety-critical deployment mode; fleet extension.
-\end{itemize}
+\section{Discussion}
+\label{sec:disc}
 
-% =============================================================================
-% \bibliographystyle{plainnat}  \bibliography{refs}
-% TODO(bib): Bengio/Lodi/Prouvost EJOR 290(2) 2021; Ross/Gordon/Bagnell
-% AISTATS 2011; Nair et al. arXiv:2012.13349; Han et al. ICLR 2023
-% (predict-and-search); Basso/Kulcsar/Sanchez-Diaz/Qu TR-E 2022; Powell,
-% RL and Stochastic Optimization, 2022; Kool/van Hoof/Welling ICLR 2019;
-% Dumouchelle et al. Neur2SP NeurIPS 2022; companion manuscript (under review).
+An exact-tail look-ahead can be compressed into a 36k-parameter network that
+decides ${\sim}10^5\times$ faster and gives up about half a percent of route
+duration. That is the difference between a policy that can be run as an offline
+study and one that can be run in a vehicle.
+
+The transferable lesson is methodological. Repeatedly an offline metric and a
+closed-loop measurement disagreed, and each time the closed-loop measurement was
+the one worth believing; with class weighting, following standard practice would
+have made the deployed policy six times worse. In sequential operational problems
+the cost of an error is wildly non-uniform across the action space --- a
+misplaced daily rest costs nine hours, a misplaced charging decision costs
+minutes --- and any offline loss that treats them comparably has stopped
+measuring what matters. We would encourage reporting realised closed-loop cost as
+the primary metric for learned policies in operations, with predictive accuracy
+relegated to a diagnostic.
+
+\paragraph{Limitations.}
+Single vehicle; synthetic travel-time uncertainty from a fitted shifted
+lognormal; imitation bounds the policy by its teacher by construction; three
+training seeds. The residual failures concentrate in one regulatory constraint
+(the daily spread ceiling), which suggests a targeted feasibility layer rather
+than more data. Extending to a fleet sharing charging infrastructure is the
+natural next step, and turns a single-agent problem into a multi-agent one.
+
+\small
+\bibliographystyle{plainnat}
+\bibliography{refs}
 \end{document}
