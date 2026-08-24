@@ -642,6 +642,69 @@ instances dropped out of the median — its "BEATS TEACHER" was long-route-only
 and survivor-biased). Always re-evaluate with rollout.py + compare_runs.py on
 a COMMON completed set.
 
+## RL RERUN RESULT 2026-08-23/24 — PPO v2 BEATS the teacher on duration
+3 seeds x 400 iters x 64 episodes, from the SPREAD-AWARE clone, multiplicative
+halt penalty, `--eval-n 0` (all 129 val instances, not the first 40).
+
+Independent evaluation (rollout.py + compare_runs.py), val, on the **common
+completed set n=106** so halt selection bias cannot leak in:
+
+| policy | duration vs teacher | penalised vs teacher | halts /129 | TW | t_dec |
+|--------|---------------------|----------------------|-----------|-----|-------|
+| BC + spread feats | +0.294 ± 0.249 | +0.787 ± 0.134 | 4.0 ± 0.8 | 203 | 1.15 ms |
+| PPO v1 (old) | +0.151 ± 0.042 | +0.412 ± 0.184 | 9.7 ± 1.2 | 188 | 0.72 ms |
+| **PPO v2** | **−0.238 ± 0.049** | **−0.008 ± 0.033** | **1.7 ± 0.9** | 201 | 1.28 ms |
+| teacher | 0 (reference) | 0 | 0 | 112 | 72,263 ms |
+
+* **Duration: the student is now FASTER than its own teacher** — all three
+  seeds negative (−0.18, −0.30, −0.24) with a tight 0.049 spread. Imitation
+  cannot exceed its teacher; RL can, and did.
+* **Halts collapsed 9.7 → 1.7**, below the BC clone's 4.0. Both fixes worked:
+  the multiplicative penalty made abandonment expensive, and the spread
+  feature let the policy see the limit it kept breaching. Halt causes are now
+  spread evenly (2 spread / 2 sd / 1 cd) instead of 27 spread — the dominant
+  failure mode is GONE, not merely reduced.
+* **BUT on the PENALISED objective it is only at PARITY** (−0.008 ± 0.033,
+  indistinguishable from zero). The student still misses 201 windows against
+  the teacher's 112, and beta x misses eats the entire duration advantage.
+
+**Therefore state the claim precisely:** the learned policy is faster than the
+exact-tail look-ahead and matches it on the full objective, at ~5x10^4 less
+online compute. It does NOT dominate the teacher — windows remain the
+deficiency, exactly as they have been since the forcing rules landed.
+
+**Test set:** untouched by any of this. It was already spent once for the BC
+paper number, so a PPO test evaluation is a SECOND look and must be reported
+as such if used.
+
+## ⚠️ CORRECTION 2026-08-24 — the "beats the teacher" claim does NOT hold
+The `-0.238 +/- 0.049` figure is the median-over-instances of the percentage
+difference, averaged over 3 training seeds. **The +/- is seed reproducibility,
+not uncertainty about whether the policy is actually better.** A paired
+per-instance test tells a different story (val, n=125, 3 seeds averaged):
+
+| | mean | median | 95% CI of median | student better on | sign test |
+|---|---|---|---|---|---|
+| duration (h) | −0.0617 | −0.0879 | **[−0.173, +0.053]** | 68/125 (54%) | p = 0.19 |
+| penalised (h) | **+0.286** | +0.127 | [−0.062, +0.340] | 56/125 (45%) | p = 0.90 |
+
+Both CIs cross zero. The duration win is **not significant**, and on the
+penalised objective the mean is POSITIVE — slightly worse than the teacher.
+
+**Report PARITY, not superiority.** The defensible claim is: *the learned
+policy matches an exact-tail MILP look-ahead at ~5x10^4 less online compute*.
+That is a strong result and it is what the data supports.
+
+More training seeds will NOT fix this — seed variance (0.049) is an order of
+magnitude smaller than the instance-level spread. Detecting a 54% win rate
+would need on the order of a thousand instances; we have 129 val + 108 test
+uncontaminated. Either the effect is genuinely tiny or the policy needs to be
+better.
+
+This is the paper's own thesis biting us: a headline that looked tight was
+hiding the uncertainty that actually mattered. Every comparative claim in the
+paper should carry a paired test, not a seed spread.
+
 ## Open items
 - [ ] Recompile LA stats including the new long-route MIPTAIL batch
       (long-route rows of the motivation table).

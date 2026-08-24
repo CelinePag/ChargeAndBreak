@@ -76,7 +76,8 @@ class RouteEnv:
     indirection would only obscure the transition."""
 
     def __init__(self, full_data, raw_inst, classes, k_look,
-                 energy_q=0.5, guard_q=0.95, spread_q=None, cv=0.15, seed=None):
+                 energy_q=0.5, guard_q=0.95, spread_q=None, cv=0.15, seed=None,
+                 halt_mode="mult"):
         self.fd, self.classes, self.k = full_data, classes, k_look
         self.ctx = build_instance_context(raw_inst)
         self.Ebar = [float(raw_inst["Ebar"][str(i)]) for i in range(len(raw_inst["Ebar"]))]
@@ -89,6 +90,10 @@ class RouteEnv:
         # not the guard in general — is what the policy keeps walking into.
         # None = use guard_q for everything (v1 behaviour).
         self.spread_q = spread_q
+        # "mult" = v2 multiplicative penalty (default).  "add" reinstates the
+        # v1 fixed 24 h surcharge, so the halt-penalty change can be isolated
+        # from the spread-feature change — v1 -> v2 altered both at once.
+        self.halt_mode = halt_mode
         self.rng = np.random.default_rng(seed)
         self.N = int(full_data["N"])
         self.C = set(full_data["C"])
@@ -196,10 +201,14 @@ class RouteEnv:
             self.done = self.halted = True
             # Total episode return becomes -HALT_MULT * est_total, where
             # est_total is what a completed route would plausibly have cost.
-            elapsed_total = self.v.t_arr - self.t0
-            est_rem   = float(self.suf_D[min(self.v.stop, self.N)]) * DWELL_INFLATION
-            est_total = elapsed_total + est_rem
-            reward -= est_rem + (HALT_MULT - 1.0) * est_total
+            rem_nom = float(self.suf_D[min(self.v.stop, self.N)])
+            if self.halt_mode == "add":                     # v1 behaviour
+                reward -= 24.0 + rem_nom
+            else:                                           # v2, multiplicative
+                elapsed_total = self.v.t_arr - self.t0
+                est_rem   = rem_nom * DWELL_INFLATION
+                est_total = elapsed_total + est_rem
+                reward -= est_rem + (HALT_MULT - 1.0) * est_total
         elif self.v.stop >= self.N:
             self.done = True
         info = dict(halted=self.halted, stop=self.v.stop,

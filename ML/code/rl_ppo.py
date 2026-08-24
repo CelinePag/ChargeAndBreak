@@ -163,7 +163,8 @@ def main(a):
         if n not in envs:
             raw = json.load(open(os.path.join(INST_DIR, n + ".json")))["instance"]
             fd, D0, E0, cv = load_instance_json(os.path.join(INST_DIR, n + ".json"))
-            envs[n] = (RouteEnv(fd, raw, classes, k_look, cv=cv, seed=a.seed),
+            envs[n] = (RouteEnv(fd, raw, classes, k_look, cv=cv, seed=a.seed,
+                                halt_mode=a.halt_mode),
                        (D0, E0))
         return envs[n]
 
@@ -251,7 +252,7 @@ def main(a):
         print(msg + f"  ({time.time()-t0:.0f}s)")
 
         if (it + 1) % a.save_every == 0 or it + 1 == a.iters:
-            tag = f"policy_ppo_seed{a.seed}"
+            tag = f"policy_ppo_seed{a.seed}" + (f"_{a.tag}" if a.tag else "")
             torch.save(dict(state=ac.net.state_dict(), mu=ck["mu"], sd=ck["sd"],
                             classes=ck["classes"], feature_names=ck["feature_names"],
                             hidden=ck["hidden"], seed=a.seed, k_look=k_look,
@@ -286,5 +287,12 @@ if __name__ == "__main__":
                    help="iterations between validation evaluations (0 = off)")
     p.add_argument("--eval-n", dest="eval_n", type=int, default=40,
                    help="validation instances per evaluation (0 = all 129)")
+    p.add_argument("--halt-mode", dest="halt_mode", default="mult",
+                   choices=["mult", "add"],
+                   help="mult = v2 multiplicative penalty; add = v1 fixed 24 h "
+                        "(use to isolate the penalty change from the features)")
+    p.add_argument("--tag", default=None,
+                   help="suffix for the saved checkpoint, so ablations do not "
+                        "overwrite the main run")
     p.add_argument("--seed", type=int, default=0)
     main(p.parse_args())
