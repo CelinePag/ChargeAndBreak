@@ -80,7 +80,7 @@ class ActorCritic(nn.Module):
     def __init__(self, ck):
         super().__init__()
         self.classes = [tuple(c) for c in ck["classes"]]
-        self.net = StudentPolicy(len(ck["mu"]), len(self.classes), hidden=ck["hidden"])
+        self.net = StudentPolicy(len(ck["mu"]), len(self.classes), hidden=ck["hidden"], depth=ck.get("depth", 2))
         self.net.load_state_dict(ck["state"])
         self.value = nn.Linear(ck["hidden"], 1)
         nn.init.zeros_(self.value.weight); nn.init.zeros_(self.value.bias)

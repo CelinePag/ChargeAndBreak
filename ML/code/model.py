@@ -74,15 +74,20 @@ def build_mask(X: torch.Tensor, classes: list) -> torch.Tensor:
 class StudentPolicy(nn.Module):
     """Trunk MLP + (decision head, charge-duration head)."""
 
-    def __init__(self, n_features: int, n_classes: int, hidden: int = 128):
+    def __init__(self, n_features: int, n_classes: int, hidden: int = 128,
+                 depth: int = 2):
         super().__init__()
         # nn.Sequential chains layers: input -> Linear -> ReLU -> ...
         # ReLU(x)=max(0,x) is the nonlinearity that lets stacked linear maps
         # express non-linear decision rules (without it, depth adds nothing).
-        self.trunk = nn.Sequential(
-            nn.Linear(n_features, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-        )
+        # depth = number of hidden layers.  Kept configurable because the
+        # architecture sweep found the trunk can be far smaller than the
+        # original 2x128 without losing supervised fit; the closed-loop
+        # rollout is what decides which size ships.
+        layers = [nn.Linear(n_features, hidden), nn.ReLU()]
+        for _ in range(depth - 1):
+            layers += [nn.Linear(hidden, hidden), nn.ReLU()]
+        self.trunk = nn.Sequential(*layers)
         self.head_cls  = nn.Linear(hidden, n_classes)  # raw scores ("logits")
         # Softplus keeps the predicted charge duration positive by
         # construction (smooth version of max(0, x)).

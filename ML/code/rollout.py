@@ -141,7 +141,7 @@ def make_policy(ckpt_path: str, raw_inst: dict, full_data: dict, stats: dict,
     ck  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     classes = [tuple(c) for c in ck["classes"]]
     k_look  = int(ck.get("k_look", 10))    # features must be built the same
-    net = StudentPolicy(len(ck["mu"]), len(classes), hidden=ck["hidden"])
+    net = StudentPolicy(len(ck["mu"]), len(classes), hidden=ck["hidden"], depth=ck.get("depth", 2))
     net.load_state_dict(ck["state"]); net.eval()
     mu, sd = torch.as_tensor(ck["mu"]), torch.as_tensor(ck["sd"])
     ctx  = build_instance_context(raw_inst)

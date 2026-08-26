@@ -452,7 +452,8 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     metric: str = "gap_pen", out_dir: str = _FIG_DIR,
                     annotate_n: bool = True, full_grid: bool = True,
                     layout: str = "row", inner: str = "tw",
-                    line_band: bool = True) -> list:
+                    line_band: bool = True, drop_methods=(),
+                    name_suffix: str = "") -> list:
     """
     Render the gap-distribution figure and save PDF + PNG; returns the paths.
 
@@ -483,6 +484,16 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         n_unsl = {}
     if n_feas is None:
         n_feas = {}
+    # Dropping a method here (not at the call site) keeps the shared y scale,
+    # the "present" detection and the infeasibility strip consistent with the
+    # boxes: everything downstream reads these four dicts.
+    drop = set(drop_methods)
+    if drop:
+        def _keep(d):
+            return {k: v for k, v in d.items() if k[3] not in drop}
+        gaps, n_infe = _keep(gaps), _keep(n_infe)
+        n_unsl, n_feas = _keep(n_unsl), _keep(n_feas)
+    method_order = [m for m in _METHOD_ORDER if m not in drop]
     pooled_tw = (inner == "pooled")
     if pooled_tw:
         # Collapse first, then let the whole layout run on a one-element TW
@@ -490,14 +501,14 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         # and the heat strip consistent with the boxes by construction.
         gaps, n_infe, n_unsl, n_feas = pool_tw(gaps, n_infe, n_unsl, n_feas)
     if full_grid:
-        routes, custs, methods = _ROUTE_ORDER, _CUST_ORDER, _METHOD_ORDER
+        routes, custs, methods = _ROUTE_ORDER, _CUST_ORDER, method_order
         tws = [POOLED_TW] if pooled_tw else _TW_ORDER
     else:
         routes  = _present((k[0] for k in gaps), _ROUTE_ORDER)
         custs   = _present((k[1] for k in gaps), _CUST_ORDER)
         tws     = ([POOLED_TW] if pooled_tw
                    else _present((k[2] for k in gaps), _TW_ORDER))
-        methods = _present((k[3] for k in gaps), _METHOD_ORDER)
+        methods = _present((k[3] for k in gaps), method_order)
     if not (routes and custs and tws and methods):
         raise SystemExit("no plottable runs found")
 
@@ -636,8 +647,9 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
     def _save(fig, name_sfx):
         out = []
         for ext in ("pdf", "png"):
-            p = os.path.join(out_dir,
-                             f"paper_gap_{kind}{metric_sfx}{name_sfx}.{ext}")
+            p = os.path.join(
+                out_dir,
+                f"paper_gap_{kind}{metric_sfx}{name_sfx}{name_suffix}.{ext}")
             fig.savefig(p, dpi=300, bbox_inches="tight")
             out.append(p)
         plt.close(fig)
@@ -1007,6 +1019,18 @@ if __name__ == "__main__":
                              "box per method, so a box holds every instance of "
                              "its (route, customers, method) cell "
                              "(files get a '_pooledtw' suffix)")
+    parser.add_argument("--drop-method", dest="drop_methods",
+                        action="append", default=[],
+                        choices=[m for m in ps.METHOD_ORDER if m != "oracle"],
+                        help="omit this method from the figure entirely "
+                             "(repeatable).  The shared y scale, the "
+                             "'present' detection and the infeasibility "
+                             "strip are all recomputed without it.  Pair "
+                             "with --name-suffix so the reduced figure does "
+                             "not overwrite the full one")
+    parser.add_argument("--name-suffix", default="",
+                        help="extra suffix appended to the output file names, "
+                             "e.g. '_v2' -> paper_gap_box_pooledtw_v2.pdf")
     parser.add_argument("--line-no-band", dest="line_band",
                         action="store_false", default=True,
                         help="--kind line: drop the IQR bands and draw only "
@@ -1073,7 +1097,9 @@ if __name__ == "__main__":
                                  metric=args.metric, out_dir=args.out_dir,
                                  full_grid=not args.present_only,
                                  layout=args.layout, inner=inner,
-                                 line_band=args.line_band):
+                                 line_band=args.line_band,
+                                 drop_methods=args.drop_methods,
+                                 name_suffix=args.name_suffix):
             print(f"  Figure    : {p}")
 
     if paper_set:

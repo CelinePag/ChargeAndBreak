@@ -21,7 +21,7 @@ Layout
       solutions/            run results + oracle_<inst>.json caches
       logs/                 per-run .txt, gurobi .log, *_scenarios.json
       figures/              .pdf/.png plots
-        └─ basecase/ LAconfig/ usecase/ sensitivity/
+        └─ basecase/ LAconfig/ usecase/ sensitivity/ VSS/
                             those three trees are split one level deep by
                             EXPERIMENT; see "EXPERIMENT BUCKETS" below.  Writers
                             call solution_out()/log_out()/figure_out() and
@@ -81,6 +81,9 @@ RESULTS_VSS : Path = ROOT / "results_vss"
 #     LAconfig/     the look-ahead configuration sweep (S..H.. ladders, LOCAL)
 #     usecase/      the real corridor instances (usecase_*)
 #     sensitivity/  the one-at-a-time axes (instances_sens, "<inst>__<tag>")
+#     VSS/          the value-of-stochastic-solution experiment: every DET run
+#                   (deterministic plan built at nominal travel times, executed
+#                   as is) that measures what planning on averages costs
 #
 # Why one level and not more: the flat trees had grown to ~18 000 solutions and
 # ~25 000 logs, which is slow to list and impossible to read.  Anything deeper
@@ -97,7 +100,8 @@ BASECASE    = "basecase"
 LACONFIG    = "LAconfig"
 USECASE     = "usecase"
 SENSITIVITY = "sensitivity"
-BUCKETS: tuple[str, ...] = (BASECASE, LACONFIG, USECASE, SENSITIVITY)
+VSS         = "VSS"
+BUCKETS: tuple[str, ...] = (BASECASE, LACONFIG, USECASE, SENSITIVITY, VSS)
 
 # Trees that are bucketed.  data_output/ and tex/tables/ are NOT: they hold a
 # few dozen named exports whose names already say which experiment they belong
@@ -190,7 +194,7 @@ results_vss    = _joiner(RESULTS_VSS)
 # it unambiguous against the 8-digit date that follows the algorithm when no
 # variant is present.
 RUN_ID_RE = re.compile(
-    r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP|ORACLE)"
+    r"^(?P<instance>.+)_(?P<algo>LA|ROBU|RO|GREEDY|2SP|DET|ORACLE)"
     r"(?:_(?P<variant>[A-Za-z][A-Za-z0-9_.-]*))?"
     r"_(?P<ts>\d{8}_\d{6})(?:_(?P<idx>\d+))?$"
 )
@@ -340,6 +344,16 @@ def bucket_for(instance: str | None, algo: str | None = None,
     case; every other LA tag is a configuration sweep.
     """
     b = instance_bucket(instance)
+    if b is None:
+        return None
+    # DET exists only to serve the VSS experiment — it is not a configuration
+    # of another method but a method of its own, so it takes the bucket
+    # regardless of which instance it ran on.  This is the one place where
+    # "instance first, configuration second" does not apply: the DET runs on a
+    # sensitivity instance are still the VSS experiment, and splitting them
+    # across two buckets would mean no single directory holds the experiment.
+    if (algo or "").upper() == "DET":
+        return VSS
     if (b == BASECASE and (algo or "").upper() == "LA"
             and variant not in (None, "", LA_STD_VARIANT)):
         return LACONFIG

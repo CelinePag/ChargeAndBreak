@@ -356,6 +356,8 @@ def fig_schedule(rows, instance: str | None = None):
     _save(fig, "ml_schedule")
 
 
+from fig_arch import fig_arch   # standalone module (see ML/code/fig_arch.py)
+
 def _save(fig, stem):
     os.makedirs(FIGS, exist_ok=True)
     fig.tight_layout()
@@ -367,7 +369,7 @@ def _save(fig, stem):
 
 FIGURES = {"money": fig_money, "paired": fig_paired,
            "failures": fig_failures, "training": fig_training,
-           "schedule": fig_schedule}
+           "schedule": fig_schedule, "arch": fig_arch}
 
 
 def main(argv):

@@ -71,7 +71,9 @@ def main(a):
     dtag = tag_for(a.k, a.mode)
     tag = (f"{dtag}_seed{a.seed}"
            + ("" if a.cw_power == 0.5 else f"_cw{a.cw_power:g}")
-           + (f"_dag{a.dagger}" if a.dagger else ""))
+           + (f"_dag{a.dagger}" if a.dagger else "")
+           + ("" if (a.hidden == 128 and a.depth == 2)
+              else f"_d{a.depth}w{a.hidden}"))
     torch.manual_seed(a.seed); np.random.seed(a.seed)   # reproducibility:
     # neural training is stochastic (init + batch order); fixing seeds makes
     # one run repeatable, and the paper reports spread over several seeds.
@@ -132,7 +134,8 @@ def main(a):
     # charging classes: rows whose label has y=1 also supervise the tauc head
     is_charge = torch.tensor([int(c[0]) == 1 for c in classes])
 
-    net = StudentPolicy(Xtr.shape[1], len(classes), hidden=a.hidden)
+    net = StudentPolicy(Xtr.shape[1], len(classes), hidden=a.hidden,
+                        depth=a.depth)
     opt = torch.optim.Adam(net.parameters(), lr=a.lr)   # Adam: gradient
     # descent with per-knob adaptive step sizes — the boring, robust default.
     # reduction="none" so each row's loss can be scaled by its own weight
@@ -191,7 +194,7 @@ def main(a):
     torch.save(dict(state=best_state, mu=mu, sd=sd, classes=classes,
                     feature_names=fn, hidden=a.hidden, seed=a.seed,
                     k_look=a.k,           # rollout re-builds features with this
-                    split_mode=a.mode),
+                    split_mode=a.mode, depth=a.depth),
                os.path.join(OUT, f"policy_{tag}.pt"))
     json.dump(hist, open(os.path.join(OUT, f"history_{tag}.json"), "w"))
     best_ep = int(np.argmin(hist["val_loss"]))
@@ -219,6 +222,8 @@ if __name__ == "__main__":
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--batch", type=int, default=512)
     p.add_argument("--hidden", type=int, default=128)
+    p.add_argument("--depth", type=int, default=2,
+                   help="number of hidden layers in the shared trunk")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--lam", type=float, default=1.0,
                    help="weight of the charge-duration loss term")

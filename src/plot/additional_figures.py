@@ -1331,14 +1331,31 @@ def section_diesel_oat():
             for k in range(len(methods))]
 
     fig, ax = plt.subplots(figsize=(7.4, 3.6))
-    half = 0.5 + 0.55 / 2
-    for blk, _name in _OAT_BLOCKS[1::2]:
-        xs = [x[i] for i, (_t, b, _l) in enumerate(_OAT_LEVELS) if b == blk]
-        if xs:
-            ax.axvspan(min(xs) - half, max(xs) + half, facecolor="#F5F5F5",
-                       edgecolor="none", zorder=0)
+    span = ax.get_xaxis_transform()   # x in data coords, y in axes fraction
 
-    span = ax.get_xaxis_transform()
+    # Grouping is carried by RULES, in the same two weights as the §8.3 figure
+    # (additional_sens_effects), not by a shaded background band.  The two sit
+    # in the same section and split their x axis on the same relation -- one
+    # experiment per block, several levels inside it -- so they have to draw it
+    # the same way, or the band reads as a third distinction that only one of
+    # them makes.  Full-height mid-grey between experiments, extended below the
+    # axes so it also splits the method, level and block labels; light hairline
+    # between the levels of one experiment.
+    _RULE_BLOCK = "#8c8c8c"   # between experiments
+    _RULE_LEVEL = "#dcdcdc"   # between levels of one experiment
+    _bounds = [i for i in range(1, len(_OAT_LEVELS))
+               if _OAT_LEVELS[i][1] != _OAT_LEVELS[i - 1][1]]
+    for i in range(1, len(_OAT_LEVELS)):
+        xm = (x[i - 1] + x[i]) / 2
+        if i in _bounds:
+            # Deeper than §8.3's -0.19: this panel carries a THIRD label row
+            # (the per-bar method names), so the rule has to clear method,
+            # level and block label before it stops.
+            ax.plot([xm, xm], [-0.26, 1.0], transform=span,
+                    color=_RULE_BLOCK, lw=0.8, zorder=0.6, clip_on=False)
+        else:
+            ax.plot([xm, xm], [0.0, 1.0], transform=span,
+                    color=_RULE_LEVEL, lw=0.6, zorder=0.4)
     for li, (tag, _blk, _lbl) in enumerate(_OAT_LEVELS):
         for mi, (meth, mlbl) in enumerate(methods):
             cell = cells.get((tag, meth))
@@ -1401,7 +1418,9 @@ def section_diesel_oat():
     ax.yaxis.set_major_locator(mticker.MultipleLocator(5))
     ax.yaxis.set_minor_locator(mticker.MultipleLocator(1))
     ax.yaxis.grid(True, which="major", color=GRID, lw=0.6)
-    ax.yaxis.grid(True, which="minor", color="#F0F0F0", lw=0.4)
+    # Same minor weight as §8.3 (GRID at 0.35/60% rather than a separate paler
+    # hex), so a 1-point line means the same thing in both figures.
+    ax.yaxis.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
     ax.set_axisbelow(True)
     ax.tick_params(axis="y", which="major", length=3.2, width=0.7,
                    labelsize=8, color=ps.BASELINE)

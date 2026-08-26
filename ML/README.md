@@ -705,6 +705,95 @@ This is the paper's own thesis biting us: a headline that looked tight was
 hiding the uncertainty that actually mattered. Every comparative claim in the
 paper should carry a paired test, not a seed spread.
 
+## FINAL NUMBERS 2026-08-24 — frozen test set (SECOND look, disclosed)
+
+Test evaluated twice: once for the earlier 141-feature clone (its checkpoints
+were overwritten when the spread features were added), once here for the final
+143-feature system. All TUNING stayed on validation; the second look is
+because the representation changed, not because we went looking for a better
+number. Say so in the paper.
+
+Test set, common completed set n=107, 3 seeds averaged per instance:
+
+| policy | gap to ORACLE (penalised) | duration vs teacher | halts /108 |
+|--------|---------------------------|---------------------|-----------|
+| greedy | +5.75% | — | 0 |
+| BC + spread | +3.62% | +0.283 h (better on 27%) | 1.7 |
+| **PPO v2** | **+2.93%** | +0.025 h (better on 45%) | 4.0 |
+| teacher | +2.22% | 0 (reference) | 0 |
+
+* **PPO closes 80% of the greedy→teacher oracle gap** (5.75 → 2.93 against a
+  teacher at 2.22) at ~5x10^4 less online compute. That is the headline, and
+  it is an ABSOLUTE yardstick rather than "vs my own teacher".
+* On test, PPO does NOT beat the teacher on duration either (median +0.025 h,
+  better on 45%, p=0.88) — consistent with validation. **PARITY is the claim.**
+* Penalised gap remains positive (+0.250 h median, better on 30%): windows are
+  still the deficiency (the mean is dragged by a heavy right tail — mean
+  +0.52 h vs median +0.25 h).
+
+## ABLATION: which RL fix did the work? (val, 3 seeds)
+v1 -> v2 changed the halt penalty AND added the spread features at once.
+`--halt-mode add` reruns PPO with the v1 fixed 24 h penalty on the SAME
+spread-aware clone, isolating the two.
+
+| variant | halts /129 | oracle gap | duration vs teacher |
+|---------|-----------|-----------|---------------------|
+| BC + spread (no RL) | 4.0 | +4.00% | +0.274 h |
+| PPO, additive penalty (v1 rule) | 4.3 | +3.11% | −0.036 h |
+| **PPO, multiplicative penalty** | **1.7** | **+3.00%** | −0.088 h |
+
+**Clean attribution:** the two fixes did different jobs.
+* The **spread feature** supplies the quality gain — both PPO variants land at
+  ~3.0-3.1% oracle gap, and both are far below the 4.00% of the clone.
+* The **multiplicative penalty** supplies the RELIABILITY gain and nothing
+  else — halts 4.3 → 1.7 at essentially unchanged oracle gap. With the old
+  additive penalty RL does not reduce halts at all (4.3 vs the clone's 4.0),
+  confirming the v1 diagnosis: the fixed surcharge was no deterrent.
+
+So "both fixes mattered" is now supported, with each one's contribution
+separated rather than asserted.
+
+## MINIMAL MODEL 2026-08-26 — 11x smaller AND better; RL gain largely evaporates
+Sweep (`ML/code/arch_sweep.py`, log in `ML/logs/arch_sweep.log`) over
+K in {0,3,5,10,20} x depth {0,1,2} x width {8..128}, then CLOSED-LOOP rollout
+of the finalists.
+
+**The 143-feature 2x128 model was one of the WORST configurations tested.**
+Supervised (val_loss): K=5 2x128 0.2105, K=5 2x32 0.2229, K=20 2x128 0.2372.
+Its best epoch was 7 of 200 — the signature of over-capacity.
+
+Closed loop, val, common completed set n=126:
+
+| model | params | oracle gap | halts /129 | dur better on |
+|-------|--------|-----------|-----------|---------------|
+| **K=5, 2x32 (BC only)** | **3,213** | **+2.93%** | **2.0** | 56% (p=0.12) |
+| K=3, 1x32 (BC only) | 1,773 | +2.96% | 3.0 | — |
+| K=20, 2x128 + PPO | 36,621 | +2.96% | 5.0 | 53% (p=0.27) |
+| K=20, 2x128 (BC, incumbent) | 36,621 | +4.00% | 12/3 seeds | 35% |
+| teacher | — | +2.70% | 0 | — |
+| greedy | — | +6.12% | 0 | — |
+
+* A **3,213-parameter behaviour-cloned model matches the 36,621-parameter
+  PPO-fine-tuned one** (+2.93% vs +2.96% oracle gap) with FEWER halts (2 vs 5)
+  and no reinforcement learning at all.
+* Depth 0 (linear) is hopeless everywhere (val_loss 0.53-0.55 vs ~0.22), so
+  the hidden layer is essential — but ONE layer of 32 units suffices.
+* Optimal K is 3-5, not 0 and not 20. A few near nodes add real information;
+  the tail is redundant with the dashboard aggregates (`e_to_next_cs`,
+  `min_slack`, `driveh_left`), which already summarise the remaining route.
+  This corroborates the permutation test (nodes 6-20 drove 6.6% of decisions).
+* Latency is UNCHANGED (~1.3-1.4 ms): the forward pass was never the
+  bottleneck, the two `compute_flags` calls are.
+
+**IMPLICATION FOR THE PAPER — the RL story needs re-examining.** Most of what
+PPO appeared to buy (+3.99% -> +2.96%) is recovered by simply not
+over-parameterising (+3.99% -> +2.93%, BC only). RL on top of a right-sized
+model has NOT been tested. Until it is, do not claim RL as the source of the
+improvement.
+
+Next: 3 seeds of K=5 2x32 for a spread; then PPO from the small clone to see
+whether RL still adds anything once capacity is fixed.
+
 ## Open items
 - [ ] Recompile LA stats including the new long-route MIPTAIL batch
       (long-route rows of the motivation table).

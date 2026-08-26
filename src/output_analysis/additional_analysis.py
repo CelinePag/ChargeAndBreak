@@ -806,9 +806,16 @@ def _t_per_stop_s(r) -> float | None:
     comparable — that is a property of the measurement, and it is stated
     rather than modelled away.
     """
-    if _is_resumed(r.get("run_id")):
-        return None            # the clock covers only the post-checkpoint tail
+    rid = r.get("run_id")
+    if _is_resumed(rid):
+        return None            # the clock covers too little of the route
     wall = r.get("wall_clock_s")
+    n_log, _ok = _log_coverage(rid)
+    if wall and n_log and (r.get("metrics") or {}).get("n_stops_executed"):
+        if n_log < int((r.get("metrics") or {}).get("n_stops_executed")):
+            # Resumed but well covered: the CLOCK measures only the stops this
+            # process ran, so it is divided by those, not by the whole route.
+            return float(wall) / n_log
     # Stops actually EXECUTED, falling back to the route length for runs made
     # before the halt semantics landed.  A halted run decided fewer stops than
     # the route has, so dividing by the route length would understate its cost
@@ -1155,38 +1162,56 @@ _LA_CS_CACHE: dict = {}
 
 _RESUMED_CACHE: dict = {}
 
+# How much of the route a log must still hold for its per-stop timings to be
+# usable.  A resumed run writes a FRESH log starting at the checkpoint, so the
+# log is a SUFFIX of the route — and a suffix is systematically cheaper,
+# because the look-ahead horizon runs out of route to reach into.  The bias is
+# therefore one-directional and shrinks with coverage: at 90% it is negligible,
+# at 1% the number describes a different quantity entirely.  Half is the line.
+_LOG_COVERAGE_MIN = 0.5
 
-def _is_resumed(run_id: str | None) -> bool:
-    """True when this run continued from a checkpoint.
 
-    A resumed run writes a FRESH log starting at the checkpoint, and its
-    wall_clock_s covers only the stops after it — 8 seconds for a 96-stop
-    route, in the case that exposed this.  Both of the cost columns are
-    therefore meaningless for such a run, while everything the vehicle
-    accumulated (durations, gaps, the stored decision mean) is intact, because
-    the checkpoint restores the event lists.  So a resumed run keeps its
-    quality numbers and loses its cost ones.
+def _log_coverage(run_id: str | None) -> tuple[int, bool]:
+    """(stops this process logged, whether that is enough to time it).
+
+    Coverage is measured against the stops the RUN executed, not the route
+    length, so a halted run is judged on what it actually did.
     """
     if not run_id:
-        return False
+        return 0, False
     if run_id in _RESUMED_CACHE:
         return _RESUMED_CACHE[run_id]
-    out = False
+    n_log, first = 0, None
     try:
         with open(_paths.log_path(f"{run_id}.txt"), encoding="utf-8",
                   errors="replace") as fh:
             for line in fh:
-                if "[RESUME] restored checkpoint" in line:
-                    out = True
-                    break
                 m = _LA_LOG_HDR.match(line)
-                if m:                      # first stop header settles it
-                    out = int(m.group(1)) > 1
-                    break
+                if m:
+                    n_log += 1
+                    if first is None:
+                        first = int(m.group(1))
     except OSError:
-        out = False
+        pass
+    if first is not None and first <= 1:
+        out = (n_log, True)                 # a full log: nothing to judge
+    elif not n_log:
+        # No [LA] stop headers at all: not an LA log (greedy prints no per-stop
+        # decision block).  There is nothing to judge, so nothing is rejected —
+        # the CS mean comes back empty on its own, and the wall clock keeps its
+        # ordinary divisor.
+        out = (0, True)
+    else:
+        # `first` is the checkpoint stop, so the route it belongs to is at
+        # least first + n_log stops long; coverage is what the log holds of it.
+        out = (n_log, n_log / max(first + n_log, 1) >= _LOG_COVERAGE_MIN)
     _RESUMED_CACHE[run_id] = out
     return out
+
+
+def _is_resumed(run_id: str | None) -> bool:
+    """True when the log holds too little of the route to time the run."""
+    return not _log_coverage(run_id)[1]
 
 
 def _cs_decision_mean_s(run_id: str | None):
@@ -1215,16 +1240,12 @@ def _cs_decision_mean_s(run_id: str | None):
                     m = _LA_LOG_CHOSEN.search(line)
                     if m:
                         vals.append(float(m.group(1)))
-        # A RESUMED run writes a fresh log covering only the stops after the
-        # checkpoint, so its CS mean would describe the tail of the route
-        # instead of the route — and the tail is systematically CHEAPER,
-        # because the look-ahead horizon runs out of route to reach into.  One
-        # such run (RmediumCmanyTnone_4, S25H48) resumed at stop 95 of 96 and
-        # its log holds a single stop.  The stored decision_time_mean_s IS
-        # correct across a resume (the checkpoint restores events), but the
-        # CS-only figure can only come from the log, so a partial log yields
-        # no CS mean at all rather than a biased one.
-        if first_stop is not None and first_stop > 1:
+        # A resumed log is a SUFFIX of the route, so its CS mean is usable
+        # exactly when the suffix is most of the route — see _log_coverage.
+        # The residual bias is downward and small at high coverage; below the
+        # threshold the number describes the cheap tail rather than the run,
+        # and no CS mean is reported at all.
+        if _is_resumed(run_id):
             vals = []
         # A forced rest short-circuits decide_stop and prints no CHOSEN line, so
         # a stop can be missing here; the mean is over the CS stops that were

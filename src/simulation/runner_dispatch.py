@@ -9,6 +9,7 @@ instance JSON file and runs one of four algorithms:
   "ROBU"   — Budgeted robust optimisation (Bertsimas–Sim, C&CG) (RObudget.py)
   "greedy" — Greedy benchmark heuristic (greedy.py)
   "2SP"    — Two-stage stochastic program, extensive form (methods/twosp.py)
+  "DET"    — Deterministic (nominal) plan, executed as is (methods/DET.py)
 
 Each JSON file produced by instance_io.py contains exactly one instance
 (geometry + uncertainty realisation).  All algorithms consume the same
@@ -30,7 +31,7 @@ Usage (CLI)
 -----------
   python -m src.simulation.runner_dispatch <json_file> <algorithm> [options...]
 
-  algorithm: LA | RO | ROBU | greedy | 2SP
+  algorithm: LA | RO | ROBU | greedy | 2SP | DET
 
   Batch usage
   -----------
@@ -304,10 +305,10 @@ def run_algorithm(
     dict -- canonical results dict (same schema for all three algorithms)
     """
     alg = algorithm.upper().strip()
-    if alg not in ("LA", "RO", "ROBU", "GREEDY", "2SP", "ORACLE"):
+    if alg not in ("LA", "RO", "ROBU", "GREEDY", "2SP", "DET", "ORACLE"):
         raise ValueError(
-            f"algorithm must be 'LA', 'RO', 'ROBU', 'greedy', '2SP', or "
-            f"'ORACLE'; got '{algorithm}'"
+            f"algorithm must be 'LA', 'RO', 'ROBU', 'greedy', '2SP', 'DET', "
+            f"or 'ORACLE'; got '{algorithm}'"
         )
 
     # ── Load precomputed instance ──────────────────────────────────────────────
@@ -435,6 +436,27 @@ def run_algorithm(
     elif alg == "RO":
         from src.methods.RO import run_ro
         return run_ro(
+            full_data  = full_data,
+            D_real     = D_real,
+            E_real     = E_real,
+            cv         = cv,
+            time_limit = ro_time_limit,
+            mip_gap    = ro_mip_gap,
+            heuristics = milp_heuristics,
+            mip_focus  = milp_mip_focus,
+            tee        = False,
+            verbose    = verbose,
+            run_id     = run_id,
+            oracle_tee = oracle_tee,
+            supervised = supervised,
+            prune_quantile = prune_quantile,
+        )
+
+    elif alg == "DET":
+        # The naive deterministic plan: same MILP as RO, but every leg at its
+        # NOMINAL travel time instead of the box worst case, executed as is.
+        from src.methods.DET import run_det
+        return run_det(
             full_data  = full_data,
             D_real     = D_real,
             E_real     = E_real,
@@ -610,12 +632,14 @@ def _expand_algorithms(spec: str) -> list:
             out.extend(_ALL_ALGORITHMS)
             continue
         alg = part.upper()
-        # ORACLE is a valid explicit algorithm but is excluded from "all"
-        # (it is the hindsight reference, not a policy under comparison)
-        if alg not in _ALL_ALGORITHMS and alg != "ORACLE":
+        # ORACLE and DET are valid explicit algorithms but are excluded from
+        # "all": ORACLE is the hindsight reference, and DET was added after the
+        # base batches were run, so folding it into "all" would silently change
+        # what an existing rerun command does.  Name it to run it.
+        if alg not in _ALL_ALGORITHMS and alg not in ("ORACLE", "DET"):
             raise SystemExit(f"unknown algorithm '{part}' "
-                              f"(expected LA, RO, ROBU, greedy, 2SP, ORACLE, "
-                              f"or all)")
+                              f"(expected LA, RO, ROBU, greedy, 2SP, DET, "
+                              f"ORACLE, or all)")
         out.append(alg)
     seen = set()
     uniq = []
@@ -662,6 +686,7 @@ def _run_one_job(job: dict) -> dict:
 _SIG_FIELDS = {
     "GREEDY": ["variant", "safety_buffer", "supervised", "prune_quantile"],
     "RO":     ["variant", "supervised", "prune_quantile"],
+    "DET":    ["variant", "supervised", "prune_quantile"],
     "ROBU":   ["variant", "robu_eps", "gamma", "supervised", "prune_quantile"],
     "2SP":    ["variant", "n_scenarios", "supervised", "prune_quantile"],
     "LA":     ["variant", "n_scenarios", "horizon_hours", "criterion",
@@ -681,7 +706,7 @@ def _requested_sig(alg: str, kw: dict) -> Optional[dict]:
     if alg == "GREEDY":
         return dict(variant=var, safety_buffer=kw.get("safety_buffer", 0.0),
                     supervised=sup, prune_quantile=pq)
-    if alg == "RO":
+    if alg in ("RO", "DET"):
         return dict(variant=var, supervised=sup, prune_quantile=pq)
     if alg == "ROBU":
         sig = dict(variant=var, robu_eps=kw.get("robu_eps", 0.01),
@@ -892,7 +917,7 @@ if __name__ == "__main__":
     parser.add_argument("json_file",  help="Instance JSON path(s): a single "
                          "path, a comma-separated list, glob pattern(s), or "
                          "'all' for every file in instances/.")
-    parser.add_argument("algorithm",  help="Algorithm(s): LA | RO | ROBU | "
+    parser.add_argument("algorithm",  help="Algorithm(s): LA | RO | ROBU | DET | "
                          "greedy | 2SP, comma-separated for multiple, or "
                          "'all' for all five.")
 
