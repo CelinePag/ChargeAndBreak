@@ -1,0 +1,49 @@
+=================================================================
+  DET SOLVE START  (2026-08-26 23:23:04)
+  Instance : RmediumCfewTlarge_13 — medium route, few customers, large windows, seed=13   run_id=RmediumCfewTlarge_13_DET_20260826_232302_004
+  Route    : 71 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Solve status=optimal  (21.3s)
+  theta=52.598h  plan: 6 chg / 5 brk / 2 rst
+
+  DET objective (planned arrival at nominal) : 52.598 h   solve 21.3s
+
+  Executing DET plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.243h soc=475kWh  cd=0.24 sd=0.24 h=0.24  -> y=0 brk=--- rst=---
+  stop   2  t=8.499h soc=451kWh  cd=0.50 sd=0.50 h=0.50  -> y=0 brk=--- rst=---
+  stop   3  t=8.822h soc=430kWh  cd=0.82 sd=0.82 h=0.82  -> y=0 brk=--- rst=---
+  stop   4  t=9.094h soc=399kWh  cd=1.09 sd=1.09 h=1.09  -> y=0 brk=--- rst=---
+  stop   5  t=9.363h soc=368kWh  cd=1.36 sd=1.36 h=1.36  -> y=0 brk=--- rst=---
+  stop   6  t=9.610h soc=342kWh  cd=1.61 sd=1.61 h=1.61  -> y=0 brk=--- rst=---
+  stop   7  t=9.846h soc=314kWh  cd=1.85 sd=1.85 h=1.85  -> y=0 brk=--- rst=---
+  stop   8  t=10.115h soc=289kWh  cd=2.12 sd=2.12 h=2.12  -> y=0 brk=--- rst=---
+  stop   9  t=10.361h soc=263kWh  cd=2.36 sd=2.36 h=2.36  -> y=0 brk=--- rst=---
+  stop  10  t=10.583h soc=238kWh  cd=2.58 sd=2.58 h=2.58  -> y=0 brk=--- rst=---
+  stop  11  t=10.806h soc=213kWh  cd=2.81 sd=2.81 h=2.81  -> y=0 brk=--- rst=---
+  stop  12  t=11.027h soc=189kWh  cd=3.03 sd=3.03 h=3.03  -> y=0 brk=--- rst=---
+  stop  13  t=11.281h soc=159kWh  cd=3.28 sd=3.28 h=3.28  -> y=0 brk=--- rst=---
+  stop  14  t=11.592h soc=133kWh  cd=3.59 sd=3.59 h=3.59  -> y=1 brk=b45 rst=---
+  stop  15  t=12.933h soc=369kWh  cd=0.30 sd=3.89 h=4.93  -> y=0 brk=--- rst=---
+  stop  16  t=13.244h soc=339kWh  cd=0.61 sd=4.20 h=5.24  -> y=0 brk=--- rst=---
+  stop  17  t=13.528h soc=307kWh  cd=0.89 sd=4.49 h=5.53  -> y=0 brk=--- rst=---
+  stop  18  t=13.976h soc=258kWh  cd=1.34 sd=4.93 h=5.98  -> y=0 brk=--- rst=r2
+  stop  19  t=23.984h soc=210kWh  cd=0.51 sd=0.51 h=0.51  -> y=0 brk=--- rst=---
+  stop  20  t=24.359h soc=180kWh  cd=0.88 sd=0.88 h=0.88  -> y=0 brk=--- rst=---
+  stop  21  t=24.624h soc=149kWh  cd=1.15 sd=1.15 h=1.15  -> y=0 brk=--- rst=---
+  stop  22  t=24.887h soc=118kWh  cd=1.41 sd=1.41 h=1.41  -> y=0 brk=--- rst=---
+  Nominal-plan failures (raw): 1 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 52.598 h   (what the driver expected)
+  Arrival (absolute) : 25.155 h  (25:09)
+  Travel duration    : 17.155 h
+  Solve time         : 21.3 s
+  Wall-clock         : 21.3 s
+=================================================================
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/VSS/RmediumCfewTlarge_13_DET_20260826_232302_004_scenarios.json
+  [!] RUN HALTED at stop 23 of 71 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/VSS/RmediumCfewTlarge_13_DET_20260826_232302_004.json

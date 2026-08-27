@@ -1,0 +1,40 @@
+=================================================================
+  DET SOLVE START  (2026-08-26 23:23:15)
+  Instance : RshortCmanyTnone_4 — short route, many customers, none windows, seed=4   run_id=RshortCmanyTnone_4_DET_20260826_232246_169
+  Route    : 56 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Solve status=optimal  (0.9s)
+  theta=39.833h  plan: 4 chg / 2 brk / 1 rst
+
+  DET objective (planned arrival at nominal) : 39.833 h   solve 0.9s
+
+  Executing DET plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.241h soc=475kWh  cd=0.24 sd=0.24 h=0.24  -> y=0 brk=--- rst=---
+  stop   2  t=8.527h soc=452kWh  cd=0.53 sd=0.53 h=0.53  -> y=0 brk=--- rst=---
+  stop   3  t=8.755h soc=426kWh  cd=0.75 sd=0.75 h=0.75  -> y=0 brk=--- rst=---
+  stop   4  t=9.069h soc=397kWh  cd=1.07 sd=1.07 h=1.07  -> y=0 brk=--- rst=---
+  stop   5  t=9.343h soc=364kWh  cd=1.34 sd=1.34 h=1.34  -> y=0 brk=--- rst=---
+  stop   6  t=9.639h soc=333kWh  cd=1.64 sd=1.64 h=1.64  -> y=0 brk=--- rst=---
+  stop   7  t=9.984h soc=296kWh  cd=1.98 sd=1.98 h=1.98  -> y=0 brk=--- rst=---
+  stop   8  t=10.260h soc=266kWh  cd=2.26 sd=2.26 h=2.26  -> y=0 brk=--- rst=---
+  stop   9  t=10.528h soc=235kWh  cd=2.53 sd=2.53 h=2.53  -> y=0 brk=--- rst=---
+  stop  10  t=10.822h soc=206kWh  cd=2.82 sd=2.82 h=2.82  -> y=0 brk=--- rst=---
+  stop  11  t=11.089h soc=175kWh  cd=3.09 sd=3.09 h=3.09  -> y=0 brk=--- rst=---
+  stop  12  t=11.334h soc=148kWh  cd=3.33 sd=3.33 h=3.33  -> y=0 brk=--- rst=---
+  stop  13  t=11.597h soc=123kWh  cd=3.60 sd=3.60 h=3.60  -> y=0 brk=--- rst=---
+  Nominal-plan failures (raw): 1 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 39.833 h   (what the driver expected)
+  Arrival (absolute) : 11.828 h  (11:49)
+  Travel duration    : 3.828 h
+  Solve time         : 0.9 s
+  Wall-clock         : 0.9 s
+=================================================================
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/VSS/RshortCmanyTnone_4_DET_20260826_232246_169_scenarios.json
+  [!] RUN HALTED at stop 14 of 56 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/VSS/RshortCmanyTnone_4_DET_20260826_232246_169.json

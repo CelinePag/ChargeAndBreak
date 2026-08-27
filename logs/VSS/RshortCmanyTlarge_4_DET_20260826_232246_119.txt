@@ -1,0 +1,60 @@
+=================================================================
+  DET SOLVE START  (2026-08-26 23:23:07)
+  Instance : RshortCmanyTlarge_4 — short route, many customers, large windows, seed=4   run_id=RshortCmanyTlarge_4_DET_20260826_232246_119
+  Route    : 41 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Solve status=optimal  (0.9s)
+  theta=36.544h  plan: 2 chg / 1 brk / 1 rst
+
+  DET objective (planned arrival at nominal) : 36.544 h   solve 0.9s
+
+  Executing DET plan AS IS (static, no recourse)...
+  stop   0  t=8.000h soc=500kWh  cd=0.00 sd=0.00 h=0.00  -> y=0 brk=--- rst=---
+  stop   1  t=8.235h soc=474kWh  cd=0.23 sd=0.23 h=0.23  -> y=0 brk=--- rst=---
+  stop   2  t=8.487h soc=450kWh  cd=0.49 sd=0.49 h=0.49  -> y=0 brk=--- rst=---
+  stop   3  t=8.724h soc=424kWh  cd=0.72 sd=0.72 h=0.72  -> y=0 brk=--- rst=---
+  stop   4  t=9.069h soc=398kWh  cd=1.07 sd=1.07 h=1.07  -> y=0 brk=--- rst=---
+  stop   5  t=9.422h soc=373kWh  cd=1.42 sd=1.42 h=1.42  -> y=0 brk=--- rst=---
+  stop   6  t=9.691h soc=343kWh  cd=1.69 sd=1.69 h=1.69  -> y=0 brk=--- rst=---
+  stop   7  t=9.973h soc=312kWh  cd=1.97 sd=1.97 h=1.97  -> y=0 brk=--- rst=---
+  stop   8  t=10.257h soc=281kWh  cd=2.26 sd=2.26 h=2.26  -> y=0 brk=--- rst=---
+  stop   9  t=11.148h soc=248kWh  cd=2.65 sd=2.65 h=3.15  -> y=0 brk=--- rst=---
+  stop  10  t=11.933h soc=217kWh  cd=2.93 sd=2.93 h=3.93  -> y=0 brk=--- rst=---
+  stop  11  t=12.120h soc=195kWh  cd=3.12 sd=3.12 h=4.12  -> y=0 brk=--- rst=---
+  stop  12  t=12.649h soc=192kWh  cd=3.15 sd=3.15 h=4.65  -> y=0 brk=--- rst=---
+  stop  13  t=13.527h soc=153kWh  cd=3.53 sd=3.53 h=5.53  -> y=0 brk=--- rst=---
+  stop  14  t=14.051h soc=151kWh  cd=3.55 sd=3.55 h=6.05  -> y=0 brk=--- rst=---
+  stop  15  t=14.335h soc=119kWh  cd=3.84 sd=3.84 h=6.34  -> y=0 brk=--- rst=r2
+  stop  16  t=23.841h soc=118kWh  cd=0.01 sd=0.01 h=0.01  -> y=0 brk=--- rst=---
+  stop  17  t=24.420h soc=109kWh  cd=0.08 sd=0.08 h=0.58  -> y=1 brk=--- rst=---
+  stop  18  t=25.905h soc=399kWh  cd=0.31 sd=0.31 h=2.07  -> y=0 brk=--- rst=---
+  stop  19  t=26.145h soc=377kWh  cd=0.55 sd=0.55 h=2.31  -> y=0 brk=--- rst=---
+  stop  20  t=26.357h soc=352kWh  cd=0.76 sd=0.76 h=2.52  -> y=0 brk=--- rst=---
+  stop  21  t=26.802h soc=305kWh  cd=1.21 sd=1.21 h=2.97  -> y=0 brk=--- rst=---
+  stop  22  t=27.651h soc=286kWh  cd=1.56 sd=1.56 h=3.82  -> y=0 brk=--- rst=---
+  stop  23  t=27.900h soc=261kWh  cd=1.81 sd=1.81 h=4.06  -> y=0 brk=--- rst=---
+  stop  24  t=28.150h soc=237kWh  cd=2.06 sd=2.06 h=4.32  -> y=0 brk=--- rst=---
+  stop  25  t=28.662h soc=236kWh  cd=2.07 sd=2.07 h=4.83  -> y=0 brk=--- rst=---
+  stop  26  t=28.759h soc=224kWh  cd=2.17 sd=2.17 h=4.92  -> y=0 brk=--- rst=---
+  stop  27  t=29.030h soc=196kWh  cd=2.44 sd=2.44 h=5.19  -> y=0 brk=--- rst=---
+  stop  28  t=29.288h soc=167kWh  cd=2.69 sd=2.69 h=5.45  -> y=0 brk=--- rst=---
+  stop  29  t=29.550h soc=138kWh  cd=2.96 sd=2.96 h=5.71  -> y=0 brk=--- rst=---
+  Nominal-plan failures (raw): 1 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 36.544 h   (what the driver expected)
+  Arrival (absolute) : 30.459 h  (30:27)
+  Travel duration    : 22.459 h
+  Solve time         : 0.9 s
+  Wall-clock         : 0.9 s
+=================================================================
+  Scenarios: /mnt/beegfs/users/celinep/ChargeAndBreak/logs/VSS/RshortCmanyTlarge_4_DET_20260826_232246_119_scenarios.json
+  [!] RUN HALTED at stop 30 of 41 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  [!] Directive 2002/15/EC compliance issues (3):
+      shift 1: working 6.84h in (6,9]h but total break 0min < 30min
+      route end: 6.62h consecutive work without a break
+      shift 2: working 6.62h in (6,9]h but total break 0min < 30min
+  Solution : /mnt/beegfs/users/celinep/ChargeAndBreak/solutions/VSS/RshortCmanyTlarge_4_DET_20260826_232246_119.json
