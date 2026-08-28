@@ -39,6 +39,8 @@ Integration
 from __future__ import annotations
 
 import datetime
+import json
+import os
 import sys
 import time
 
@@ -73,6 +75,65 @@ def _nominal_scenario(full_data: dict) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PLAN CACHE
+# ══════════════════════════════════════════════════════════════════════════════
+# solutions/VSS/det_plan_<instance>.json — the committed schedule of the
+# nominal MILP.  It exists because the plan is a property of the INSTANCE, not
+# of how the plan is then executed: the raw arm and the guarded arm must run
+# the SAME plan or their difference measures the solver's choice of incumbent
+# as much as the guard.  A stored run cannot serve this purpose — its
+# trajectory is truncated at the stop where the plan broke, so for the ~98% of
+# runs that halt, the tail of the schedule is not in the file at all.
+#
+# Keyed by instance title only, exactly like the oracle cache, with N checked
+# on load.  A run that overrides instance parameters at load time (diesel
+# mode, --m_man_h) must NOT reuse a cache built without that override, so
+# those runs record the override in the cache and refuse a mismatched one.
+
+def _plan_cache_path(title: str) -> str:
+    name = f"det_plan_{title}.json"
+    return _paths.find_in(_paths.SOLUTIONS, name) or _paths.solution_out(name)
+
+
+def _cache_signature(full_data: dict) -> dict:
+    """What must match for a cached plan to be valid for this data."""
+    return dict(
+        N=int(full_data["N"]),
+        diesel=bool(sum(full_data.get("E", {}).values()) == 0.0),
+        M=round(float(next(iter(full_data.get("M", {1: 0.0}).values()), 0.0)), 6),
+        T_START=round(float(full_data.get("T_START", 8.0)), 6),
+    )
+
+
+def load_plan_cache(full_data: dict, title: str):
+    """-> (plan, meta) from the cache, or (None, None) on miss/mismatch."""
+    path = _plan_cache_path(title)
+    if not os.path.isfile(path):
+        return None, None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            cached = json.load(fh)
+    except Exception:
+        return None, None                       # corrupt -> re-solve
+    if cached.get("signature") != _cache_signature(full_data):
+        return None, None
+    plan = cached.get("plan")
+    if not isinstance(plan, list) or not plan:
+        return None, None
+    return plan, cached.get("meta", {})
+
+
+def save_plan_cache(full_data: dict, title: str, plan: list,
+                    meta: dict) -> str:
+    path = _plan_cache_path(title)
+    payload = dict(instance=title, signature=_cache_signature(full_data),
+                   meta=meta, plan=plan)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    return path
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -90,6 +151,7 @@ def run_det(full_data: dict,
             oracle_tee: bool  = True,
             supervised: bool  = False,
             prune_quantile: float | None = GUARD_QUANTILE,
+            reuse_plan: bool  = True,
             **kwargs) -> dict:
     """
     Solve the deterministic (nominal) MILP and execute it AS IS on
@@ -148,32 +210,51 @@ def run_det(full_data: dict,
        f"executed as is, no recourse")
     _p("=" * 65)
 
-    # ── Step 1: single nominal scenario (every leg at its mean) ───────────────
-    scen_set = [_nominal_scenario(full_data)]
+    # ── Step 1: the committed plan — from cache, else solve once ────────────
+    plan, cmeta = (load_plan_cache(full_data, title) if reuse_plan
+                   else (None, None))
+    if plan is not None:
+        t_solve_total = 0.0
+        theta  = cmeta.get("theta")
+        status = cmeta.get("status")
+        info   = dict(feasible=True, status=status,
+                      optimal=cmeta.get("optimal"), obj=theta)
+        _p(f"  Plan       : reused cache (solved in "
+           f"{cmeta.get('solve_time', 0.0):.1f}s, theta={theta:.3f}h) — "
+           f"no MILP re-solve")
+    else:
+        # With one scenario, the epigraph max + shared durations reduce EXACTLY
+        # to the deterministic full-route MILP — the same reduction RO.py
+        # relies on, here evaluated at the mean instead of the box corner.
+        scen_set = [_nominal_scenario(full_data)]
+        t0 = time.perf_counter()
+        model = _twosp.build_2sp_model(full_data, scen_set, objective="max",
+                                       share_durations=True)
+        info, status = _twosp.solve_2sp(model, time_limit=time_limit,
+                                        mip_gap=mip_gap, tee=tee,
+                                        heuristics=heuristics,
+                                        mip_focus=mip_focus,
+                                        log_file=paths["gurobi"])
+        t_solve_total = time.perf_counter() - t0
+        _p(f"  Solve status={status}  ({t_solve_total:.1f}s)")
 
-    # ── Step 2: deterministic solve on the nominal parameters ────────────────
-    # With one scenario, the epigraph max + shared durations reduce EXACTLY to
-    # the deterministic full-route MILP — the same reduction RO.py relies on,
-    # here evaluated at the mean instead of the box corner.
-    t0 = time.perf_counter()
-    model = _twosp.build_2sp_model(full_data, scen_set, objective="max",
-                                   share_durations=True)
-    info, status = _twosp.solve_2sp(model, time_limit=time_limit,
-                                    mip_gap=mip_gap, tee=tee,
-                                    heuristics=heuristics, mip_focus=mip_focus,
-                                    log_file=paths["gurobi"])
-    t_solve_total = time.perf_counter() - t0
-    _p(f"  Solve status={status}  ({t_solve_total:.1f}s)")
+        if not info["feasible"]:
+            _p("  No feasible plan at nominal travel times — aborting.")
+            log.close()
+            return dict(feasible=False, status=status,
+                        total_time=float("inf"),
+                        wall_clock=time.perf_counter() - t_wall_start)
 
-    if not info["feasible"]:
-        _p("  No feasible plan at nominal travel times — aborting.")
-        log.close()
-        return dict(feasible=False, status=status,
-                    total_time=float("inf"),
-                    wall_clock=time.perf_counter() - t_wall_start)
-
-    theta = info["obj"]
-    plan  = _twosp.extract_2sp_full_schedule(model, full_data)
+        theta = info["obj"]
+        plan  = _twosp.extract_2sp_full_schedule(model, full_data)
+        if reuse_plan:
+            cp = save_plan_cache(full_data, title, plan,
+                                 dict(theta=float(theta), status=str(status),
+                                      optimal=bool(info.get("optimal")),
+                                      solve_time=float(t_solve_total),
+                                      mip_gap=float(mip_gap),
+                                      time_limit=int(time_limit)))
+            _p(f"  Plan cache : {cp}")
     _p(f"  theta={theta:.3f}h  "
        f"plan: {sum(1 for e in plan if e['y'])} chg / "
        f"{sum(1 for e in plan if e['break_type'])} brk / "

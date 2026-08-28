@@ -1,0 +1,30 @@
+=================================================================
+  DET SOLVE START  (2026-08-27 11:02:09)
+  Instance : RmediumCfewTlarge_1 — medium route, few customers, large windows, seed=1   run_id=RmediumCfewTlarge_1_DET_20260827_110148_025
+  Route    : 104 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Solve status=optimal  (11.6s)
+  theta=62.531h  plan: 8 chg / 6 brk / 2 rst
+
+  DET objective (planned arrival at nominal) : 62.531 h   solve 11.6s
+
+  Executing DET plan AS IS (static, no recourse)...
+  [SUPERVISOR] stop 36: ['rest'] (must_rest)
+  [SUPERVISOR] stop 52: ['charge'] (must_charge)
+  Nominal-plan failures (raw): 1 violation(s); 2 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 62.531 h   (what the driver expected)
+  Arrival (absolute) : 73.493 h  (73:29)
+  Travel duration    : 65.493 h
+  Solve time         : 11.6 s
+  Wall-clock         : 11.6 s
+=================================================================
+  Scenarios: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\logs\VSS\RmediumCfewTlarge_1_DET_20260827_110148_025_scenarios.json
+  [!] RUN HALTED at stop 104 of 104 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=0% (early=0, late=1)  interventions=2  repairs=0
+  [!] Directive 2002/15/EC compliance issues (1):
+      stop 54: 6.66h consecutive work before the break (> 6.0h)
+  Solution : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\RmediumCfewTlarge_1_DET_20260827_110148_025.json

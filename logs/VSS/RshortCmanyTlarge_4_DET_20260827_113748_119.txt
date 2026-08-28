@@ -1,0 +1,31 @@
+=================================================================
+  DET SOLVE START  (2026-08-27 11:39:10)
+  Instance : RshortCmanyTlarge_4 — short route, many customers, large windows, seed=4   run_id=RshortCmanyTlarge_4_DET_20260827_113748_119
+  Route    : 41 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Solve status=optimal  (2.7s)
+  Plan cache : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\det_plan_RshortCmanyTlarge_4.json
+  theta=36.544h  plan: 2 chg / 1 brk / 1 rst
+
+  DET objective (planned arrival at nominal) : 36.544 h   solve 2.7s
+
+  Executing DET plan AS IS (static, no recourse)...
+  Nominal-plan failures (raw): 1 violation(s); 0 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 36.544 h   (what the driver expected)
+  Arrival (absolute) : 30.459 h  (30:27)
+  Travel duration    : 22.459 h
+  Solve time         : 2.7 s
+  Wall-clock         : 2.7 s
+=================================================================
+  Scenarios: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\logs\VSS\RshortCmanyTlarge_4_DET_20260827_113748_119_scenarios.json
+  [!] RUN HALTED at stop 30 of 41 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=100% (early=0, late=0)  interventions=0  repairs=0
+  [!] Directive 2002/15/EC compliance issues (3):
+      shift 1: working 6.84h in (6,9]h but total break 0min < 30min
+      route end: 6.62h consecutive work without a break
+      shift 2: working 6.62h in (6,9]h but total break 0min < 30min
+  Solution : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\RshortCmanyTlarge_4_DET_20260827_113748_119.json

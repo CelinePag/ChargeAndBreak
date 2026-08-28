@@ -1,0 +1,27 @@
+=================================================================
+  DET SOLVE START  (2026-08-27 14:49:05)
+  Instance : RmediumCmediumTtight_22 — medium route, medium customers, tight windows, seed=22   run_id=RmediumCmediumTtight_22_DET_20260827_144852_589
+  Route    : 84 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Plan       : reused cache (solved in 150.8s, theta=58.547h) — no MILP re-solve
+  theta=58.547h  plan: 6 chg / 4 brk / 2 rst
+
+  DET objective (planned arrival at nominal) : 58.547 h   solve 0.0s
+
+  Executing DET plan AS IS (static, no recourse)...
+  [SUPERVISOR] stop 45: ['charge'] (must_charge)
+  [SUPERVISOR] stop 64: ['break', 'rest'] (must_reset_cd, must_rest)
+  Nominal-plan failures (raw): 0 violation(s); 2 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 58.547 h   (what the driver expected)
+  Arrival (absolute) : 69.475 h  (69:28)
+  Travel duration    : 61.475 h
+  Solve time         : 0.0 s
+  Wall-clock         : 0.0 s
+=================================================================
+  Scenarios: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\logs\VSS\RmediumCmediumTtight_22_DET_20260827_144852_589_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=67% (early=0, late=2)  interventions=2  repairs=0
+  Solution : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\RmediumCmediumTtight_22_DET_20260827_144852_589.json

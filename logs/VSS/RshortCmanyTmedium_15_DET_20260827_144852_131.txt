@@ -1,0 +1,29 @@
+=================================================================
+  DET SOLVE START  (2026-08-27 14:48:57)
+  Instance : RshortCmanyTmedium_15 — short route, many customers, medium windows, seed=15   run_id=RshortCmanyTmedium_15_DET_20260827_144852_131
+  Route    : 57 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Plan       : reused cache (solved in 2.2s, theta=41.810h) — no MILP re-solve
+  theta=41.810h  plan: 4 chg / 4 brk / 1 rst
+
+  DET objective (planned arrival at nominal) : 41.810 h   solve 0.0s
+
+  Executing DET plan AS IS (static, no recourse)...
+  [SUPERVISOR] stop 43: ['charge'] (must_charge)
+  Nominal-plan failures (raw): 0 violation(s); 1 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 41.810 h   (what the driver expected)
+  Arrival (absolute) : 43.152 h  (43:09)
+  Travel duration    : 35.152 h
+  Solve time         : 0.0 s
+  Wall-clock         : 0.0 s
+=================================================================
+  Scenarios: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\logs\VSS\RshortCmanyTmedium_15_DET_20260827_144852_131_scenarios.json
+  Metrics  : violations=0 (none)  tw_hit=92% (early=0, late=1)  interventions=1  repairs=0
+  [!] Directive 2002/15/EC compliance issues (2):
+      stop 23: 6.44h consecutive work before the break (> 6.0h)
+      stop 48: 6.18h consecutive work before the break (> 6.0h)
+  Solution : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\RshortCmanyTmedium_15_DET_20260827_144852_131.json

@@ -96,6 +96,7 @@ _TW_LBL    = dict(ps.TW_LBL)
 _METHOD_ORDER  = [m for m in ps.METHOD_ORDER if m != "oracle"]
 _METHOD_LBL    = ps.METHOD_LBL
 _METHOD_COLOR  = ps.METHOD_COLOR
+_METHOD_HATCH  = ps.METHOD_HATCH
 
 # chart chrome — neutral journal-figure grays
 _INK_PRIMARY = ps.INK_PRIMARY
@@ -179,6 +180,13 @@ def collect_gaps(solutions_dir: str, metric: str = "gap_pen"):
         route, cust, tw = (r.get("route_class"), r.get("customers_class"),
                            r.get("window_class"))
         method = r.get("method")
+        # The guard is an EXECUTION rule, not a parameter of the plan, so a
+        # guarded DET run is its own series rather than an extra sample of the
+        # raw one.  _dedup_latest already keeps the two apart (its key carries
+        # `supervised`); without this split they would pool back together here
+        # and the guard's effect would vanish into the raw arm's box.
+        if method == "DET" and r.get("supervised"):
+            method = "DETg"
         if not (route and cust and tw and method):
             continue
         key = (route, cust, tw, method)
@@ -406,18 +414,30 @@ def plot_tw_response(gaps, metric: str = "gap_pen",
     return out
 
 
-def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
-    """Draw one method's marks (box / bar / violin) at the given positions."""
+def _draw_group_marks(ax, kind, data, x_pos, col, mark_w, hatch=""):
+    """Draw one method's marks (box / bar / violin) at the given positions.
+
+    ``hatch`` is the secondary channel for a hue that serves two arms of one
+    method (see paper_style.METHOD_HATCH); "" leaves the fill solid.
+
+    A hatched arm also gets a DARKENED outline.  Matplotlib draws hatch lines
+    in the edge colour, and at this box width (nine methods share one slot) a
+    mid-tone hatch over a tinted fill of the same hue is invisible — the two
+    arms then read as one series in two places.  Darkening the edge separates
+    them by outline weight even where the hatch itself is sub-pixel.
+    """
+    edge = _shade(col, 0.45) if hatch else col
     if kind == "box":
         ax.boxplot(
             data, positions=x_pos, widths=mark_w,
             showmeans=True, patch_artist=True,
-            boxprops=dict(facecolor=_tint(col), edgecolor=col, lw=1.0),
-            whiskerprops=dict(color=col, lw=1.0),
-            capprops=dict(color=col, lw=1.0),
-            medianprops=dict(color=col, lw=1.6),
+            boxprops=dict(facecolor=_tint(col), edgecolor=edge, lw=1.0,
+                          hatch=hatch or None),
+            whiskerprops=dict(color=edge, lw=1.0),
+            capprops=dict(color=edge, lw=1.0),
+            medianprops=dict(color=edge, lw=1.6),
             meanprops=dict(marker="D", markerfacecolor="white",
-                           markeredgecolor=col, markeredgewidth=1.0,
+                           markeredgecolor=edge, markeredgewidth=1.0,
                            markersize=3.5),
             flierprops=dict(marker="o", markersize=2.0,
                             markerfacecolor="none", markeredgecolor=col,
@@ -427,7 +447,8 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
         means = [d.mean() for d in data]
         stds  = [d.std(ddof=1) if len(d) > 1 else 0.0 for d in data]
         ax.bar(x_pos, means, width=mark_w, color=col, alpha=0.85,
-               edgecolor="white", linewidth=0.5, zorder=3)
+               edgecolor="white", linewidth=0.5, zorder=3,
+               hatch=hatch or None)
         ax.errorbar(x_pos, means, yerr=stds, fmt="none",
                     ecolor=_INK_PRIMARY, elinewidth=0.9,
                     capsize=2.0, capthick=0.9, zorder=4)
@@ -448,12 +469,18 @@ def _draw_group_marks(ax, kind, data, x_pos, col, mark_w):
         raise ValueError(f"unknown kind '{kind}'")
 
 
+def _hatch_rc():
+    """Thin hatch strokes — the default 1.0pt fills a narrow box solid."""
+    import matplotlib as _mpl
+    _mpl.rcParams["hatch.linewidth"] = 0.45
+
+
 def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     metric: str = "gap_pen", out_dir: str = _FIG_DIR,
                     annotate_n: bool = True, full_grid: bool = True,
                     layout: str = "row", inner: str = "tw",
                     line_band: bool = True, drop_methods=(),
-                    name_suffix: str = "") -> list:
+                    name_suffix: str = "", with_det: bool = False) -> list:
     """
     Render the gap-distribution figure and save PDF + PNG; returns the paths.
 
@@ -480,6 +507,7 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
     and in the stats CSV only — so a cell without an assessable rate stays
     blank rather than carrying a marker of its own.
     """
+    _hatch_rc()
     if n_unsl is None:
         n_unsl = {}
     if n_feas is None:
@@ -493,7 +521,12 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
             return {k: v for k, v in d.items() if k[3] not in drop}
         gaps, n_infe = _keep(gaps), _keep(n_infe)
         n_unsl, n_feas = _keep(n_unsl), _keep(n_feas)
-    method_order = [m for m in _METHOD_ORDER if m not in drop]
+    order = list(_METHOD_ORDER)
+    if with_det:
+        # appended, never inserted: the published method colours and their
+        # left-to-right order must not shift because a diagnostic was added
+        order += [m for m in ps.METHOD_ORDER_EXTRA if m not in order]
+    method_order = [m for m in order if m not in drop]
     pooled_tw = (inner == "pooled")
     if pooled_tw:
         # Collapse first, then let the whole layout run on a one-element TW
@@ -531,7 +564,8 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
                     data.append(np.asarray(vals))
             if data:
                 _draw_group_marks(ax, kind, data, x_pos,
-                                  _METHOD_COLOR[m], mark_w)
+                                  _METHOD_COLOR[m], mark_w,
+                                  _METHOD_HATCH.get(m, ""))
 
         ns = {(ti, m): len(gaps.get((route, cust, tw, m), []))
               for ti, tw in enumerate(tws) for m in methods}
@@ -605,13 +639,17 @@ def plot_gap_figure(gaps, n_infe, n_unsl=None, n_feas=None, kind: str = "box",
         ONE row avoids colliding with the centred route titles below."""
         if kind == "bar":
             handles = [Patch(facecolor=_METHOD_COLOR[m], alpha=0.85,
+                             hatch=_METHOD_HATCH.get(m, "") or None,
                              label=_METHOD_LBL[m]) for m in methods]
         elif kind == "line":
             handles = [Line2D([], [], color=_METHOD_COLOR[m], lw=1.6,
                               label=_METHOD_LBL[m]) for m in methods]
         else:
             handles = [Patch(facecolor=_tint(_METHOD_COLOR[m]),
-                             edgecolor=_METHOD_COLOR[m],
+                             edgecolor=(_shade(_METHOD_COLOR[m], 0.45)
+                                        if _METHOD_HATCH.get(m) else
+                                        _METHOD_COLOR[m]),
+                             hatch=_METHOD_HATCH.get(m, "") or None,
                              label=_METHOD_LBL[m]) for m in methods]
         if kind == "line":
             # TW is read from POSITION inside the block here, not from a shade,
@@ -1028,6 +1066,16 @@ if __name__ == "__main__":
                              "strip are all recomputed without it.  Pair "
                              "with --name-suffix so the reduced figure does "
                              "not overwrite the full one")
+    parser.add_argument("--with-det", dest="with_det",
+                        action="store_true", default=False,
+                        help="also draw DET (deterministic plan executed as "
+                             "is) and DET+guard (same plan under the 0.95 "
+                             "departure guard) as two extra methods.  OFF by "
+                             "default: DET is a diagnostic of what planning "
+                             "at the mean costs, not a competing policy, and "
+                             "including it would add two slots to every "
+                             "published figure.  Pair with --name-suffix so "
+                             "the result does not overwrite the paper figure")
     parser.add_argument("--name-suffix", default="",
                         help="extra suffix appended to the output file names, "
                              "e.g. '_v2' -> paper_gap_box_pooledtw_v2.pdf")
@@ -1043,6 +1091,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     gaps, n_infe, n_unsl, n_feas = collect_gaps(args.dir, metric=args.metric)
+
+    # collect_gaps pools every method it finds, so the opt-in extras (DET,
+    # DETg) are dropped HERE rather than inside plot_gap_figure: the stats CSV
+    # is written from these same dicts, and filtering only in the figure left
+    # the paper's own table carrying rows its figure did not draw.
+    if not args.with_det:
+        _extra = set(ps.METHOD_ORDER_EXTRA)
+        gaps, n_infe, n_unsl, n_feas = (
+            {k: v for k, v in d.items() if k[3] not in _extra}
+            for d in (gaps, n_infe, n_unsl, n_feas))
 
     n_groups = len(gaps)
     n_runs   = sum(len(v) for v in gaps.values())
@@ -1061,9 +1119,14 @@ if __name__ == "__main__":
                   f"{'/'.join(key[:3])} [{key[3]}]")
 
     os.makedirs(args.out_dir, exist_ok=True)
-    # tabular exports live in data_output/, not alongside the .pdf/.png figures
+    # tabular exports live in data_output/, not alongside the .pdf/.png figures.
+    # The name suffix has to reach the CSV too: it is written from the SAME
+    # dicts the figure draws, so a --with-det (or --drop-method) run would
+    # otherwise overwrite the paper's own table with a differently-scoped one
+    # while the figure it belongs to sits under a separate name.
     write_stats_csv(gaps, n_infe, n_unsl, n_feas,
-                    _paths.data_output("paper_gap_stats.csv"))
+                    _paths.data_output(
+                        f"paper_gap_stats{args.name_suffix}.csv"))
 
     if args.tw_response:
         # Its own layout (methods on x, customers pooled), so it does not go
@@ -1099,7 +1162,7 @@ if __name__ == "__main__":
                                  layout=args.layout, inner=inner,
                                  line_band=args.line_band,
                                  drop_methods=args.drop_methods,
-                                 name_suffix=args.name_suffix):
+                                 name_suffix=args.name_suffix, with_det=args.with_det):
             print(f"  Figure    : {p}")
 
     if paper_set:

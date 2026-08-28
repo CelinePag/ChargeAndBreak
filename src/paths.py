@@ -397,6 +397,11 @@ def bucket_of_artefact(name: str) -> str | None:
             stem = stem[: -len(sfx)]
     if stem.startswith("oracle_"):
         return instance_bucket(stem[len("oracle_"):])
+    # det_plan_<inst>.json — the DET MILP plan, shared by both execution arms
+    # (raw and guarded).  Unlike the oracle cache it is filed with the VSS
+    # experiment rather than with the instance: nothing outside VSS reads it.
+    if stem.startswith("det_plan_"):
+        return VSS
     return bucket_of_run_id(stem)
 
 
@@ -415,6 +420,7 @@ _FIGURE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("check_diesel_timeline_", SENSITIVITY),
     ("check_power_timeline_",  SENSITIVITY),
     ("real_route_",            USECASE),
+    ("vss_",                   VSS),
 )
 
 

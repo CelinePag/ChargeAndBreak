@@ -1,0 +1,27 @@
+=================================================================
+  DET SOLVE START  (2026-08-27 14:49:02)
+  Instance : RmediumCmanyTmedium_15 — medium route, many customers, medium windows, seed=15   run_id=RmediumCmanyTmedium_15_DET_20260827_144852_431
+  Route    : 101 stops  departure=8:00
+  Model    : deterministic MILP at NOMINAL travel times (xi = 1), executed as is, no recourse
+=================================================================
+  Plan       : reused cache (solved in 28.4s, theta=66.754h) — no MILP re-solve
+  theta=66.754h  plan: 7 chg / 6 brk / 2 rst
+
+  DET objective (planned arrival at nominal) : 66.754 h   solve 0.0s
+
+  Executing DET plan AS IS (static, no recourse)...
+  [SUPERVISOR] stop 24: ['charge'] (must_charge)
+  Nominal-plan failures (raw): 1 violation(s); 1 supervisor intervention(s)
+
+=================================================================
+  DET SIMULATION COMPLETE
+  Planned arrival    : 66.754 h   (what the driver expected)
+  Arrival (absolute) : 58.681 h  (58:40)
+  Travel duration    : 50.681 h
+  Solve time         : 0.0 s
+  Wall-clock         : 0.0 s
+=================================================================
+  Scenarios: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\logs\VSS\RmediumCmanyTmedium_15_DET_20260827_144852_431_scenarios.json
+  [!] RUN HALTED at stop 76 of 101 (stranding) — no route duration is reported
+  Metrics  : violations=1 (stranding:1)  tw_hit=67% (early=0, late=4)  interventions=1  repairs=0
+  Solution : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\solutions\VSS\RmediumCmanyTmedium_15_DET_20260827_144852_431.json

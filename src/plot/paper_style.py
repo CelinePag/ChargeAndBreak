@@ -34,6 +34,7 @@ METHOD_ORDER = ["ROBU", "RO", "2SP", "greedy", "LA", "oracle"]
 METHOD_LBL = {
     "greedy": "Greedy", "RO": "RO", "ROBU": "ROBU",
     "LA": "LA", "2SP": "2SP", "oracle": "Oracle",
+    "DET": "DET", "DETg": "DET + guard",
 }
 METHOD_COLOR = {
     "greedy": "#0072B2",   # blue
@@ -42,7 +43,24 @@ METHOD_COLOR = {
     "LA":     "#009E73",   # bluish green
     "2SP":    "#CC79A7",   # reddish purple
     "oracle": "#3A3A3A",   # neutral dark grey — a bound, not a policy
+    # DET and DETg are the SAME plan under two execution rules, so they share
+    # one hue and are told apart by hatch (METHOD_HATCH) rather than by a
+    # second colour.  That keeps the palette inside Okabe-Ito — the remaining
+    # free slot is the yellow #F0E442, whose contrast on white is too low for
+    # a thin box outline — and it says what the pair actually is.
+    "DET":    "#56B4E9",   # sky blue — deterministic plan, executed as is
+    "DETg":   "#56B4E9",   # same plan, 0.95 departure guard (hatched)
 }
+
+# Secondary (non-colour) channel, so a hue that serves two arms stays legible
+# in greyscale and under every CVD simulation.  Empty = solid fill.
+METHOD_HATCH = {"DETg": "///"}
+
+# Methods kept OUT of the published paper figures unless explicitly asked for.
+# DET is a diagnostic of what planning at the mean costs (the VSS experiment),
+# not a competing policy, and adding it to METHOD_ORDER would silently give
+# every existing paper figure two more slots.
+METHOD_ORDER_EXTRA = ["DET", "DETg"]
 
 # ── ordered: route class (one hue, light -> dark with length) ────────────────
 ROUTE_ORDER = ["short", "medium", "long"]
