@@ -1,0 +1,75 @@
+
+=== gbt_base_s0 (Trees, training seed 0) ===
+   $ train gbt_base_s0
+   $ evaluate gbt_base_s0
+   -> vs LA -0.01%  infeasible 0.0  (156.4s)
+
+=== gbt_base_s1 (Trees, training seed 1) ===
+   $ train gbt_base_s1
+   $ evaluate gbt_base_s1
+   -> vs LA -0.05%  infeasible 0.0  (196.6s)
+
+=== gbt_base_s2 (Trees, training seed 2) ===
+   $ train gbt_base_s2
+   $ evaluate gbt_base_s2
+   -> vs LA -0.07%  infeasible 1.0  (170.4s)
+
+=== gbt_base_s3 (Trees, training seed 3) ===
+   $ train gbt_base_s3
+   $ evaluate gbt_base_s3
+   -> vs LA -0.14%  infeasible 1.0  (139.6s)
+
+=== gbt_base_s4 (Trees, training seed 4) ===
+   $ train gbt_base_s4
+   $ evaluate gbt_base_s4
+   -> vs LA 0.08%  infeasible 1.0  (144.1s)
+
+=== mlp_base_s0 (MLP, training seed 0) ===
+   $ train mlp_base_s0
+   $ evaluate mlp_base_s0
+   -> vs LA 0.25%  infeasible 3.0  (64937.5s)
+
+=== mlp_base_s1 (MLP, training seed 1) ===
+   $ train mlp_base_s1
+[resume] keeping 5 rows from arms not re-run: ['gbt']
+
+=== mlp_base_s0 (MLP, training seed 0) ===
+   $ evaluate mlp_base_s0
+   -> vs LA 0.25%  infeasible 3.0  (38.2s)
+
+=== mlp_base_s1 (MLP, training seed 1) ===
+   $ train mlp_base_s1
+   $ evaluate mlp_base_s1
+   -> vs LA 0.36%  infeasible 4.0  (997.6s)
+
+=== mlp_base_s2 (MLP, training seed 2) ===
+   $ train mlp_base_s2
+   $ evaluate mlp_base_s2
+   -> vs LA 0.35%  infeasible 6.0  (882.6s)
+
+=== clf_base_s0 (Classifier, training seed 0) ===
+   $ train clf_base_s0
+   $ evaluate clf_base_s0
+   -> vs LA 0.17%  infeasible 1.0  (212.8s)
+
+=== clf_base_s1 (Classifier, training seed 1) ===
+   $ train clf_base_s1
+   $ evaluate clf_base_s1
+   -> vs LA -0.03%  infeasible 1.0  (205.5s)
+
+=== clf_base_s2 (Classifier, training seed 2) ===
+   $ train clf_base_s2
+   $ evaluate clf_base_s2
+   -> vs LA 0.13%  infeasible 3.0  (195.0s)
+
+======================================================================================
+SEED SPREAD — 3 training seeds per arm, held-out test batch
+======================================================================================
+arm                       vs LA          vs GREEDY     infeasible    TW misses
+--------------------------------------------------------------------------------------
+Trees           -0.04 ± 0.07       -2.47 ± 0.14       0.6 ± 0.5      113 ±   6
+MLP             +0.32 ± 0.05       -2.25 ± 0.11       4.3 ± 1.2      107 ±   6
+Classifier      +0.09 ± 0.09       -2.40 ± 0.17       1.7 ± 0.9      117 ±   6
+
+(teacher time-window misses on the same routes: 57)
+saved: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results/seeds_test.json

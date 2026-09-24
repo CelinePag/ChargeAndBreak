@@ -1,0 +1,39 @@
+
+=== base: regret target, margin weights, depth 6 ===
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\train_gbt.py --tag base
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --tag base --split val --out eval_base_val.json
+   -> median vs LA -0.2%  halted 4.0  (1533.5s)
+
+=== rawcost: raw cost target (no centring) ===
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\train_gbt.py --tag rawcost --target cost
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --tag rawcost --split val --out eval_rawcost_val.json
+   -> median vs LA 3.41%  halted 14.0  (396.9s)
+
+=== noweight: no margin weighting ===
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\train_gbt.py --tag noweight --weight-power 0
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --tag noweight --split val --out eval_noweight_val.json
+   -> median vs LA -0.16%  halted 2.0  (322.2s)
+
+=== shallow: depth 3 / 15 leaves ===
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\train_gbt.py --tag shallow --leaves 15 --depth 3
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --tag shallow --split val --out eval_shallow_val.json
+   -> median vs LA 0.16%  halted 9.0  (306.7s)
+
+=== base_g95: base model, 0.95 guard at deploy ===
+   $ C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --tag base --split val --out eval_base_g95_val.json --guard-q 0.95
+   -> median vs LA 0.1%  halted 0.0  (80.7s)
+
+======================================================================================
+ABLATIONS (val)
+======================================================================================
+variant       vs LA  vs GRDY  vs ORCL  penalis  halt    TW   ms/dec  description
+--------------------------------------------------------------------------------------
+base          -0.20    -2.29    +2.05    +0.12     4   184     4.09  regret target, margin weights, depth 6
+rawcost       +3.41    +0.88    +7.09    +4.41    14   204     4.21  raw cost target (no centring)
+noweight      -0.16    -2.29    +2.16    +0.13     2   190     4.26  no margin weighting
+shallow       +0.16    -1.97    +2.35    +0.47     9   207     3.36  depth 3 / 15 leaves
+base_g95      +0.10    -2.21    +2.09    +0.26     0   196     4.21  base model, 0.95 guard at deploy
+
+(teacher TW misses on the same routes: 119)
+
+saved: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results/ablations_val.json

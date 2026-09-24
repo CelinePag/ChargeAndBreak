@@ -1,0 +1,234 @@
+[
+ {
+  "routes": 125.0,
+  "completed": 119.0,
+  "infeasible": 6.0,
+  "ms": 3.673,
+  "med_la": -0.12,
+  "med_greedy": -2.61,
+  "med_pen": 0.19,
+  "tw": [
+   114,
+   57
+  ],
+  "arm": "gbt",
+  "name": "base",
+  "tag": "gbt_base",
+  "guard": null,
+  "desc": "same model, nominal guard",
+  "display": "Trees (nominal guard)",
+  "eval_file": "eval_gbt_base_nom_test.json",
+  "seconds": 67.8
+ },
+ {
+  "routes": 125.0,
+  "completed": 121.0,
+  "infeasible": 4.0,
+  "ms": 2.323,
+  "med_la": 3.54,
+  "med_greedy": 1.34,
+  "med_pen": 4.53,
+  "tw": [
+   165,
+   57
+  ],
+  "arm": "gbt",
+  "name": "rawcost",
+  "tag": "gbt_rawcost",
+  "guard": 0.95,
+  "desc": "raw horizon cost instead of centred regret",
+  "display": "Trees \u2014 raw cost target",
+  "eval_file": "eval_gbt_rawcost_g95_test.json",
+  "seconds": 180.7
+ },
+ {
+  "routes": 125.0,
+  "completed": 124.0,
+  "infeasible": 1.0,
+  "ms": 1.97,
+  "med_la": -0.04,
+  "med_greedy": -2.41,
+  "med_pen": 0.16,
+  "tw": [
+   109,
+   57
+  ],
+  "arm": "gbt",
+  "name": "noweight",
+  "tag": "gbt_noweight",
+  "guard": 0.95,
+  "desc": "no margin weighting",
+  "display": "Trees \u2014 no weighting",
+  "eval_file": "eval_gbt_noweight_g95_test.json",
+  "seconds": 171.5
+ },
+ {
+  "routes": 125.0,
+  "completed": 120.0,
+  "infeasible": 5.0,
+  "ms": 6.15,
+  "med_la": 0.49,
+  "med_greedy": -2.16,
+  "med_pen": 0.74,
+  "tw": [
+   139,
+   57
+  ],
+  "arm": "gbt",
+  "name": "shallow",
+  "tag": "gbt_shallow",
+  "guard": 0.95,
+  "desc": "depth 3 / 15 leaves",
+  "display": "Trees \u2014 shallow",
+  "eval_file": "eval_gbt_shallow_g95_test.json",
+  "seconds": 236.5
+ },
+ {
+  "routes": 125.0,
+  "completed": 118.0,
+  "infeasible": 7.0,
+  "ms": 1.096,
+  "med_la": -0.02,
+  "med_greedy": -2.53,
+  "med_pen": 0.28,
+  "tw": [
+   110,
+   57
+  ],
+  "arm": "mlp",
+  "name": "base",
+  "tag": "mlp_base",
+  "guard": null,
+  "desc": "same model, nominal guard",
+  "display": "MLP (nominal guard)",
+  "eval_file": "eval_mlp_base_nom_test.json",
+  "seconds": 23.0
+ },
+ {
+  "routes": 125.0,
+  "completed": 124.0,
+  "infeasible": 1.0,
+  "ms": 3.03,
+  "med_la": 1.29,
+  "med_greedy": -1.41,
+  "med_pen": 2.29,
+  "tw": [
+   173,
+   57
+  ],
+  "arm": "mlp",
+  "name": "sqerr",
+  "tag": "mlp_sqerr",
+  "guard": 0.95,
+  "desc": "squared error on raw regret (unprotected tail)",
+  "display": "MLP \u2014 squared error",
+  "eval_file": "eval_mlp_sqerr_g95_test.json",
+  "seconds": 980.1
+ },
+ {
+  "routes": 125.0,
+  "completed": 119.0,
+  "infeasible": 6.0,
+  "ms": 1.713,
+  "med_la": 43.06,
+  "med_greedy": 38.56,
+  "med_pen": 46.16,
+  "tw": [
+   365,
+   57
+  ],
+  "arm": "mlp",
+  "name": "rawcost",
+  "tag": "mlp_rawcost",
+  "guard": 0.95,
+  "desc": "raw horizon cost instead of centred regret",
+  "display": "MLP \u2014 raw cost target",
+  "eval_file": "eval_mlp_rawcost_g95_test.json",
+  "seconds": 894.4
+ },
+ {
+  "routes": 125.0,
+  "completed": 124.0,
+  "infeasible": 1.0,
+  "ms": 1.375,
+  "med_la": 1.6,
+  "med_greedy": -0.77,
+  "med_pen": 2.4,
+  "tw": [
+   165,
+   57
+  ],
+  "arm": "clf",
+  "name": "sqrtw",
+  "tag": "clf_sqrtw",
+  "guard": 0.95,
+  "desc": "classifier with sqrt class weights",
+  "display": "Classifier \u2014 sqrt weights",
+  "eval_file": "eval_clf_sqrtw_g95_test.json",
+  "seconds": 92.7
+ },
+ {
+  "arm": "gbt",
+  "name": "base",
+  "tag": "gbt_base_s1",
+  "guard": 0.95,
+  "desc": "median of 5 training seeds",
+  "display": "Trees",
+  "eval_file": "eval_gbt_base_s1_g95_test.json",
+  "med_la": -0.05,
+  "med_greedy": -2.39,
+  "med_pen": 0.23,
+  "infeasible": 0.0,
+  "tw": [
+   112,
+   57
+  ],
+  "ms": 0.0
+ },
+ {
+  "arm": "mlp",
+  "name": "base",
+  "tag": "mlp_base_s2",
+  "guard": 0.95,
+  "desc": "median of 3 training seeds",
+  "display": "MLP",
+  "eval_file": "eval_mlp_base_s2_g95_test.json",
+  "med_la": 0.35,
+  "med_greedy": -2.14,
+  "med_pen": 0.73,
+  "infeasible": 6.0,
+  "tw": [
+   100,
+   57
+  ],
+  "ms": 0.0
+ },
+ {
+  "arm": "clf",
+  "name": "base",
+  "tag": "clf_base_s2",
+  "guard": 0.95,
+  "desc": "median of 3 training seeds",
+  "display": "Classifier",
+  "eval_file": "eval_clf_base_s2_g95_test.json",
+  "med_la": 0.13,
+  "med_greedy": -2.48,
+  "med_pen": 0.38,
+  "infeasible": 3.0,
+  "tw": [
+   110,
+   57
+  ],
+  "ms": 0.0
+ },
+ {
+  "arm": "legacy",
+  "name": "mlp",
+  "tag": "legacy_mlp",
+  "guard": 0.95,
+  "desc": "restored verbatim: 141 features, 772 runs, its own rollout",
+  "display": "MLP (2026-08, as built)",
+  "eval_file": "eval_legacy_mlp_g95_test.json",
+  "ms": 0.0
+ }
+]

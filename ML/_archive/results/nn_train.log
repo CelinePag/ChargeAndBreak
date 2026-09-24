@@ -1,0 +1,20 @@
+[data] rows 411118  features 91
+  train rows  284489  instances  569  decisions  50215
+  val   rows   64668  instances  136  decisions  11398
+  test  rows   61961  instances  125  decisions  10982
+[scale] StandardScaler fitted on 284489 training rows ((64, 64) hidden units, alpha=0.0001)
+[cost] epochs=112 best=87 val_mse=0.513126  395s
+[feas] epochs=49 best=24 val_logloss=0.025702  195s
+[tauc] epochs=61 best=36 val_mse=0.020728  62s
+[tauc] val_MAE=5.86 min (on 16337 charge rows)
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go
+train       1.57 min    88.9%      50192       3.13 min
+val         1.85 min    88.3%      11390       3.40 min
+test        1.70 min    88.9%      10979       3.44 min
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/nn_nn.joblib  (656s)
+[size]  cost head: 10,113 parameters (91 inputs -> (64, 64) -> 1)

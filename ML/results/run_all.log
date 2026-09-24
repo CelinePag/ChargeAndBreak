@@ -1,0 +1,72 @@
+
+=== gbt_base  (guard 0.95) : regret target, margin weights, depth 6 ===
+   $ train gbt_base
+   $ evaluate gbt_base -> eval_gbt_base_g95_test.json
+   -> vs LA 0.18%  infeasible 2.0  (742.4s)
+
+=== gbt_base  (guard nominal) : same model, nominal guard ===
+   $ evaluate gbt_base -> eval_gbt_base_nom_test.json
+   -> vs LA -0.12%  infeasible 6.0  (67.8s)
+
+=== gbt_rawcost  (guard 0.95) : raw horizon cost instead of centred regret ===
+   $ train gbt_rawcost
+   $ evaluate gbt_rawcost -> eval_gbt_rawcost_g95_test.json
+   -> vs LA 3.54%  infeasible 4.0  (180.7s)
+
+=== gbt_noweight  (guard 0.95) : no margin weighting ===
+   $ train gbt_noweight
+   $ evaluate gbt_noweight -> eval_gbt_noweight_g95_test.json
+   -> vs LA -0.04%  infeasible 1.0  (171.5s)
+
+=== gbt_shallow  (guard 0.95) : depth 3 / 15 leaves ===
+   $ train gbt_shallow
+   $ evaluate gbt_shallow -> eval_gbt_shallow_g95_test.json
+   -> vs LA 0.49%  infeasible 5.0  (236.5s)
+
+=== mlp_base  (guard 0.95) : log1p regret — tail-robust, monotone ===
+   $ train mlp_base
+   $ evaluate mlp_base -> eval_mlp_base_g95_test.json
+   -> vs LA 0.42%  infeasible 0.0  (610.3s)
+
+=== mlp_base  (guard nominal) : same model, nominal guard ===
+   $ evaluate mlp_base -> eval_mlp_base_nom_test.json
+   -> vs LA -0.02%  infeasible 7.0  (23.0s)
+
+=== mlp_sqerr  (guard 0.95) : squared error on raw regret (unprotected tail) ===
+   $ train mlp_sqerr
+   $ evaluate mlp_sqerr -> eval_mlp_sqerr_g95_test.json
+   -> vs LA 1.29%  infeasible 1.0  (980.1s)
+
+=== mlp_rawcost  (guard 0.95) : raw horizon cost instead of centred regret ===
+   $ train mlp_rawcost
+   $ evaluate mlp_rawcost -> eval_mlp_rawcost_g95_test.json
+   -> vs LA 43.06%  infeasible 6.0  (894.4s)
+
+=== clf_base  (guard 0.95) : 12-way action classifier, unweighted ===
+   $ train clf_base
+   $ evaluate clf_base -> eval_clf_base_g95_test.json
+   -> vs LA 0.17%  infeasible 1.0  (99.2s)
+
+=== clf_sqrtw  (guard 0.95) : classifier with sqrt class weights ===
+   $ train clf_sqrtw
+   $ evaluate clf_sqrtw -> eval_clf_sqrtw_g95_test.json
+   -> vs LA 1.6%  infeasible 1.0  (92.7s)
+
+====================================================================================================
+ALL CONFIGURATIONS — held-out test batch (seeds 22-25, 125 routes)
+====================================================================================================
+tag                  guard    vs LA  vs GRDY  penalis  infs    TW     ms  description
+----------------------------------------------------------------------------------------------------
+gbt_base              0.95    +0.18    -2.44    +0.57     2   124    4.2  regret target, margin weights, depth 6
+gbt_base           nominal    -0.12    -2.61    +0.19     6   114    3.7  same model, nominal guard
+gbt_rawcost           0.95    +3.54    +1.34    +4.53     4   165    2.3  raw horizon cost instead of centred regret
+gbt_noweight          0.95    -0.04    -2.41    +0.16     1   109    2.0  no margin weighting
+gbt_shallow           0.95    +0.49    -2.16    +0.74     5   139    6.2  depth 3 / 15 leaves
+mlp_base              0.95    +0.42    -2.40    +0.72     0   116    1.1  log1p regret — tail-robust, monotone
+mlp_base           nominal    -0.02    -2.53    +0.28     7   110    1.1  same model, nominal guard
+mlp_sqerr             0.95    +1.29    -1.41    +2.29     1   173    3.0  squared error on raw regret (unprotected tail)
+mlp_rawcost           0.95   +43.06   +38.56   +46.16     6   365    1.7  raw horizon cost instead of centred regret
+clf_base              0.95    +0.17    -2.17    +0.53     1   116    1.3  12-way action classifier, unweighted
+clf_sqrtw             0.95    +1.60    -0.77    +2.40     1   165    1.4  classifier with sqrt class weights
+
+saved: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results/all_test.json

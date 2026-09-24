@@ -1,0 +1,54 @@
+[eval] kind=nn tag=nn on test: 125 instances
+  25/125  10s
+  50/125  16s
+  75/125  22s
+  100/125  29s
+  125/125  35s
+[eval] 125 routes in 35.5s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  nn:nn on test
+==========================================================================
+routes                125
+completed             117
+halted                8   hos_cd=1, hos_spread=7
+latency               2.174 ms/decision (median 2.001)
+teacher latency       74185 ms/decision (34,123x slower)
+
+vs LA  (paired on 117 routes both completed)
+   median    +2.65 %
+   mean      +5.90 %
+   IQR     [+1.12, +5.03]
+   best/worst -6.46 % / +40.13 %
+   student faster on 10/117 routes
+
+vs GREEDY  (paired on 113 routes both completed)
+   median    +0.25 %
+   mean      +3.33 %
+   IQR     [-1.56, +1.71]
+   best/worst -5.27 % / +38.90 %
+   student faster on 52/113 routes
+
+vs ORACLE (hindsight objective - T_START, 117 routes)
+   median    +4.89 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 163   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 117 routes)
+   median   +3.56 %   mean   +6.77 %
+
+rests   student   279  LA   263   mean +0.137/route   fewer on 1/117 routes
+charges student  1239  LA  1063   mean +1.504/route
+
+worst 5 families (median % vs LA)
+   RshortCmanyTmedium         n=  4  median +21.01 %  worst +40.13 %
+   RshortCmediumTnone         n=  4  median +19.23 %  worst +35.72 %
+   RlongCmediumTnone          n=  1  median +18.51 %  worst +18.51 %
+   RmediumCmanyTlarge         n=  2  median +11.98 %  worst +22.97 %
+   RlongCmediumTlarge         n=  1  median +11.83 %  worst +11.83 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 5x, left none 0x, charge clamp moved 0x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_nn_test.json

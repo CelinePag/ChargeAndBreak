@@ -1,0 +1,17 @@
+log1p model ready; launching grid
+
+=== nn_raw: squared error on raw regret (the handicapped original) ===
+   $ evaluate.py --kind nn --tag nn --split val --out eval_nn_raw_val.json
+   -> vs LA 2.62%  infeasible 18.0  (109.5s)
+
+=== nn_log1p: log1p regret — tail-robust, monotone (the fair baseline) ===
+   (reusing existing nn_log1p)
+   $ evaluate.py --kind nn --tag nn_log1p --split val --out eval_nn_log1p_val.json
+   -> vs LA -0.03%  infeasible 9.0  (69.9s)
+
+=== nn_rawcost: raw horizon cost instead of centred regret ===
+   $ nn_train.py --tag nn_rawcost --target cost --target-transform log1p
+   $ evaluate.py --kind nn --tag nn_rawcost --split val --out eval_nn_rawcost_val.json
+
+
+failed: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\.venv\Scripts\python.exe C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\evaluate.py --kind nn --tag nn_rawcost --split val --out eval_nn_rawcost_val.json
