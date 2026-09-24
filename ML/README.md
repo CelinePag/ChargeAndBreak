@@ -1,33 +1,37 @@
 # ML — a solver-free policy for the discrete-event simulator
 
-**Results: [RESULTS.md](RESULTS.md)** (the selected model) and
-**[RESULTS_ARMS.md](RESULTS_ARMS.md)** (trees vs network).
+**Results: [RESULTS.md](RESULTS.md)** · **Method: [METHOD.md](METHOD.md)** ·
+figures in `ML/figures/`.
 
-Headline, boosted trees on the held-out test split (122 completed routes):
-statistically indistinguishable from the LA teacher (median -0.01 %, Wilcoxon
-p = 0.92), 2.47 % faster than GREEDY, 2.18 % above the hindsight ORACLE, at
-~4 ms per decision against the teacher's ~72 s. Selected configuration:
-`base` model + deployment guard 0.95.
+Held-out test batch (seeds 22–25, 125 routes), gap to the hindsight oracle —
+the manuscript's own metric:
 
-**The simplest neural network loses, decisively, and consistently across both
-splits.** Gap to the hindsight oracle — the manuscript's own metric:
-
-| | val | test | infeasible (val / test) |
+| policy | gap to oracle | infeasible | TW misses |
 |---|---:|---:|---:|
-| **GBT student** | **+2.10 %** | **+2.18 %** | 0 / 3 |
-| MLP student | +5.48 % | +4.89 % | 8 / 8 |
-| LA (teacher) | — | +2.14 % | 0 / 0 |
-| Greedy | — | +4.90 % | 5 |
+| **Trees** (5 training seeds) | **+2.10 %** | 0 | 113 ± 6 |
+| LA — the teacher | +2.14 % | 0 | 57 |
+| **Classifier** (3 seeds) | +2.21 % | 3 | 117 ± 6 |
+| MLP, 2026-08 as built | +2.23 % | 2 | 123 |
+| **MLP** (3 seeds) | +2.54 % | 6 | 107 ± 6 |
+| Greedy | +4.90 % | 5 | 182 |
+| 2SP | +2.10 % | **19** | — |
+| RO | +32.4 % | 0 | — |
 
-The network lands on top of Greedy: it recovers little of what the look-ahead
-buys over a myopic rule. Both arms generalise consistently from validation to
-test, so the ~2.7 pp gap between them is the stable finding.
+Against the teacher, across training seeds: Trees **−0.04 ± 0.07 %**,
+Classifier **+0.09 ± 0.09 %**, MLP **+0.32 ± 0.05 %**. Trees and Classifier
+overlap within one standard deviation and are indistinguishable; the MLP is
+separably behind both. Every arm is inside the **0.35 %** practical floor (the
+look-ahead's own run-to-run spread), and every arm beats Greedy by ~2.3–2.5 pp
+— at **milliseconds** per decision against the teacher's ~70 s.
 
-**Selection vs measurement.** Validation (seeds 18–21) is where every choice
-was made — guard quantile, depth, target, which arm wins. Test (seeds 22–25)
-is measured once with those choices frozen. The guard 0.95 was picked because
-it gave zero infeasible runs on validation; on test it gives 3. That optimism
-is exactly what the held-out split exists to expose.
+**The design choice that matters is centring the target.** Regressing the
+teacher's raw horizon objective instead of the per-decision regret costs the
+trees +4.2 pp (+2.10 → +6.27 %) and the MLP **+42.9 pp** (+2.54 → +45.5 %).
+Weighting rare actions hurts on both arms.
+
+**The open weakness is time windows**: every arm misses ~107–117 of 737
+customer visits against the teacher's 57, flat across seeds. Adding explicit
+window features did not move it — see [METHOD.md](METHOD.md).
 
 A learned stand-in for the look-ahead MILP (`LA_MIPTAIL`), compared
 against GREEDY, LA and ORACLE inside the existing simulator. Base case only
