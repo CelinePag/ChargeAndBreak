@@ -53,7 +53,8 @@ if _ROOT not in sys.path:
 from src.simulation.BEHDV import (BEHDV, _charging_time_needed,     # noqa: E402
                                   _energy_after_charging)
 from src.simulation.Simulation import enumerate_actions             # noqa: E402
-from src.simulation.supervisor import action_passes                 # noqa: E402
+from src.simulation.supervisor import (_action_min_dwell,           # noqa: E402
+                                       action_passes)
 
 from features import (Precomp, action_features, action_key,         # noqa: E402
                       state_features)
@@ -77,6 +78,43 @@ def charge_needed_to_reach(fd, e_arr, flags):
     return hi
 
 
+def _norm(v):
+    return None if str(v).lower() in ("0", "none", "-", "") else str(v).lower()
+
+
+def stop_overhead(fd, stop, action):
+    """Fixed time an action costs at this stop, as BEHDV's departure time
+    charges it: M_stop at a charger whenever anything happens there, M_lay at
+    a layby for a break or rest."""
+    active = (_norm(action.get("break_type")) in ("b45", "b15", "b30")
+              or _norm(action.get("rest_type")) in ("r1", "r2"))
+    if stop in set(fd["K"]):
+        if int(action.get("y", 0)) or active:
+            return float(fd.get("M_stop", {}).get(stop, 0.0))
+        return 0.0
+    if stop in set(fd.get("L", [])) and active:
+        return float(fd.get("M_lay", {}).get(stop, 0.0))
+    return 0.0
+
+
+def spread_room(fd, stop, action, flags):
+    """Hours of charging the 15 h spread still allows (None after a rest).
+
+    The shared legality check (supervisor._spread_with_dwell_fails) admits a
+    non-rest action when h + o(a) + D_wc <= 15 h, with o(a) = service + queue
+    + minimum break.  It leaves out two things the simulator then spends: the
+    charge, which the MILP models itself and so the check never needed, and
+    the stop overhead.  A learned policy picks its charge AFTER that check, so
+    for it the room has to be computed here.  A rest resets the spread, so it
+    has no such limit.
+    """
+    if _norm(action.get("rest_type")) in ("r1", "r2"):
+        return None
+    return (float(flags["Tspr2"]) - float(flags["h_state"])
+            - _action_min_dwell(fd, stop, action)
+            - stop_overhead(fd, stop, action) - float(flags["D_next_wc"]))
+
+
 class StudentPolicy:
     """The decision rule.  Subclasses only supply the predictions."""
 
@@ -90,6 +128,12 @@ class StudentPolicy:
         self.n_forced = 0      # decisions where forcing left exactly one action
         self.n_empty = 0       # decisions where forcing left nothing
         self.n_clamped = 0     # charge durations the physics clamp moved
+        # Opt-in (evaluate.py --spread-room): complete the spread check with
+        # the charge and stop overhead it leaves out -- see spread_room().
+        # Off by default, so every result produced without it is unchanged.
+        self.spread_room = False
+        self.n_spread_dropped = 0   # actions removed: even the minimum charge
+        self.n_spread_cut = 0       # charges shortened to fit the spread
 
     # -- to be implemented per arm -------------------------------------------
     def _predict(self, rows):
@@ -99,12 +143,26 @@ class StudentPolicy:
         raise NotImplementedError
 
     # -- identical for every arm ---------------------------------------------
-    def decide(self, fd, pre, stop, state, cv):
-        """Return (action dict, tauc hours, action key)."""
+    def _score(self, fd, pre, stop, state, cv):
+        """The legal actions at this stop and the model's view of each:
+        (legal, rows, cost, feas, flags).  decide() and candidates() both go
+        through here, so they see the same legality, forcing and spread-room
+        filtering, and bump the counters once per call."""
         acts = enumerate_actions(stop, state, fd, charge_only=False)
         sf, flags = state_features(fd, pre, stop, state, cv, self.guard_q)
 
         legal = [a for a in acts if action_passes(fd, stop, state, a, flags)]
+        if self.spread_room and legal:
+            # drop non-rest actions whose dwell cannot fit the spread even with
+            # the least charge the next leg needs (none, for y=0); if that
+            # would leave nothing, keep the unfiltered set
+            need = charge_needed_to_reach(fd, state.e_arr, flags)
+            fits = [a for a in legal
+                    if (r := spread_room(fd, stop, a, flags)) is None
+                    or r >= (need if int(a.get("y", 0)) else 0.0) - 1e-9]
+            self.n_spread_dropped += len(legal) - len(fits)
+            if fits:
+                legal = fits
         if not legal:
             self.n_empty += 1
             legal = acts                  # keep moving; BEHDV records the breach
@@ -124,19 +182,54 @@ class StudentPolicy:
         self._legal_keys = [action_key(a.get("y", 0), a.get("break_type"),
                                        a.get("rest_type")) for a in legal]
         cost, feas = self._predict(rows)
-        j = int(np.argmin(cost + 1e6 * (feas < self.feas_thr)))
-        act = legal[j]
+        return legal, rows, cost, feas, flags
 
+    def _charge_hours(self, fd, stop, state, act, row, flags):
+        """Charge duration for `act` (0 if it does not charge): the tauc head,
+        clamped into [reach the next charger, charge to full] and, with the
+        spread-room check on, into what the 15 h spread still allows."""
         tc = 0.0
         if int(act.get("y", 0)) == 1:
-            raw = float(self._predict_tauc(rows[j:j + 1]))
+            raw = float(self._predict_tauc(row))
             lo = charge_needed_to_reach(fd, state.e_arr, flags)
             hi = _charging_time_needed(state.e_arr, fd)
+            if self.spread_room:
+                room = spread_room(fd, stop, act, flags)
+                if room is not None and room < hi:
+                    hi = room               # never below lo: max(hi, lo) below
+                    if raw > room:
+                        self.n_spread_cut += 1
             tc = min(max(raw, lo), max(hi, lo))
             if abs(tc - raw) > 1e-6:
                 self.n_clamped += 1
+        return tc
+
+    def decide(self, fd, pre, stop, state, cv):
+        """Return (action dict, tauc hours, action key)."""
+        legal, rows, cost, feas, flags = self._score(fd, pre, stop, state, cv)
+        j = int(np.argmin(cost + 1e6 * (feas < self.feas_thr)))
+        act = legal[j]
+        tc = self._charge_hours(fd, stop, state, act, rows[j:j + 1], flags)
         return act, tc, action_key(act.get("y", 0), act.get("break_type"),
                                    act.get("rest_type"))
+
+    def candidates(self, fd, pre, stop, state, cv, k=3):
+        """The k best actions by the model's own score, best first, as
+        [(action, tauc, key, score), ...].  candidates()[0] is exactly what
+        decide() returns (a stable sort keeps argmin's tie-break); the rollout
+        policy (rollout_policy.py) weighs the others against it."""
+        legal, rows, cost, feas, flags = self._score(fd, pre, stop, state, cv)
+        score = cost + 1e6 * (feas < self.feas_thr)
+        out = []
+        for j in np.argsort(score, kind="stable")[:k]:
+            j = int(j)
+            act = legal[j]
+            tc = self._charge_hours(fd, stop, state, act, rows[j:j + 1], flags)
+            out.append((act, tc, action_key(act.get("y", 0),
+                                            act.get("break_type"),
+                                            act.get("rest_type")),
+                        float(score[j])))
+        return out
 
 
 def durations(fd, stop, action, tauc):
@@ -202,15 +295,19 @@ def run_student(fd, D_real, E_real, policy: StudentPolicy, cv=0.15):
     )
 
 
-def load_policy(kind: str, tag: str, feas_thr=0.5, guard_q=None):
+def load_policy(kind: str, tag: str, feas_thr=0.5, guard_q=None,
+                spread_room=False):
     """Factory: 'gbt' (trees), 'nn' (MLP regression), 'clf' (MLP classifier)."""
     if kind == "gbt":
         from gbt_policy import GBTPolicy
-        return GBTPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
-    if kind == "nn":
+        pol = GBTPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
+    elif kind == "nn":
         from nn_policy import NNPolicy
-        return NNPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
-    if kind == "clf":
+        pol = NNPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
+    elif kind == "clf":
         from clf_policy import ClfPolicy
-        return ClfPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
-    raise ValueError(f"unknown policy kind: {kind!r}")
+        pol = ClfPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
+    else:
+        raise ValueError(f"unknown policy kind: {kind!r}")
+    pol.spread_room = bool(spread_room)
+    return pol

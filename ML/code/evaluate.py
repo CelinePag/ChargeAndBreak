@@ -52,7 +52,9 @@ RESULTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results
 
 SPLITS = dict(fit=range(1, 20), stop=range(20, 22), test=range(22, 26),
               # legacy names, kept so older commands still resolve
-              train=range(1, 20), val=range(20, 22))
+              train=range(1, 20), val=range(20, 22),
+              # route-length extrapolation (run_length.py): long routes only
+              long_test=range(22, 26), long_all=range(1, 26))
 
 POL = None   # set by main(), read by report() for the policy counters
 
@@ -112,6 +114,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--feas-thr", type=float, default=0.5)
     ap.add_argument("--guard-q", type=float, default=None)
+    ap.add_argument("--spread-room", action="store_true",
+                    help="count the charge and the stop overhead against the "
+                         "15 h spread (policy_core.spread_room); off by default")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -119,13 +124,15 @@ def main():
     insts = [str(x) for x in d["instances"]]
     seeds = np.array([int(x.rsplit("_", 1)[1]) for x in insts])
     keep = [i for i, s in zip(insts, seeds) if s in SPLITS[args.split]]
+    if args.split.startswith("long_"):
+        keep = [i for i in keep if i.startswith("Rlong")]
     if args.limit:
         keep = keep[: args.limit]
     print(f"[eval] kind={args.kind} tag={args.tag} on {args.split}: "
           f"{len(keep)} instances")
 
     pol = load_policy(args.kind, args.tag, feas_thr=args.feas_thr,
-                      guard_q=args.guard_q)
+                      guard_q=args.guard_q, spread_room=args.spread_room)
     rows = []
     t0 = time.time()
     for i, inst in enumerate(keep):
@@ -267,6 +274,9 @@ def report(rows, args, wall):
     if POL is not None:
         print(f"policy: forcing left 1 action {POL.n_forced}x, left none "
               f"{POL.n_empty}x, charge clamp moved {POL.n_clamped}x")
+        if POL.spread_room:
+            print(f"spread room: actions removed {POL.n_spread_dropped}x, "
+                  f"charges shortened {POL.n_spread_cut}x")
 
 
 if __name__ == "__main__":

@@ -61,6 +61,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+ARM = "mlp"
+
 import joblib                                                      # noqa: E402
 from sklearn.neural_network import MLPClassifier, MLPRegressor     # noqa: E402
 from sklearn.preprocessing import StandardScaler                   # noqa: E402
@@ -98,6 +100,7 @@ def fit_grouped(net, Xtr, ytr, Xva, yva, epochs, patience, label,
 
 
 def main():
+    from fsets import FSET_IDS
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=None)
     ap.add_argument("--tag", default="nn")
@@ -109,6 +112,13 @@ def main():
     ap.add_argument("--epochs", type=int, default=400)
     ap.add_argument("--patience", type=int, default=25)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--scope", default="all", choices=["all", "SM"],
+                    help="route lengths the model may learn from: all, or SM "
+                         "(short + medium only, for the length-extrapolation "
+                         "test in run_length.py)")
+    ap.add_argument("--fset", default="F", choices=list(FSET_IDS),
+                    help="feature set, see fsets.py: C compact, D dedup, "
+                         "F full, L full + raw lookahead")
     ap.add_argument("--target", choices=["regret", "cost"], default="regret",
                     help="what the cost head regresses.  'cost' reproduces "
                          "gbt_train.py's `rawcost` ablation on this arm: the "
@@ -129,9 +139,18 @@ def main():
     hidden = tuple(int(x) for x in args.hidden.split(","))
     os.makedirs(MODELS, exist_ok=True)
     d = load(args.data)
-    X = d["X"].astype(np.float64)
-    names = [str(x) for x in d["feature_names"]]
-    tr, va, te = split_report(d)
+    # -- feature set: select columns BY NAME from the dataset's superset -----
+    from fsets import resolve
+    _all = [str(x) for x in d["feature_names"]]
+    # masks that need a specific column are taken from the SUPERSET, so a set
+    # that happens to omit that column (e.g. a compact set without `a_y`)
+    # still trains its charge head on the right rows
+    _is_y1_full = d["X"][:, _all.index("a_y")] > 0.5
+    names, n_state_sel = resolve(args.fset, _all, int(d["n_state"]), ARM)
+    X = d["X"][:, [_all.index(n) for n in names]]
+    print(f"[fset] {args.fset}: {len(names)} features ({n_state_sel} state)")
+    X = X.astype(np.float64)
+    tr, va, te = split_report(d, args.scope)
     clean = d["clean"].astype(bool)
 
     # -- scaling: fitted on TRAINING ROWS ONLY, shipped with the weights -----
@@ -168,7 +187,7 @@ def main():
         classes=np.array([0, 1]), score="logloss")
 
     # -- HEAD 3: charge duration, y=1 rows only ------------------------------
-    is_y1 = X[:, names.index("a_y")] > 0.5
+    is_y1 = _is_y1_full
     c_tr, c_va = tr & is_y1 & clean, va & is_y1 & clean
     tauc_m, tauc_ep, tauc_s, _ = fit_grouped(
         net("reg"), Xs[c_tr], d["tauc"][c_tr], Xs[c_va], d["tauc"][c_va],
@@ -189,7 +208,7 @@ def main():
                 os.path.join(MODELS, f"{tag}_nn.joblib"))
     with open(os.path.join(MODELS, f"{tag}_meta.json"), "w") as fh:
         json.dump(dict(tag=tag, kind="nn", args=vars(args), features=names,
-                       n_state=int(d["n_state"]),
+                       n_state=n_state_sel, fset=args.fset,
                        target=args.target,
                        target_transform=args.target_transform,
                        epochs=dict(cost=cost_ep, feas=feas_ep, tauc=tauc_ep),

@@ -1,52 +1,59 @@
-# ML — a solver-free policy for the discrete-event simulator
+# ML — solver-free policies for the discrete-event simulator
 
-**Results: [RESULTS.md](RESULTS.md)** · **Method: [METHOD.md](METHOD.md)** ·
+**Results: [RESULTS.md](RESULTS.md)** (generated) · **Method: [METHOD.md](METHOD.md)** ·
+**Theory and the MDP: [THEORY.md](THEORY.md)** ·
 figures in `ML/figures/`.
 
-Held-out test batch (seeds 22–25, 125 routes), gap to the hindsight oracle —
-the manuscript's own metric:
+Learned stand-ins for the look-ahead MILP (`LA_MIPTAIL`): each one makes the
+per-stop decision — charge or not, break or rest, how long to charge — in
+milliseconds instead of ~70 s, inside the existing simulator, and is compared
+with Greedy, the LA, 2SP, RO and the hindsight oracle on the manuscript's own
+metric. Trained on the base case only (3 route lengths × 3 customer counts ×
+4 window types × 25 seeds; cv 0.15, H 24 h, 500 kWh, 350 kW).
 
-| policy | gap to oracle | infeasible | TW misses |
-|---|---:|---:|---:|
-| **Trees** (5 training seeds) | **+2.10 %** | 0 | 113 ± 6 |
-| LA — the teacher | +2.14 % | 0 | 57 |
-| **Classifier** (3 seeds) | +2.21 % | 3 | 117 ± 6 |
-| MLP, 2026-08 as built | +2.23 % | 2 | 123 |
-| **MLP** (3 seeds) | +2.54 % | 6 | 107 ± 6 |
-| Greedy | +4.90 % | 5 | 182 |
-| 2SP | +2.10 % | **19** | — |
-| RO | +32.4 % | 0 | — |
+## Headline — base case, held-out test batch (seeds 22–25, 125 routes)
 
-Against the teacher, across training seeds: Trees **−0.04 ± 0.07 %**,
-Classifier **+0.09 ± 0.09 %**, MLP **+0.32 ± 0.05 %**. Trees and Classifier
-overlap within one standard deviation and are indistinguishable; the MLP is
-separably behind both. Every arm is inside the **0.35 %** practical floor (the
-look-ahead's own run-to-run spread), and every arm beats Greedy by ~2.3–2.5 pp
-— at **milliseconds** per decision against the teacher's ~70 s.
+Gap to the hindsight oracle; each learned arm at its best feature set, median
+training seed; the last column is the spread over 3 training seeds.
 
-**The design choice that matters is centring the target.** Regressing the
-teacher's raw horizon objective instead of the per-decision regret costs the
-trees +4.2 pp (+2.10 → +6.27 %) and the MLP **+42.9 pp** (+2.54 → +45.5 %).
-Weighting rare actions hurts on both arms.
+| policy | features | gap to oracle | infeasible | vs LA, over training seeds |
+|---|---|---:|---:|---:|
+| 2SP | — | +2.10 % | 19 / 123 | — |
+| **Trees** | F95 | **+2.10 %** | 0 / 125 | −0.04 ± 0.02 % |
+| **Classifier** | F77 | +2.13 % | 3 / 125 | −0.12 ± 0.02 % |
+| LA — the teacher | — | +2.14 % | 0 / 125 | — |
+| MLP 2026-08, as built | O143 | +2.23 % | 2 / 108 | one model |
+| **MLP** | D77 | +2.27 % | 4 / 125 | +0.09 ± 0.12 % |
+| Greedy | — | +4.90 % | 5 / 125 | — |
+| RO | — | +32.4 % | 0 / 125 | — |
 
-**The open weakness is time windows**: every arm misses ~107–117 of 737
-customer visits against the teacher's 57, flat across seeds. Adding explicit
-window features did not move it — see [METHOD.md](METHOD.md).
+* **Every arm reaches the teacher**: all within the 0.35 % practical floor
+  (the LA's own run-to-run spread), ~2.4 pp ahead of Greedy, ~10⁴× faster.
+* **Centring the target is the choice that matters**: regressing the raw
+  horizon cost instead of the per-decision regret costs the trees ~3.5 pp and
+  the MLP ~43 pp.
+* **Generalisation**: trees trained on short+medium routes only are as fast on
+  long routes as trees trained on everything; the classifier and the MLP
+  transfer less well. Most runs that became infeasible on long routes and
+  shifted physics hit one hole in the safety layer, which
+  `policy_core.spread_room` closes; with it and a 0.99 drive guard, the only
+  failures left in any experiment are 8 ferry crossings — see METHOD.md §6.
+* **Open weakness: time windows** — 102–146 misses against the teacher's 57.
 
-A learned stand-in for the look-ahead MILP (`LA_MIPTAIL`), compared
-against GREEDY, LA and ORACLE inside the existing simulator. Base case only
-(3 route x 3 customer x 4 window x 25 seeds, cv 0.15, H 24 h, 500 kWh,
-350 kW).
+## Scope and where things go
 
-Everything this project writes lives under `ML/`. Nothing is written into
-`solutions/`, `logs/` or `figures/`: the reporting pipeline discovers runs by
-globbing `solutions/<bucket>/` by method name, so a stray student run in the
-main tree would silently enter the manuscript's tables.
+Everything this project writes lives under `ML/`; `src/` is read-only. Nothing
+is written into `solutions/`, `logs/` or `figures/`: the reporting pipeline
+discovers runs by globbing `solutions/<bucket>/` by method name, so a stray
+student run in the main tree would silently enter the manuscript's tables.
 
 ## The formulation
 
-Not "classify the teacher's action". Instead: predict what each action would
-**cost**, then take an argmin over the legally enumerated actions.
+Predict what each legal action would **cost** (its regret against the best
+action, in hours), then take the argmin — rather than classifying the
+teacher's choice. Legality, forcing and the charge clamp are **not learned**:
+they come from `enumerate_actions`, `supervisor.compute_flags` /
+`action_passes`, and the PWL charging curve. Details and theory: METHOD.md §2.
 
 ```
 A  = enumerate_actions(stop, state, full_data)     # the simulator's own rules
@@ -56,203 +63,93 @@ a* = argmin score
 tauc* = clip(tauc(s,a*), reach-next-CS, charge-to-full)
 ```
 
-Three measured reasons, all from the base-case data:
-
-| observation | consequence |
-|---|---|
-| 88.8% of chosen actions are `y0_go` | a classifier's loss is dominated by a class nobody needs help with |
-| error costs span two orders of magnitude (spurious daily rest 9–11 h vs a b15/b45 mix-up at minutes) | cross-entropy cannot see that; regression on cost is exactly that scale |
-| the teacher logs **every** enumerated action's cost, not just the winner | 411k labelled rows instead of 73k, and rare classes (`y1_r1`, 0.11%) get gradient wherever they were *scored* |
-
-Legality, forcing and the charge clamp are **not learned** — they come from
-`enumerate_actions`, `supervisor.compute_flags` / `action_passes`, and the PWL
-charging curve.
-
-## Pipeline
-
-```bash
-python ML/code/extract.py                     # logs + solutions -> ML/data/dataset.npz
-
-# --- tree arm ---
-python ML/code/gbt_train.py --tag base        # three LightGBM boosters
-python ML/code/evaluate.py --kind gbt --tag base --split val
-
-# --- network arm ---
-python ML/code/nn_train.py --tag nn           # three sklearn MLPs + scaler
-python ML/code/evaluate.py --kind nn --tag nn --split val
-
-# --- head to head ---
-python ML/code/compare_arms.py                # -> RESULTS_ARMS.md + fig4
-```
-
-## Three arms, one experiment
-
-There are **three students**, all solving the *same* problem on the *same* 830
-instances with the *same* 91 features, splits, legality rules and decision rule
-(`policy_core.py`). Only the learning changes, so differences are attributable:
+## Three arms, one decision rule
 
 | arm | what it learns | rows |
 |---|---|---|
-| `gbt_*` | cost of **every** enumerated action (boosted trees) | 411,118 (state, action) |
-| `nn_*` | cost of **every** enumerated action (sklearn MLP) | 411,118 (state, action) |
-| `clf_*` | **which** action the teacher chose (sklearn MLP classifier) | 72,595 decisions |
+| Trees `gbt_*` | cost of every enumerated action (LightGBM) | 411,118 (state, action) |
+| MLP `mlp_*` | cost of every enumerated action (sklearn MLP, `log1p` target) | 411,118 (state, action) |
+| Classifier `clf_*` | which action the teacher chose (sklearn MLP classifier) | 72,595 decisions |
 
-The `clf` arm reimplements the framing of the deleted 2026-08 tree, which
-reported far better numbers than this project's MLP. Restoring that code
-verbatim would not have been comparable — it differed in features, instance
-set, splits and decision code all at once — so the *framing* is reproduced
-here instead, with everything else held fixed.
+The classifier is the framing of the deleted 2026-08 model, reproduced with
+everything else held fixed; the 2026-08 model itself is shown as it was built
+(`legacy/`, 143 inputs, its own instances and rollout — not a controlled
+comparison).
 
-The file layout makes which is which unambiguous: `gbt_*` is trees, `nn_*` is
-the regression network, `clf_*` is the classifier network, everything else is
-shared.
+**Names** say what a model is: `<arm>_<SET><n>_<config>[_SM][_s<seed>]` —
+`n` is the number of inputs it consumes, `_SM` means trained on short+medium
+routes only, `s<seed>` is the training seed. E.g. `gbt_F95_base_s1`,
+`clf_R70_base_SM_s2`. Feature sets (C, D, F, L, R): METHOD.md §3, `fsets.py`.
 
-| file | arm | role |
-|---|---|---|
-| `code/parse_logs.py` | shared | recovers per-action cost vectors from the LA logs |
-| `code/features.py` | shared | the ONE state/action description, used by training and by driving |
-| `code/extract.py` | shared | joins labels to states, runs the four validation gates |
-| `code/dataset.py` | shared | loading, splits, weighting, offline metrics |
-| `code/policy_core.py` | shared | **the decision rule and the simulator loop** |
-| `code/evaluate.py` | shared | closed-loop comparison (`--kind gbt\|nn`) |
-| `code/stats.py`, `code/figures.py`, `code/report.py` | shared | significance, figures, write-up |
-| `code/gbt_train.py` | **trees** | three LightGBM boosters |
-| `code/gbt_policy.py` | **trees** | loads the boosters, supplies predictions |
-| `code/ablations.py` | **trees** | the pre-registered grid |
-| `code/nn_train.py` | **MLP regression** | three sklearn MLPs + a fitted scaler |
-| `code/nn_policy.py` | **MLP regression** | loads the MLPs, supplies predictions |
-| `code/nn_ablations.py` | **MLP regression** | the grid mirroring the tree arm's |
-| `code/clf_train.py` | **MLP classifier** | 12-way action classifier + tauc head |
-| `code/clf_policy.py` | **MLP classifier** | returns `-log P(a)` into the shared argmin |
-| `code/paper_link.py` | shared | the manuscript's gap-to-oracle, exact definition |
-| `code/fig_gap.py`, `code/ml_style.py` | shared | figures in the paper's own style |
+**Variants** of a policy at evaluation time are named in the result files:
+`g95` = as trained (drive guard at the 0.95 quantile), `g95sr` = + the
+spread-room check, `g99sr` = + the check and a 0.99 guard.
 
-`policy_core.py` is the important one: it owns `enumerate_actions` → legality
-filter → forcing rules → `argmin` → charge clamp → `BEHDV.advance`. Each arm
-implements only two methods, `_predict(rows)` and `_predict_tauc(row)`. That is
-the entire difference between them in the deployed policy.
+## Files
 
-### What actually differs
-
-| | `gbt_*` | `nn_*` |
-|---|---|---|
-| model | LightGBM, 3 boosters | sklearn MLP, 3 nets (64, 64) |
-| feature scaling | **none needed** — trees are invariant to monotone transforms | **required** — a `StandardScaler` fitted on train rows ships inside the checkpoint |
-| sample weighting | `margin/(margin+2·SEM)` | not supported by sklearn's MLP (and shown inert, see below) |
-| early stopping | LightGBM, on grouped val | hand-rolled `partial_fit` loop on grouped val |
-| checkpoint | `<tag>_{cost,feas,tauc}.txt` | `<tag>_nn.joblib` |
-
-The neural arm is deliberately the **simplest network that could work**: three
-plain MLPs, no shared trunk, no listwise loss. `torch` is available here, and a
-shared-trunk network with a listwise loss over the action set is the version
-with a real structural advantage over trees — but that is not the simplest
-thing that could work, so it is not what `nn_train.py` is.
-
-One trap the neural arm must avoid and the tree arm need not: sklearn's
-`early_stopping=True` holds out a **random fraction of rows**. Rows within a
-route are a Markov chain, so that would put ~88 near-duplicates of every
-validation row into training, making the internal score wildly optimistic.
-`nn_train.py` therefore sets `early_stopping=False` and scores on the real
-seed-held-out routes after every epoch.
-
-## Two traps found in the stored data
-
-**1. The stored runs cannot be replayed naively.** `BEHDV.advance` takes the
-executed break/rest from the nominal MIP's flags
-(`milp_sol["sol"][0]["b45"|"b15"|"b30"|"rho1"|"rho2"]`), but `vehicle.actions`
-stores the action the look-ahead *selected*. The two disagree whenever the
-nominal re-solve placed the break elsewhere, and the executed flags are never
-written to disk. A replay therefore drifts silently — measured at `phi` off by
-one and `cd` off by up to 2.7 h on the first three routes tried. So states are
-rebuilt from `sim_trajectory` instead.
-
-**2. The shift spread `h` is not stored** — not in `sim_trajectory`, not in the
-log's state line — although it is a hard constraint (13 / 15 h). *(Not a new
-finding: the deleted 2026-08 ML tree hit this too and reconstructed `h` the
-same way — see `ML/code/extract_dataset.py` in git history. Recorded here
-because it is easy to miss and expensive to miss.)* It is exactly
-reconstructible, because BEHDV computes
-
-```
-o_dwell = td[k] - t_arr[k] - taur[k]
-h[k+1]  = (0 if rest at k else h[k] + o_dwell) + D_actual[k]
-```
-
-and `td_list`, `durations_list` and `D_actual_list` are all in the solution
-JSON.
-
-## Validation gates (run on every extraction)
-
-| gate | check |
+| file | role |
 |---|---|
-| G1 | the LOG's state line agrees with the SOLUTION's trajectory, at the precision each was printed with |
-| G2 | `t_arr[k+1] == td[k] + D_actual[k]` |
-| G3 | `t_arr[last] - T_START == duration_h` |
-| G4 | the reconstructed spread stays in [0, 15] h on runs recorded as feasible |
-
-G2/G3 are checked to 1e-3 h, not machine precision: the JSON rounds `td_list`
-and `D_actual_list`, worth ~5e-5 h on its own.
-
-Current status: **830/840 runs usable** (10 excluded as `run_infeasible`),
-**72,595 decisions**, **411,118 rows**, 91 features, 36 families, all gates
-green.
-
-## Splits
-
-By **seed within family**, never by row — the ~88 decisions of one route are a
-Markov chain and a row-level split leaks almost perfectly.
-
-| split | seeds | instances |
-|---|---|---|
-| train | 1–17 | 569 |
-| val | 18–21 | 136 |
-| test | 22–25 | 125 |
-
-The effective sample size is the ~569 independent *routes*, not the 284k rows.
-Model capacity is sized against that.
-
-## Sample weighting
-
-13.6% of decisions have a best-vs-second margin below twice the teacher's own
-scenario-sampling SEM (median SEM 2.08 min) — there, the teacher's preference
-is not distinguishable from which 25 travel-time draws it happened to get.
-Rows are weighted by `margin / (margin + 2*SEM)`, which spends capacity where
-the teacher was confident. That is a regulariser read off the data, not a
-tuned knob.
-
-**It did not pay off.** The `noweight` ablation matches `base` on duration
-(-0.16 % vs -0.20 %), so on its own the weighting is inert. It is kept in the
-selected configuration only because `base` + guard 0.95 reached 0 infeasible runs on
-validation where `noweight` + guard 0.95 did not — and at 0 vs 2 infeasible runs of 136
-that is suggestive, not established. Reported as a negative result rather
-than quietly dropped.
+| `code/parse_logs.py`, `code/extract.py` | recover per-action costs from the LA logs, join to states, run the validation gates → `data/dataset.npz` |
+| `code/features.py` | the ONE state/action description, used by training and by driving |
+| `code/fsets.py` | the feature-set registry (C, D, F, L, R) |
+| `code/dataset.py` | loading, splits, scopes (all / short+medium) |
+| `code/gbt_train.py`, `code/nn_train.py`, `code/clf_train.py` | the three trainers |
+| `code/gbt_policy.py`, `code/nn_policy.py`, `code/clf_policy.py` | load a model, supply predictions |
+| `code/policy_core.py` | **the decision rule and the simulator loop**, shared by every arm; `spread_room`; `candidates` (the k best actions) |
+| `code/evaluate.py` | closed-loop evaluation of one model on one split |
+| `code/rollout_policy.py` | rollout on top of any student: its k best actions each driven to the end of the route under sampled travel times |
+| `code/run_rollout.py` | the rollout policy on chosen routes, paired with the plain student, the LA and the oracle |
+| `code/configs.py`, `code/run_all.py` | the ablation registry and runner |
+| `code/run_ladder.py` | every arm × feature set × training seed |
+| `code/run_length.py` | trained on short+medium, tested on long routes |
+| `code/ood_eval.py` | base-case models on shifted physics and the use case |
+| `code/halt_state.py`, `code/diagnose_all.py` | replay infeasible runs; the cause of each |
+| `code/spread_compare.py` | the same models with and without the spread-room check |
+| `code/paper_link.py` | the manuscript's gap-to-oracle, exact definition |
+| `code/ml_style.py`, `code/fig_*.py` | figures in the manuscript's style |
+| `code/report.py` | writes RESULTS.md from the result stores |
+| `code/legacy_adapt.py`, `legacy/` | the 2026-08 model, restored as built |
+| `code/stats.py`, `code/figures.py` | older per-model statistics and figures |
 
 ## Reproducing
 
 ```bash
-python ML/code/extract.py                                    # ~45 s, runs the gates
-python ML/code/gbt_train.py --tag base                       # 3 heads
-python ML/code/evaluate.py --tag base --split val --guard-q 0.95
-python ML/code/ablations.py --split val                      # the grid
-python ML/code/evaluate.py --tag base --split test --guard-q 0.95   # ONCE
-python ML/code/stats.py --file eval_base_test.json
-python ML/code/figures.py test && python ML/code/report.py test
-python ML/code/compare_arms.py                                      # arms
+python ML/code/extract.py                                  # dataset + gates
+python ML/code/run_ladder.py --arms gbt,clf,mlp --fsets C,D,F,L --seeds 3
+python ML/code/run_all.py                                  # ablations
+python ML/code/run_length.py --arms gbt,clf,mlp --fsets F,R --seeds 3
+python ML/code/run_length.py --arms gbt,clf,mlp --fsets F,R --seeds 3 --spread-room
+python ML/code/run_length.py --arms gbt,clf,mlp --fsets F,R --seeds 3 --guard 0.99 --spread-room
+python ML/code/ood_eval.py            # and with --spread-room, --guard-q 0.99 --spread-room
+python ML/code/diagnose_all.py && python ML/code/spread_compare.py
+python ML/code/fig_gap.py && python ML/code/fig_ladder.py
+python ML/code/fig_length.py [--variant g95sr|g99sr] && python ML/code/fig_ood.py [--variant ...]
+python ML/code/report.py                                   # -> RESULTS.md
+python ML/code/run_rollout.py --set smoke --guard-q 0.99 --spread-room   # rollout, beyond the teacher
 ```
+
+Every runner skips work whose output already exists, so a rerun resumes.
+
+## Splits
+
+By **route seed within family**, never by row — the ~88 decisions of one route
+are a Markov chain and a row-level split leaks almost perfectly.
+
+| split | route seeds | routes | used for |
+|---|---|---:|---|
+| fit | 1–19 | 639 | fitting |
+| stop | 20–21 | 66 | early stopping only |
+| test | 22–25 | 125 | every reported number |
+
+The effective sample size is the ~639 independent routes, not the rows.
 
 ## Known limitations
 
-* **Time windows.** The student misses ~2x as many windows as the teacher
-  (122 vs 57 on test). Duration is what the cost head is trained on; window
-  compliance reaches it only through the small beta*delta term in the
-  teacher's objective. Weighting windows explicitly in the target is the
-  obvious next step.
-* **Feasibility does not fully generalise.** The selected guard gave 0 halts
-  on validation and 3 on test, all shift-spread. The guard reduces infeasibility; it
-  does not remove it.
-* **Latency is an upper bound**, dominated by Python feature construction and
-  three separate LightGBM `predict` calls, and it was measured on a loaded
-  machine. Read the speed-up as order 10^4.
-* **Base case only.** No sensitivity, diesel, battery or charger-power axes,
-  and no LA-LP baseline (zero `LPTAIL` runs exist on disk; it would have to be
-  re-run).
+* **Time windows** — 102–146 misses against the teacher's 57 on every arm.
+* **Ferries** — a forced crossing needs a rest before boarding; the one-step
+  checks cannot see it coming and the base case has no ferries to learn from.
+* **The spread-room check is opt-in**, so all earlier numbers stay valid;
+  RESULTS.md shows each result with and without it.
+* **Latency** is an upper bound measured on a loaded machine; read it as an
+  order of magnitude.
+* **No LA-LP baseline** — zero `LPTAIL` runs exist on disk.

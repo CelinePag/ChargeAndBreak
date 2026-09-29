@@ -97,17 +97,21 @@ def main():
             if os.path.exists(ck):
                 print(f"   (checkpoint exists, reusing {c.tag})", flush=True)
             else:
-                run([PY, os.path.join(HERE, TRAINER[c.arm]), "--tag", c.tag]
-                    + list(c.train), f"train {c.tag}")
+                run([PY, os.path.join(HERE, TRAINER[c.arm]), "--tag", c.tag,
+                     "--fset", c.fset] + list(c.train), f"train {c.tag}")
             trained.add(c.tag)
 
         cmd = [PY, os.path.join(HERE, "evaluate.py"), "--kind", KIND[c.arm],
                "--tag", c.tag, "--split", "test", "--out", c.eval_name]
         if c.guard is not None:
             cmd += ["--guard-q", str(c.guard)]
-        txt = run(cmd, f"evaluate {c.tag} -> {c.eval_name}")
+        if not os.path.exists(os.path.join(RESULTS, c.eval_name)):
+            run(cmd, f"evaluate {c.tag} -> {c.eval_name}")
+        else:
+            print(f"   (evaluation exists, reusing {c.eval_name})", flush=True)
 
-        r = parse(txt)
+        from run_ladder import summarise
+        r = summarise(c.eval_name)
         r.update(arm=c.arm, name=c.name, tag=c.tag, guard=c.guard,
                  desc=c.desc, display=c.display, eval_file=c.eval_name,
                  seconds=round(time.time() - t0, 1))
@@ -130,7 +134,8 @@ def main():
           f"{'penalis':>8s} {'infs':>5s} {'TW':>5s} {'ms':>6s}  description")
     print("-" * 100)
     for r in rows:
-        tw = r.get("tw", (0, 0))[0]
+        tw = r.get("tw", 0)
+        tw = tw[0] if isinstance(tw, (list, tuple)) else tw   # older summaries: a pair
         g = "nominal" if r["guard"] is None else f"{r['guard']}"
         print(f"{r['tag']:18s} {g:>7s} {r.get('med_la', float('nan')):+8.2f} "
               f"{r.get('med_greedy', float('nan')):+8.2f} "

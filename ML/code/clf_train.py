@@ -66,10 +66,11 @@ import joblib                                                      # noqa: E402
 from sklearn.neural_network import MLPClassifier, MLPRegressor     # noqa: E402
 from sklearn.preprocessing import StandardScaler                   # noqa: E402
 
-from dataset import MODELS, decision_id, load, split_masks         # noqa: E402
+from dataset import (FIT_SEEDS, MODELS, STOP_SEEDS, TEST_SEEDS,
+                     decision_id, load, split_masks)         # noqa: E402
 
 
-def decision_table(d):
+def decision_table(d, cols=None):
     """One row per DECISION: state features only, label = the chosen action.
 
     The cost-scoring arms use one row per (state, action); a classifier needs
@@ -77,7 +78,8 @@ def decision_table(d):
     """
     chosen = d["chosen"].astype(bool)
     n_state = int(d["n_state"])
-    X = d["X"][chosen][:, :n_state].astype(np.float64)
+    cols = list(range(n_state)) if cols is None else cols
+    X = d["X"][chosen][:, cols].astype(np.float64)
     y = d["action_ix"][chosen].astype(int)
     seed = d["seed"][chosen]
     inst = d["instance_ix"][chosen]
@@ -119,6 +121,7 @@ def fit_grouped(net, Xtr, ytr, Xva, yva, epochs, patience, label,
 
 
 def main():
+    from fsets import FSET_IDS
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=None)
     ap.add_argument("--tag", default="clf")
@@ -129,6 +132,13 @@ def main():
     ap.add_argument("--epochs", type=int, default=400)
     ap.add_argument("--patience", type=int, default=25)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--scope", default="all", choices=["all", "SM"],
+                    help="route lengths the model may learn from: all, or SM "
+                         "(short + medium only, for the length-extrapolation "
+                         "test in run_length.py)")
+    ap.add_argument("--fset", default="F", choices=list(FSET_IDS),
+                    help="feature set, see fsets.py: C compact, D dedup, "
+                         "F full, L full + raw lookahead")
     ap.add_argument("--class-weight", choices=["none", "sqrt", "balanced"],
                     default="none",
                     help="the deleted project's biggest finding was that "
@@ -145,10 +155,24 @@ def main():
     n_state = int(d["n_state"])
     vocab = [str(x) for x in d["action_vocab"]]
 
-    X, y, seed, inst, tauc = decision_table(d)
-    tr = np.isin(seed, list(range(1, 18)))
-    va = np.isin(seed, list(range(18, 22)))
-    te = np.isin(seed, list(range(22, 26)))
+    from fsets import resolve
+    _all = [str(x) for x in d["feature_names"]]
+    names, n_state = resolve(args.fset, _all, int(d["n_state"]), "clf")
+    X, y, seed, inst, tauc = decision_table(d, [_all.index(n) for n in names])
+    print(f"[fset] {args.fset}: {len(names)} state features")
+    # The SAME split as every other arm, from dataset.py.  This file used to
+    # hardcode seeds 1-17 / 18-21 and was missed when the protocol moved to
+    # fit 1-19 / stop 20-21, so every classifier before this fix trained on
+    # 569 routes instead of 639.  Importing the constants makes that drift
+    # impossible.
+    from dataset import SCOPES
+    _inames = [str(x) for x in d["instances"]]
+    _rc = np.array([_inames[i][1:].split("C")[0] for i in inst])
+    inscope = np.isin(_rc, SCOPES[args.scope])
+    print(f"[scope] {args.scope}: training on {', '.join(SCOPES[args.scope])} routes")
+    tr = np.isin(seed, list(FIT_SEEDS)) & inscope
+    va = np.isin(seed, list(STOP_SEEDS)) & inscope
+    te = np.isin(seed, list(TEST_SEEDS))
     print(f"[data] {len(X)} decisions, {n_state} state features")
     for nm, m in (("train", tr), ("val", va), ("test", te)):
         print(f"  {nm:5s} {m.sum():6d} decisions  "
@@ -177,11 +201,17 @@ def main():
         print(f"\n[weight] resampled with {args.class_weight} weights")
 
     t0 = time.time()
+    # warm_start stays OFF: training is by partial_fit, which always continues
+    # from the current weights, so warm_start changes nothing there except one
+    # check -- that every call contains EVERY class.  Short+medium routes
+    # (--scope SM) contain no y0_b45 or y0_r1 decisions at all, and that check
+    # would refuse them; without it, sklearn only requires y's classes to be a
+    # subset of the 12 declared on the first call.
     clf = MLPClassifier(hidden_layer_sizes=hidden, activation="relu",
                         solver="adam", alpha=args.alpha,
                         learning_rate_init=args.lr, batch_size=args.batch,
                         random_state=args.seed, early_stopping=False,
-                        max_iter=1, warm_start=True)
+                        max_iter=1, warm_start=False)
     clf, ep_c, s_c = fit_grouped(clf, Xs[idx], y[idx], Xs[va], y[va],
                                  args.epochs, args.patience, "class",
                                  classes=np.arange(len(vocab)),
@@ -214,6 +244,7 @@ def main():
     with open(os.path.join(MODELS, f"{args.tag}_meta.json"), "w") as fh:
         json.dump(dict(tag=args.tag, kind="clf", args=vars(args),
                        features=names, n_state=n_state, vocab=vocab,
+                       fset=args.fset,
                        epochs=dict(clf=ep_c, tauc=ep_t)), fh, indent=1)
     print(f"\n[saved] {MODELS}/{args.tag}_clf.joblib  ({time.time()-t0:.0f}s)")
 

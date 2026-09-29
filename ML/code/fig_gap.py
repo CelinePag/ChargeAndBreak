@@ -145,32 +145,70 @@ def draw(series, out, title, subtitle):
     print(f"   wrote {out}")
 
 
+def best_per_arm():
+    """Each arm's best feature set on the ladder, and that set's median seed.
+
+    Best = lowest mean over training seeds of the median gap vs the teacher.
+    The MEDIAN seed of that set is plotted, not its best seed, so no arm is
+    flattered by a lucky initialisation.
+    """
+    p = os.path.join(RESULTS, "ladder_test.json")
+    with open(p) as fh:
+        ladder = json.load(fh)
+    out = []
+    import glob, re
+    from run_ladder import summarise
+    for arm, lab in (("gbt", "Trees"), ("clf", "Classifier"), ("mlp", "MLP")):
+        cells = {}
+        for r in ladder:
+            if r["arm"] == arm:
+                cells.setdefault(r["fset_label"], []).append(r)
+        # The ladder records a cell only when it REACHES it, so an arm whose
+        # ladder is still running can have finished evaluations it has not
+        # recorded yet.  Read those directly (read-only -- never write to the
+        # ladder's own table while it is running).
+        for f in glob.glob(os.path.join(RESULTS, f"eval_{arm}_*_base_s*_g95_test.json")):
+            m = re.match(rf"eval_{arm}_([A-Z]\d+)_base_s(\d+)_g95_test\.json",
+                         os.path.basename(f))
+            if not m:
+                continue
+            fl = m.group(1)
+            if any(r["eval_file"] == os.path.basename(f) for r in cells.get(fl, [])):
+                continue
+            r = summarise(os.path.basename(f))
+            r.update(eval_file=os.path.basename(f), fset_label=fl)
+            cells.setdefault(fl, []).append(r)
+        if not cells:
+            continue
+        best = min(cells, key=lambda k: np.mean([r["med_la"] for r in cells[k]]))
+        seeds = sorted(cells[best], key=lambda r: r["med_la"])
+        pick = seeds[len(seeds) // 2]
+        out.append(dict(arm=arm, display=f"{lab} ({best})",
+                        eval_file=pick["eval_file"]))
+    return out
+
+
 def main():
     os.makedirs(FIGS, exist_ok=True)
-    p = os.path.join(RESULTS, "all_test.json")
-    if not os.path.exists(p):
-        # run_all.py writes the real table only at the end; a provisional one
-        # lets the figure be drawn from whatever has finished so far
-        p = os.path.join(RESULTS, "all_test_partial.json")
-    if not os.path.exists(p):
-        raise SystemExit("no all_test.json yet — run ML/code/run_all.py")
-    print(f"   (table: {os.path.basename(p)})")
-    with open(p) as fh:
-        rows = json.load(fh)
+    sys.path.insert(0, HERE)
+    from configs import CONFIGS, LEGACY
 
-    everything = collect(rows, with_baselines=True)
-    draw(everything, os.path.join(FIGS, "fig_gap_test.png"),
-         "Gap to the hindsight optimum — every method and configuration",
+    heads = best_per_arm()
+    if os.path.exists(os.path.join(RESULTS, LEGACY.eval_name)):
+        heads.append(dict(arm="legacy", display="MLP 2026-08 (O143)",
+                          eval_file=LEGACY.eval_name))
+    draw(collect(heads, with_baselines=True),
+         os.path.join(FIGS, "fig_gap_test.png"),
+         "Gap to the hindsight optimum — each arm at its best feature set",
          "held-out test batch (seeds 22-25, 125 routes); learned policies use "
-         "no solver at deployment")
+         "no solver at deployment; median training seed shown")
 
-    arms_only = [s for s in collect(rows, with_baselines=False)]
-    # keep LA as the reference line in the arm comparison
-    la = [s for s in everything if s[1] == "LA"]
-    draw(arms_only + la, os.path.join(FIGS, "fig_gap_arms.png"),
-         "Learned configurations, against the teacher",
-         "held-out test batch; every row is an independent model fitted on "
-         "seeds 1-19")
+    abl = [dict(arm=c.arm, display=f"{c.display} ({c.fset_label})",
+                eval_file=c.eval_name) for c in CONFIGS]
+    draw(collect(abl, with_baselines=False),
+         os.path.join(FIGS, "fig_ablations.png"),
+         "Ablations — each compared with its base on the same feature set",
+         "held-out test batch; single training seed per ablation")
 
 
 if __name__ == "__main__":

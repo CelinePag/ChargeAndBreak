@@ -37,6 +37,7 @@ from src.simulation.Simulation import find_horizon_end_stop
 
 N_CS_AHEAD = 3        # how many charging stations the lookahead describes
 N_CUST_AHEAD = 2      # how many customers the lookahead describes
+N_RAW_AHEAD = 20      # stops listed one by one in the raw `nx*` block
 
 # The complete, fixed action vocabulary: y in {0,1} x (nothing | break | rest).
 ACTION_VOCAB = [
@@ -302,6 +303,38 @@ def state_features(fd: dict, pre: Precomp, stop: int, state,
     f["cs_left"] = float(len(pre.cs_list) - pre.n_cs_after[stop])
     f["cust_left"] = float(len(pre.cust_list) - pre.n_cust_after[stop])
     f["route_frac_done"] = float(pre.cumD[stop] / max(pre.totD, 1e-9))
+
+    # -- H. RAW per-stop lookahead (the `L` feature set) -----------------------
+    # Everything above SUMMARISES the route ahead (next 3 chargers, next 2
+    # customers, horizon totals).  This block instead lists the next
+    # N_RAW_AHEAD stops one by one, six numbers each, so a model can pick out
+    # whatever pattern matters for itself.  The teacher's own window is a
+    # median of 41 stops.  Trees are good at finding the few relevant columns
+    # among many; a network is expected to prefer the summaries -- which is
+    # exactly what the feature-set ladder in `fsets.py` tests.  These columns
+    # are only USED by the `L` sets; every other set ignores them by name.
+    for j in range(1, N_RAW_AHEAD + 1):
+        s = stop + j
+        p = f"nx{j}_"
+        if s <= N:
+            leg = s - 1
+            eta = t + float(pre.cumD[s] - pre.cumD[stop])
+            whf = _get(fd.get("Whf", {}), s, None)
+            is_cu = s in pre.C
+            f[p + "D"] = float(pre.D[leg])
+            f[p + "E"] = float(pre.E[leg])
+            f[p + "cs"] = float(s in pre.K)
+            f[p + "cu"] = float(is_cu)
+            f[p + "q"] = float(_get(fd["Q"], s)) if s in pre.K else 0.0
+            f[p + "slack"] = (min(float(whf) - eta, 48.0)
+                              if (is_cu and whf is not None) else 48.0)
+        else:                                   # past the destination
+            f[p + "D"] = 0.0
+            f[p + "E"] = 0.0
+            f[p + "cs"] = 0.0
+            f[p + "cu"] = 0.0
+            f[p + "q"] = 0.0
+            f[p + "slack"] = 48.0
 
     return f, flags
 

@@ -51,7 +51,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import lightgbm as lgb                                            # noqa: E402
+import lightgbm as lgb
+
+ARM = "gbt"                                            # noqa: E402
 
 from dataset import (MODELS, argmin_policy_regret, decision_margins,
                      load, print_offline, sample_weights, split_report)
@@ -60,6 +62,7 @@ RESULTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results
 
 
 def main():
+    from fsets import FSET_IDS
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=None)
     ap.add_argument("--tag", default="gbt")
@@ -82,12 +85,19 @@ def main():
     ap.add_argument("--target", choices=["regret", "cost"], default="regret",
                     help="'cost' reproduces the un-centered baseline (ablation)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--scope", default="all", choices=["all", "SM"],
+                    help="route lengths the model may learn from: all, or SM "
+                         "(short + medium only, for the length-extrapolation "
+                         "test in run_length.py)")
+    ap.add_argument("--fset", default="F", choices=list(FSET_IDS),
+                    help="feature set, see fsets.py: C compact, D dedup, "
+                         "F full, L full + raw lookahead")
     ap.add_argument("--refit-val", action="store_true",
                     help="train on seeds 1-21 (train + val) instead of 1-17. "
                          "The standard protocol is: SELECT on val, then REFIT "
                          "the chosen configuration on train+val, then measure "
                          "on test once.  Holding val out permanently wastes "
-                         "136 routes (569 -> 705, +24% of the independent "
+                         "136 routes (569 -> 705, +24%% of the independent "
                          "sample) for no reason once nothing is left to "
                          "choose.  Early stopping then falls back to the "
                          "round count the selection run settled on, since "
@@ -97,9 +107,17 @@ def main():
     os.makedirs(MODELS, exist_ok=True)
     os.makedirs(RESULTS, exist_ok=True)
     d = load(args.data)
-    X = d["X"]
-    names = [str(x) for x in d["feature_names"]]
-    tr, va, te = split_report(d)
+    # -- feature set: select columns BY NAME from the dataset's superset -----
+    from fsets import resolve
+    _all = [str(x) for x in d["feature_names"]]
+    # masks that need a specific column are taken from the SUPERSET, so a set
+    # that happens to omit that column (e.g. a compact set without `a_y`)
+    # still trains its charge head on the right rows
+    _is_y1_full = d["X"][:, _all.index("a_y")] > 0.5
+    names, n_state_sel = resolve(args.fset, _all, int(d["n_state"]), ARM)
+    X = d["X"][:, [_all.index(n) for n in names]]
+    print(f"[fset] {args.fset}: {len(names)} features ({n_state_sel} state)")
+    tr, va, te = split_report(d, args.scope)
     clean = d["clean"].astype(bool)
     if args.refit_val:
         # No held-out set remains, so early stopping has nothing to watch:
@@ -152,7 +170,7 @@ def main():
 
     # ── HEAD 3: charge duration ──────────────────────────────────────────────
     ychg = d["tauc"]
-    is_y1 = X[:, names.index("a_y")] > 0.5
+    is_y1 = _is_y1_full
     c_tr, c_va = tr & is_y1 & clean, va & is_y1 & clean
     cds_tr = lgb.Dataset(X[c_tr], label=ychg[c_tr], feature_name=names,
                          free_raw_data=False)
@@ -177,7 +195,7 @@ def main():
     feas_m.save_model(os.path.join(MODELS, f"{tag}_feas.txt"))
     tauc_m.save_model(os.path.join(MODELS, f"{tag}_tauc.txt"))
     meta = dict(tag=tag, args=vars(args), features=names,
-                n_state=int(d["n_state"]),
+                n_state=n_state_sel, fset=args.fset,
                 trees=dict(cost=cost_m.best_iteration,
                            feas=feas_m.best_iteration,
                            tauc=tauc_m.best_iteration))

@@ -1,0 +1,49 @@
+
+=== mlp_F95_base_SM_s0 (MLP, set F95, trained on short+medium, training seed 0) ===
+   $ evaluate mlp_F95_base_SM_s0 on test
+   $ evaluate mlp_F95_base_SM_s0 on long_all
+   -> in-dist +0.81%  long(30) +0.51%  long(239) +0.62%  infeasible on long(239) 6  (350.5s)
+
+=== mlp_F95_base_SM_s1 (MLP, set F95, trained on short+medium, training seed 1) ===
+   $ evaluate mlp_F95_base_SM_s1 on test
+   $ evaluate mlp_F95_base_SM_s1 on long_all
+   -> in-dist +0.43%  long(30) +1.45%  long(239) +1.18%  infeasible on long(239) 7  (332.6s)
+
+=== mlp_F95_base_SM_s2 (MLP, set F95, trained on short+medium, training seed 2) ===
+   $ evaluate mlp_F95_base_SM_s2 on test
+   $ evaluate mlp_F95_base_SM_s2 on long_all
+   -> in-dist +0.68%  long(30) +0.60%  long(239) +0.60%  infeasible on long(239) 16  (327.0s)
+
+=== mlp_R88_base_SM_s0 (MLP, set R88, trained on short+medium, training seed 0) ===
+   $ evaluate mlp_R88_base_SM_s0 on test
+   $ evaluate mlp_R88_base_SM_s0 on long_all
+   -> in-dist +0.17%  long(30) +0.15%  long(239) +0.19%  infeasible on long(239) 13  (328.4s)
+
+=== mlp_R88_base_SM_s1 (MLP, set R88, trained on short+medium, training seed 1) ===
+   $ evaluate mlp_R88_base_SM_s1 on test
+   $ evaluate mlp_R88_base_SM_s1 on long_all
+   -> in-dist +0.97%  long(30) +0.98%  long(239) +1.38%  infeasible on long(239) 17  (67960.9s)
+
+=== mlp_R88_base_SM_s2 (MLP, set R88, trained on short+medium, training seed 2) ===
+   $ evaluate mlp_R88_base_SM_s2 on test
+   $ evaluate mlp_R88_base_SM_s2 on long_all
+   -> in-dist +0.48%  long(30) +1.03%  long(239) +1.05%  infeasible on long(239) 10  (395.2s)
+
+====================================================================================================
+ROUTE-LENGTH EXTRAPOLATION — median vs teacher (%), mean ± sd over training seeds; [infeasible]
+====================================================================================================
+arm         trained on   set         short+medium      long, 30 paired        long, all 239
+----------------------------------------------------------------------------------------------------
+Trees       all lengths  F95     +0.14 ± 0.03 [ 0.0]   -0.27 ± 0.05 [ 0.3]                    —
+Trees       short+medium F95     +0.47 ± 0.10 [ 0.0]   -0.28 ± 0.02 [ 0.3]   -0.16 ± 0.04 [ 6.3]
+Trees       short+medium R88     +0.29 ± 0.13 [ 0.0]   -0.13 ± 0.20 [ 0.7]   -0.21 ± 0.04 [ 6.7]
+
+Classifier  all lengths  F77     +0.12 ± 0.12 [ 0.0]   -0.38 ± 0.12 [ 1.0]                    —
+Classifier  short+medium F77     +0.60 ± 0.11 [ 0.3]   +0.27 ± 0.27 [ 1.0]   +0.39 ± 0.31 [ 7.0]
+Classifier  short+medium R70     +0.80 ± 0.16 [ 0.3]   +0.33 ± 0.12 [ 0.3]   +0.20 ± 0.14 [ 5.0]
+
+MLP         all lengths  F95     +0.46 ± 0.05 [ 0.3]   +0.00 ± 0.05 [ 1.0]                    —
+MLP         short+medium F95     +0.64 ± 0.15 [ 0.7]   +0.85 ± 0.42 [ 1.3]   +0.80 ± 0.27 [ 9.7]
+MLP         short+medium R88     +0.54 ± 0.33 [ 0.7]   +0.72 ± 0.40 [ 2.0]   +0.88 ± 0.50 [13.3]
+
+saved: C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\length_test_g95sr.json

@@ -57,11 +57,31 @@ def decision_id(d):
     return d["instance_ix"].astype(np.int64) * 100_000 + d["stop"].astype(np.int64)
 
 
-def split_masks(d):
-    """(fit, stop, test) row masks."""
+def route_class(d):
+    """Per-ROW route length class: 'short' | 'medium' | 'long'."""
+    fams = [str(x) for x in d["families"]]
+    cls = np.array([f[1:].split("C")[0] for f in fams])
+    return cls[d["family_ix"]]
+
+
+# Training SCOPE: which route lengths the model may learn from.
+#   all  every length (the default)
+#   SM   short + medium only -- long routes are never seen, so any long route
+#        is a genuine extrapolation test (see run_length.py).  Models trained
+#        this way carry `_SM` before the seed in their name.
+SCOPES = {"all": ("short", "medium", "long"), "SM": ("short", "medium")}
+
+
+def split_masks(d, scope="all"):
+    """(fit, stop, test) row masks, restricted to the training scope.
+
+    The TEST mask is never restricted: which routes a model is evaluated on
+    is the evaluator's choice, not the trainer's.
+    """
     s = d["seed"]
-    return (np.isin(s, list(FIT_SEEDS)),
-            np.isin(s, list(STOP_SEEDS)),
+    inscope = np.isin(route_class(d), SCOPES[scope])
+    return (np.isin(s, list(FIT_SEEDS)) & inscope,
+            np.isin(s, list(STOP_SEEDS)) & inscope,
             np.isin(s, list(TEST_SEEDS)))
 
 
@@ -150,8 +170,9 @@ def print_offline(d, pred, feas, masks, names=("fit", "stop", "test")):
         print(f"{nm:6s} {r*60:9.2f} min {t1*100:7.1f}% {n:10d}   {rg*60:8.2f} min")
 
 
-def split_report(d):
-    masks = split_masks(d)
+def split_report(d, scope="all"):
+    masks = split_masks(d, scope)
+    print(f"[scope] {scope}: training on {', '.join(SCOPES[scope])} routes")
     print(f"[data] rows {len(d['X'])}  features {d['X'].shape[1]}")
     for nm, m in zip(("fit", "stop", "test"), masks):
         print(f"  {nm:5s} rows {m.sum():7d}  instances "

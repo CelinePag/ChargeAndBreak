@@ -4,10 +4,17 @@ configs.py — THE registry: every model, named the same way, in one place
 Naming got out of hand (`base`, `gbt_v1`, `noweight`, `nn`, `nn_log1p`, ...)
 and none of it said which ARM a tag belonged to.  Every model is now named
 
-    <arm>_<config>
+    <arm>_<SET><n>_<config>
 
-with the arm always first, so a tag is self-describing wherever it appears --
-in `ML/models/`, in `ML/results/`, in a figure legend or in a table row.
+with the arm first and the feature set second -- `n` is the number of inputs
+the model actually consumes (see fsets.py) -- so a tag is self-describing
+wherever it appears: `ML/models/`, `ML/results/`, a legend or a table row.
+
+This registry holds the ABLATIONS.  The headline configurations, run for every
+arm across every feature set and several training seeds, are in
+`run_ladder.py`.  An ablation is only meaningful against a base on the SAME
+feature set, which the names now make checkable: `gbt_F91_rawcost` is compared
+with `gbt_F91_base`, never with a 95-feature model.
 
     gbt_*      boosted trees, cost-scoring       (LightGBM)
     mlp_*      neural net, cost-scoring          (sklearn MLPRegressor)
@@ -35,10 +42,12 @@ class Config:
     train: tuple = ()            # flags passed to <arm>_train.py
     guard: float | None = 0.95   # deployment guard quantile; None = nominal
     label: str = ""              # display label; defaults to a readable form
+    fset: str = "F"              # feature-set id passed to the trainer
+    fset_label: str = "F95"      # its name fragment: letter + inputs consumed
 
     @property
     def tag(self) -> str:
-        return f"{self.arm}_{self.name}"
+        return f"{self.arm}_{self.fset_label}_{self.name}"
 
     @property
     def eval_name(self) -> str:
@@ -58,45 +67,45 @@ ARM_LABEL = {"gbt": "Trees", "mlp": "MLP (regression)",
 # share a trained model and differ only there; the runner trains once.
 CONFIGS = [
     # -- boosted trees, cost-scoring -----------------------------------------
-    Config("gbt", "base", "regret target, margin weights, depth 6",
+    Config("gbt", "base", fset="F91", fset_label="F91", desc="regret target, margin weights, depth 6",
            train=(), guard=0.95, label="Trees"),
-    Config("gbt", "base", "same model, nominal guard",
+    Config("gbt", "base", fset="F91", fset_label="F91", desc="same model, nominal guard",
            train=(), guard=None, label="Trees (nominal guard)"),
-    Config("gbt", "rawcost", "raw horizon cost instead of centred regret",
+    Config("gbt", "rawcost", fset="F91", fset_label="F91", desc="raw horizon cost instead of centred regret",
            train=("--target", "cost"), guard=0.95,
            label="Trees — raw cost target"),
-    Config("gbt", "noweight", "no margin weighting",
+    Config("gbt", "noweight", fset="F91", fset_label="F91", desc="no margin weighting",
            train=("--weight-power", "0"), guard=0.95,
            label="Trees — no weighting"),
-    Config("gbt", "shallow", "depth 3 / 15 leaves",
+    Config("gbt", "shallow", fset="F91", fset_label="F91", desc="depth 3 / 15 leaves",
            train=("--leaves", "15", "--depth", "3"), guard=0.95,
            label="Trees — shallow"),
 
     # -- neural net, cost-scoring --------------------------------------------
-    Config("mlp", "base", "log1p regret — tail-robust, monotone",
+    Config("mlp", "base", fset="F91", fset_label="F91", desc="log1p regret — tail-robust, monotone",
            train=("--target-transform", "log1p"), guard=0.95, label="MLP"),
-    Config("mlp", "base", "same model, nominal guard",
+    Config("mlp", "base", fset="F91", fset_label="F91", desc="same model, nominal guard",
            train=("--target-transform", "log1p"), guard=None,
            label="MLP (nominal guard)"),
-    Config("mlp", "sqerr", "squared error on raw regret (unprotected tail)",
+    Config("mlp", "sqerr", fset="F91", fset_label="F91", desc="squared error on raw regret (unprotected tail)",
            train=("--target-transform", "none"), guard=0.95,
            label="MLP — squared error"),
-    Config("mlp", "rawcost", "raw horizon cost instead of centred regret",
+    Config("mlp", "rawcost", fset="F91", fset_label="F91", desc="raw horizon cost instead of centred regret",
            train=("--target", "cost", "--target-transform", "log1p"),
            guard=0.95, label="MLP — raw cost target"),
 
     # -- neural net, classification (the 2026-08 framing, controlled) --------
-    Config("clf", "base", "12-way action classifier, unweighted",
-           train=("--class-weight", "none"), guard=0.95, label="Classifier"),
-    Config("clf", "sqrtw", "classifier with sqrt class weights",
+    # the classifier BASE is the ladder's clf_F77 cell (3 training seeds);
+    # a single-seed copy here would be the same model under a second name
+    Config("clf", "sqrtw", fset="F", fset_label="F77", desc="classifier with sqrt class weights",
            train=("--class-weight", "sqrt"), guard=0.95,
            label="Classifier — sqrt weights"),
 ]
 
 # The restored 2026-08 model is run by its own scripts, not by <arm>_train.py,
 # so it is listed separately and joined into the table from its own results.
-LEGACY = Config("legacy", "mlp",
-                "restored verbatim: 141 features, 772 runs, its own rollout",
+LEGACY = Config("legacy", "mlp", fset="O", fset_label="O143", desc=
+                "restored verbatim: 143 features, 772 runs, its own rollout",
                 guard=0.95, label="MLP (2026-08, as built)")
 
 
