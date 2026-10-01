@@ -17,6 +17,15 @@ Parameters notation:
     - M_stop : dict {stop: h} — manoeuver time at stops (charging, break, or rest)
     - M_seq : dict {cs_stop: h} — additional manoeuver time at CS stops in sequential mode
     - Tbar : dict {r: h} — PWL charging curve cumulative-time breakpoints
+    - TbarK : dict {cs_stop: {r: h}} — OPTIONAL, one curve per charging
+          station (a different charger power at each), on the same energy
+          breakpoints Ebar.  Absent from every generated instance; written by
+          ML/code/mixed_instances.py.  Honoured by the MILP builders (full
+          route and rolling-horizon window, so the oracle and the LA), BEHDV
+          and greedy — see MILP.py "Per-charger charging curves".  Tbar must
+          still be present; set it to the slowest station's curve.  Not read
+          by twosp.py.  compute_time_bounds below takes ONE curve: pass the
+          slowest (BEHDV.slowest_charging_curve).
     - t0 : float — departure time (absolute hours)
     - E0 : float — initial battery SOC (kWh)
     - Ecap : float — battery capacity (kWh)

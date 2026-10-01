@@ -57,7 +57,7 @@ from src.simulation.supervisor import (_action_min_dwell,           # noqa: E402
                                        action_passes)
 
 from features import (Precomp, action_features, action_key,         # noqa: E402
-                      state_features)
+                      charger_curve, state_features)
 
 MODELS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 
@@ -148,6 +148,14 @@ class StudentPolicy:
         (legal, rows, cost, feas, flags).  decide() and candidates() both go
         through here, so they see the same legality, forcing and spread-room
         filtering, and bump the counters once per call."""
+        legal, rows, flags = self._rows(fd, pre, stop, state, cv)
+        cost, feas = self._predict(rows)
+        return legal, rows, cost, feas, flags
+
+    def _rows(self, fd, pre, stop, state, cv):
+        """_score without the prediction: (legal, rows, flags).  Split out so a
+        batch of vehicles can share one _predict call (fpi_policy.drive_fleet);
+        rows are predicted independently, so batching changes no value."""
         acts = enumerate_actions(stop, state, fd, charge_only=False)
         sf, flags = state_features(fd, pre, stop, state, cv, self.guard_q)
 
@@ -170,9 +178,12 @@ class StudentPolicy:
             self.n_forced += 1
 
         sv = [sf[n] for n in self.state_names]
+        # one action_features dict per action (it used to be rebuilt once per
+        # column: same values, ~18x the work)
         rows = np.array(
-            [sv + [action_features(fd, pre, stop, state, a, sf)[n]
-                   for n in self.action_names] for a in legal],
+            [sv + [af[n] for n in self.action_names]
+             for af in (action_features(fd, pre, stop, state, a, sf)
+                        for a in legal)],
             dtype=np.float32)
 
         # An arm that scores the STATE once and reads off per-action values
@@ -181,16 +192,16 @@ class StudentPolicy:
         # every arm, which is the point of this class.
         self._legal_keys = [action_key(a.get("y", 0), a.get("break_type"),
                                        a.get("rest_type")) for a in legal]
-        cost, feas = self._predict(rows)
-        return legal, rows, cost, feas, flags
+        return legal, rows, flags
 
-    def _charge_hours(self, fd, stop, state, act, row, flags):
+    def _charge_hours(self, fd, stop, state, act, row, flags, raw=None):
         """Charge duration for `act` (0 if it does not charge): the tauc head,
         clamped into [reach the next charger, charge to full] and, with the
-        spread-room check on, into what the 15 h spread still allows."""
+        spread-room check on, into what the 15 h spread still allows.  `raw`
+        is the tauc head's output when the caller already has it (a batch)."""
         tc = 0.0
         if int(act.get("y", 0)) == 1:
-            raw = float(self._predict_tauc(row))
+            raw = float(self._predict_tauc(row) if raw is None else raw)
             lo = charge_needed_to_reach(fd, state.e_arr, flags)
             hi = _charging_time_needed(state.e_arr, fd)
             if self.spread_room:
@@ -262,20 +273,35 @@ def run_student(fd, D_real, E_real, policy: StudentPolicy, cv=0.15):
     T0 = float(fd.get("T_START", 8.0))
     dec_times, acts_taken = [], []
 
+    curves = fd.get("TbarK")          # a route whose chargers differ
+    tbar_route = fd["Tbar"]
     while veh.stop < N:
         stop = veh.stop
+        if curves:
+            # the simulator and the policy's charge clamp read fd["Tbar"]:
+            # make it the curve of the charger here (or of the next one,
+            # which is what a layby's charge features describe)
+            fd["Tbar"] = charger_curve(fd, stop if stop in pre.K
+                                       else int(pre.next_cs[stop]))
         t0 = time.perf_counter()
-        action, tauc, key = policy.decide(fd, pre, stop, veh, cv)
+        out = policy.decide(fd, pre, stop, veh, cv)
         dec_times.append(time.perf_counter() - t0)
+        action, tauc, key = out[:3]
         acts_taken.append(key)
 
-        mock = dict(feasible=True,
-                    sol=[dict(i=0, **durations(fd, stop, action, tauc))])
+        # A policy that plans with the MILP (endgame_policy.py) hands back the
+        # plan itself as a 4th element, and the vehicle executes it the way
+        # the LA's nominal re-solve is executed -- durations, sequencing and
+        # all.  Every other policy returns three and gets the mock below.
+        plan = out[3] if len(out) > 3 else None
+        mock = plan or dict(feasible=True,
+                            sol=[dict(i=0, **durations(fd, stop, action, tauc))])
         veh.advance(action=action, D_next=float(D_real[stop]),
                     E_next=float(E_real[stop]), milp_sol=mock)
         if veh.is_halted:
             break
 
+    fd["Tbar"] = tbar_route
     completed = (not veh.is_halted) and veh.stop >= N
     return dict(
         duration_h=(veh.t_arr - T0) if completed else None,

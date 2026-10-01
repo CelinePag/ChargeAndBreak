@@ -66,18 +66,26 @@ D_DROP = (
     "a_cu1_slack_after",
 )
 
+# P: charger power, per charger (features.py section I).  Constant along every
+# training route (one charger type per route), so they are kept OUT of every
+# older set -- F, D, R, L, C keep their meaning and their counts -- and read
+# only by P = F + POWER, the set for routes whose chargers differ.
+POWER = ("kw_here", "cs1_kw", "cs2_kw", "cs3_kw", "kw_next_ratio",
+         "best_kw_reach", "drive_to_best_kw")
+
 # R: features that grow with route length rather than describe the decision
 ROUTE_POS = ("t_elapsed", "stops_left", "drive_left", "energy_left",
              "cs_left", "cust_left", "route_frac_done")
 
 # the single source of truth for valid set ids: the trainers' --fset choices
 # are read from here, so adding a set here is enough to make it trainable
-FSET_IDS = ("C", "D", "F", "L", "R", "F91")
+FSET_IDS = ("C", "D", "F", "L", "R", "F91", "P")
 
 SET_DOC = {"R": "route-local (no whole-route position)",
            "C": "compact (top by importance)", "D": "deduplicated",
            "F": "full engineered", "L": "full + raw lookahead",
-           "F91": "full, before the window features"}
+           "F91": "full, before the window features",
+           "P": "full + per-charger power"}
 
 
 def _is_raw(n):
@@ -101,7 +109,14 @@ def resolve(set_id, all_names, all_n_state, arm):
     state = list(all_names[:all_n_state])
     action = list(all_names[all_n_state:])
 
-    if set_id == "L":
+    if set_id != "P":
+        # every older set is defined without the power block, so adding it
+        # to the dataset leaves each of them exactly as it was
+        all_names = [n for n in all_names if n not in POWER]
+
+    if set_id == "P":
+        keep = {n for n in all_names if not _is_raw(n)}
+    elif set_id == "L":
         keep = set(all_names)
     elif set_id == "F":
         keep = {n for n in all_names if not _is_raw(n)}

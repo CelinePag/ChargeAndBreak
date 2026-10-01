@@ -23,6 +23,15 @@ Responsibilities
       _energy_after_charging(ea, tauc, full_data) evaluates the PWL charging
       curve analytically.  Imported by oracle.py and greedy.py.
 
+      Per-charger curves (2026-10).  An instance may give each charging
+      station its own curve in full_data["TbarK"] = {cs_stop: {r: hours}} —
+      a different charger power per station (instances.py, "TbarK").  Both
+      helpers take an optional ``stop`` and then use that station's curve
+      (charging_curve_at); without TbarK, or without a stop, they use the
+      route-wide full_data["Tbar"] exactly as before.  advance() always
+      passes the stop.  slowest_charging_curve() is the route's longest full
+      charge, which the MILP needs for its charging big-M and time bounds.
+
 Non-responsibilities (deliberately excluded)
 --------------------------------------------
   Action enumeration lives in Simulation.py (enumerate_actions).
@@ -54,12 +63,53 @@ import numpy as np
 # ENERGY UTILITY
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _energy_after_charging(ea: float, tauc: float, full_data: dict) -> float:
+def charging_curve_at(full_data: dict, stop: int | None = None) -> dict:
+    """
+    The charging curve (cumulative-time breakpoints {r: h}) in force at
+    ``stop``.
+
+    An instance may carry one curve per charging station in
+    full_data["TbarK"] = {cs_stop: {r: h}} — a different charger power at
+    each station, sharing the route's energy breakpoints Ebar (instances.py,
+    "TbarK").  For such a station that curve is returned; in every other case
+    (no TbarK, no stop given, or a stop that is not a station) the route-wide
+    full_data["Tbar"] is, so instances without TbarK behave exactly as before.
+    """
+    per = full_data.get("TbarK")
+    if per and stop is not None:
+        curve = per.get(stop)
+        if curve is None:                 # JSON-shaped dict (string keys)
+            curve = per.get(str(stop))
+        if curve is not None:
+            return curve
+    return full_data["Tbar"]
+
+
+def slowest_charging_curve(full_data: dict) -> dict:
+    """
+    The curve with the longest 0-to-full charge among the route-wide Tbar and
+    every per-station curve.
+
+    The MILP uses it wherever it needs ONE curve that bounds them all: the
+    charging big-M TK (max charging duration) and the arrival-time bounds.
+    Taking the slowest keeps both valid at every station.  Without TbarK this
+    is full_data["Tbar"] itself.
+    """
+    per = full_data.get("TbarK")
+    if not per:
+        return full_data["Tbar"]
+    return max([full_data["Tbar"], *per.values()],
+               key=lambda c: max(float(t) for t in c.values()))
+
+
+def _energy_after_charging(ea: float, tauc: float, full_data: dict,
+                           stop: int | None = None) -> float:
     """
     Return departure SOC (kWh) after charging for `tauc` hours starting from
     initial SOC `ea`, using the piecewise-linear charging curve defined by
-    full_data["Ebar"] (energy breakpoints) and full_data["Tbar"]
-    (cumulative-charge-time breakpoints).
+    full_data["Ebar"] (energy breakpoints) and the time breakpoints of the
+    curve in force at ``stop`` (charging_curve_at: the station's own curve
+    when the instance has per-station curves, else full_data["Tbar"]).
 
     The PWL curve is evaluated analytically: invert ea → t, add tauc, invert
     back t → e.  This is correct for any tauc, including fractional values
@@ -70,13 +120,14 @@ def _energy_after_charging(ea: float, tauc: float, full_data: dict) -> float:
     ea        : float — arrival SOC (kWh), before charging
     tauc      : float — charging duration (h)
     full_data : dict  — must contain Ebar, Tbar, Ecap, Emin
+    stop      : int   — the charging station (optional; see charging_curve_at)
 
     Returns
     -------
     float — departure SOC clipped to [Emin, Ecap]
     """
     Ebar = full_data["Ebar"]
-    Tbar = full_data["Tbar"]
+    Tbar = charging_curve_at(full_data, stop)
     Ecap = full_data["Ecap"]
     Emin = full_data["Emin"]
 
@@ -125,16 +176,18 @@ def _energy_after_charging(ea: float, tauc: float, full_data: dict) -> float:
     return ed
 
 
-def _charging_time_needed(ea: float, full_data: dict) -> float:
+def _charging_time_needed(ea: float, full_data: dict,
+                          stop: int | None = None) -> float:
     """
-    Charging time (h) to bring battery from ``ea`` kWh to full capacity.
+    Charging time (h) to bring battery from ``ea`` kWh to full capacity, on
+    the curve in force at ``stop`` (see charging_curve_at).
 
     Used by BEHDV.advance as a fallback when milp_sol is unavailable or
     infeasible, ensuring the vehicle actually charges when y=1 rather than
     departing at its current SOC.  Returns 0.0 if already at full capacity.
     """
     Ebar = full_data["Ebar"]
-    Tbar = full_data["Tbar"]
+    Tbar = charging_curve_at(full_data, stop)
     Ecap = full_data["Ecap"]
 
     rs = sorted(Ebar)
@@ -485,7 +538,8 @@ class BEHDV:
             tauq_exec = full_data["Q"].get(stop, 0.0) * y if is_CS else 0.0
             if y and is_CS:
                 # Charge to full using the PWL curve (same as greedy heuristic)
-                tauc_exec = _charging_time_needed(self.e_arr, full_data)
+                tauc_exec = _charging_time_needed(self.e_arr, full_data,
+                                                  stop=stop)
             else:
                 tauc_exec = 0.0
 
@@ -591,7 +645,8 @@ class BEHDV:
         # ── 5. Energy update ──────────────────────────────────────────────────
         E_act = float(E_next)
         if y and is_CS and tauc_exec > 0:
-            e_dep = _energy_after_charging(self.e_arr, tauc_exec, full_data)
+            e_dep = _energy_after_charging(self.e_arr, tauc_exec, full_data,
+                                           stop=stop)
         else:
             e_dep = self.e_arr
 

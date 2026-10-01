@@ -237,3 +237,52 @@ deadlines, 60 km spacing default).
   back-filled): greedy ✅ feasible (gap 12.3 %), 2SP ✅ feasible (gap 4.4 %,
   3 add-only repairs, 0 violations), RO Γ=2 ✅ feasible (gap 8.4 %), LA ✅
   (see log).  Oracle solves with the new model + warm start.
+
+---
+
+# October 2026 — per-charger charging curves (`TbarK`)
+
+**Why.**  Every instance had ONE charging curve (`Tbar`) for all stations, so
+a route could not mix charger powers.  The ML side-study (CPAIOR short paper)
+tests learned policies on routes where the power changes from station to
+station (`ML/code/mixed_instances.py`), and needs the LA teacher and the
+oracle to run on them.  Approved by the author on 2026-10-01 as a
+backward-compatible `src/` change (the ML work otherwise never writes `src/`).
+
+**What.**  An OPTIONAL instance field `TbarK = {cs_stop: {r: h}}`: one curve
+per station, on the route's energy breakpoints `Ebar` (all power levels share
+them — the knee is a fixed fraction of the pack, only the time to reach each
+breakpoint changes).  `Tbar` stays mandatory; set it to the slowest station's
+curve.  No generated instance carries `TbarK`.
+
+| Where | Change |
+|---|---|
+| `BEHDV.charging_curve_at(full_data, stop)` | new: the station's curve, or `Tbar` when there is no `TbarK` / no stop |
+| `BEHDV.slowest_charging_curve(full_data)` | new: the longest 0→full charge over `Tbar` and every station |
+| `BEHDV._energy_after_charging`, `_charging_time_needed` | new optional `stop=` → that station's curve; `advance()` passes it |
+| `MILP._declare_common_params` | `TK` (charging big-M) from the slowest curve; new `Param m.TbarK[i,k]`, declared only when `TbarK` is present |
+| `MILP._add_pwl_charging_constraints` | `pwl_tc` uses `m.TbarK[i,k]` when present, `m.Tbar[k]` otherwise — the only constraint that changes |
+| `MILP.make_subproblem_data` | time bounds from the slowest curve; `TbarK` sliced to the window (local indices) |
+| `oracle.py` | time bounds from the slowest curve; warm start and feasibility check pass the stop |
+| `greedy.py` | the four charging-time / energy calls pass their stop |
+| `instances.py` | data-dict key listing documents `TbarK` |
+
+Full description: `src/methods/MILP.py`, section "Per-charger charging curves".
+
+**Not covered.**  `twosp.py` (2SP) builds its own PWL block and still reads
+only `Tbar`; RO/ROBU were not audited.  Do not run those on `TbarK` instances.
+
+**Verification (2026-10-01).**
+- Backward compatibility: LP files written by `build_model` and by
+  `make_subproblem_data` + `build_horizon_model` (two windows each) on four
+  instances (base short, base medium tight, `kw150`, `kwh300`) are
+  **byte-identical** before and after the change (12/12).
+- Stored runs: Greedy reproduces the stored base-case runs exactly; the ML
+  students reproduce their stored results exactly.
+- Per-charger behaviour: the native oracle on four `pmix` routes reproduces
+  the objectives of an earlier, independently written runtime patch of
+  `pwl_tc` (3 identical, 1 within 6e-5, inside the 0.5 % MIP gap), and every
+  charge it schedules follows its own station's curve to < 1e-13 h.  A
+  rolling-horizon window forced to charge at a 1000 kW station charges
+  246 kWh in 0.27 h on that station's curve (the route-wide 150 kW curve
+  would have needed 1.64 h).

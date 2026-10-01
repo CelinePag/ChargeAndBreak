@@ -56,7 +56,8 @@ import lightgbm as lgb
 ARM = "gbt"                                            # noqa: E402
 
 from dataset import (MODELS, argmin_policy_regret, decision_margins,
-                     load, print_offline, sample_weights, split_report)
+                     load, load_multi, physics_file, print_offline,
+                     sample_weights, split_report)
 
 RESULTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results"))
 
@@ -92,6 +93,20 @@ def main():
     ap.add_argument("--fset", default="F", choices=list(FSET_IDS),
                     help="feature set, see fsets.py: C compact, D dedup, "
                          "F full, L full + raw lookahead")
+    ap.add_argument("--physics", default=None,
+                    help="comma list of physics values to join (base, kwh300, "
+                         "kw150, ...; files from extract.py --physics); "
+                         "overrides --data")
+    ap.add_argument("--hold-out", default="",
+                    help="physics values kept out of fit and stop "
+                         "(leave-one-value-out); they stay in test")
+    ap.add_argument("--weight-physics", default="",
+                    help="multiply the sample weight of some physics values, "
+                         "e.g. 'pmix=5': a few dozen routes of a new kind "
+                         "would otherwise be ~3%% of a pooled dataset")
+    ap.add_argument("--fit-seeds", default=None,
+                    help="learn from these route seeds only, e.g. '1-7' "
+                         "(learning curve); stop and test unchanged")
     ap.add_argument("--refit-val", action="store_true",
                     help="train on seeds 1-21 (train + val) instead of 1-17. "
                          "The standard protocol is: SELECT on val, then REFIT "
@@ -106,18 +121,36 @@ def main():
 
     os.makedirs(MODELS, exist_ok=True)
     os.makedirs(RESULTS, exist_ok=True)
-    d = load(args.data)
-    # -- feature set: select columns BY NAME from the dataset's superset -----
     from fsets import resolve
+    hold_out = tuple(t for t in args.hold_out.split(",") if t)
+    if args.physics:
+        tags = [t for t in args.physics.split(",") if t]
+        # only the set's columns (+ a_y for the charge-head mask) are joined:
+        # all 215 over ~1.3 M rows would not fit next to training
+        with np.load(physics_file(tags[0]), allow_pickle=True) as z:
+            sup = [str(x) for x in z["feature_names"]]
+            sup_ns = int(z["n_state"])
+        want, _ = resolve(args.fset, sup, sup_ns, ARM)
+        d = load_multi(tags, columns=set(want) | {"a_y"})
+    else:
+        d = load(args.data)
+    # -- feature set: select columns BY NAME from the dataset's superset -----
     _all = [str(x) for x in d["feature_names"]]
     # masks that need a specific column are taken from the SUPERSET, so a set
     # that happens to omit that column (e.g. a compact set without `a_y`)
     # still trains its charge head on the right rows
     _is_y1_full = d["X"][:, _all.index("a_y")] > 0.5
     names, n_state_sel = resolve(args.fset, _all, int(d["n_state"]), ARM)
-    X = d["X"][:, [_all.index(n) for n in names]]
+    X = (d["X"] if names == _all
+         else d["X"][:, [_all.index(n) for n in names]])
     print(f"[fset] {args.fset}: {len(names)} features ({n_state_sel} state)")
-    tr, va, te = split_report(d, args.scope)
+    fit_seeds = None
+    if args.fit_seeds:
+        fit_seeds = set()
+        for part in args.fit_seeds.split(","):
+            a, _, b = part.partition("-")
+            fit_seeds |= set(range(int(a), int(b or a) + 1))
+    tr, va, te = split_report(d, args.scope, hold_out, fit_seeds)
     clean = d["clean"].astype(bool)
     if args.refit_val:
         # No held-out set remains, so early stopping has nothing to watch:
@@ -130,6 +163,14 @@ def main():
 
     margin = decision_margins(d)
     w = sample_weights(d, margin, args.weight_power)
+    if args.weight_physics:
+        from dataset import row_physics
+        rp = row_physics(d)
+        for part in args.weight_physics.split(","):
+            tag, _, mult = part.partition("=")
+            w = np.where(rp == tag, w * float(mult), w)
+            print(f"[weight] {tag} rows x{float(mult):g} "
+                  f"({int((rp == tag).sum())} rows)")
 
     base = dict(objective="huber", metric="huber", learning_rate=args.lr,
                 num_leaves=args.leaves, max_depth=args.depth,
@@ -154,6 +195,7 @@ def main():
     print(f"\n[cost] trees={cost_m.best_iteration}  "
           f"val_huber={cost_m.best_score['val']['huber']:.5f}  "
           f"{time.time()-t0:.0f}s")
+    del ds_tr, ds_va                 # the next head's copy must not stack on it
 
     # ── HEAD 2: feasibility ──────────────────────────────────────────────────
     yf = clean.astype(int)
@@ -167,6 +209,7 @@ def main():
                                   lgb.log_evaluation(0)])
     print(f"[feas] trees={feas_m.best_iteration}  "
           f"val_logloss={feas_m.best_score['val']['binary_logloss']:.5f}")
+    del fds_tr, fds_va
 
     # ── HEAD 3: charge duration ──────────────────────────────────────────────
     ychg = d["tauc"]
@@ -184,6 +227,7 @@ def main():
     print(f"[tauc] trees={tauc_m.best_iteration}  "
           f"val_MAE={np.abs(pv - ychg[c_va]).mean()*60:.2f} min "
           f"(on {c_va.sum()} charge rows)")
+    del cds_tr, cds_va
 
     # ── offline evaluation, in the units the policy is judged in ─────────────
     pred = cost_m.predict(X, num_iteration=cost_m.best_iteration)

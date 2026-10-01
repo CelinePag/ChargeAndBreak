@@ -1,0 +1,38 @@
+[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[physics] learning from base, kwh300, kwh700, kw150, kw700, kw1000, cs30, cs100; held out: kwh900
+[data] rows 1326872  features 95
+  fit   rows  912178  instances 1727  decisions 161980
+  stop  rows   95061  instances  180  decisions  16709
+  test  rows  211572  instances  402  decisions  37512
+
+[cost] trees=1200  val_huber=0.18784  224s
+[feas] trees=372  val_logloss=0.01474
+[tauc] trees=449  val_MAE=5.77 min (on 24228 charge rows)
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go
+fit         0.61 min    93.6%     161777       4.44 min
+stop        0.80 min    93.5%      16701       4.43 min
+test        0.81 min    93.8%      37487       4.38 min
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/gbt_F95_phys_LOkwh900_s1_{cost,feas,tauc}.txt  (502s)
+
+top 15 features by gain (cost head):
+   a_rest_min                      4040875
+   a_dwell_min                     2120763
+   a_resets_sd                      883262
+   hz_drive                         461894
+   legs_to_forced_rest              306457
+   a_r1                             214719
+   hz_stops                         148362
+   drive_left                       117131
+   hz_n_rests                        68383
+   ext_shift_used                    61271
+   a_residual_break                  58776
+   cust_left                         57668
+   sd_slack                          56809
+   a_cu1_slack_after                 54499
+   charge_rate_now_kw                50833

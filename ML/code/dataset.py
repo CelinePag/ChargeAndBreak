@@ -52,6 +52,85 @@ def load(path=None):
     return {k: d[k] for k in d.files}
 
 
+def physics_file(tag):
+    """Where extract.py writes one physics value's rows."""
+    return os.path.join(DATA, "dataset.npz" if tag == "base"
+                        else f"dataset_phys_{tag}.npz")
+
+
+_ROWWISE = ("action_ix", "regret", "cost", "std", "ok", "n_scen", "tauc",
+            "taub", "clean", "stop", "chosen", "tiebreak", "best_cost",
+            "n_actions", "n_clean", "seed")
+
+
+def load_multi(tags, columns=None):
+    """Join several physics values' files into one dataset dict.
+
+    `columns`: feature names to keep (default all); only these are ever held
+    for the whole join, which is what keeps ~1.3 M rows inside a laptop's
+    memory -- X is preallocated and filled one file at a time.  Adds
+    `physics_ix` per row and `physics_names`; instance and family indices are
+    re-based onto the joined lists.  A file written before the physics tag
+    existed (the original dataset.npz) is read as 'base'.
+    """
+    files = [physics_file(t) for t in tags]
+    heads = []
+    for f in files:
+        with np.load(f, allow_pickle=True) as z:
+            heads.append(dict(n=len(z["stop"]),
+                              names=[str(x) for x in z["feature_names"]],
+                              n_state=int(z["n_state"]),
+                              vocab=[str(x) for x in z["action_vocab"]]))
+    all_names = heads[0]["names"]
+    for h, f in zip(heads, files):
+        if h["names"] != all_names or h["vocab"] != heads[0]["vocab"]:
+            raise ValueError(f"{f}: feature names or action vocabulary differ")
+    keep = all_names if columns is None else [n for n in all_names if n in set(columns)]
+    col_ix = [all_names.index(n) for n in keep]
+    n_state = sum(1 for n in keep if all_names.index(n) < heads[0]["n_state"])
+
+    N = sum(h["n"] for h in heads)
+    X = np.empty((N, len(keep)), dtype=np.float32)
+    out = {k: [] for k in _ROWWISE}
+    inst_ix, fam_rows, phys_ix, instances = [], [], [], []
+    at = 0
+    for p, (tag, f, h) in enumerate(zip(tags, files, heads)):
+        with np.load(f, allow_pickle=True) as z:
+            X[at:at + h["n"]] = z["X"][:, col_ix]
+            for k in _ROWWISE:
+                out[k].append(z[k])
+            inst_ix.append(z["instance_ix"].astype(np.int32) + len(instances))
+            fams = [str(x) for x in z["families"]]
+            fam_rows.append(np.array(fams, dtype=object)[z["family_ix"]])
+            instances += [str(x) for x in z["instances"]]
+            file_tag = str(z["physics"]) if "physics" in z.files else "base"
+            if file_tag != tag:
+                raise ValueError(f"{f} holds physics {file_tag!r}, not {tag!r}")
+        phys_ix.append(np.full(h["n"], p, dtype=np.int8))
+        at += h["n"]
+
+    fam_all = np.concatenate(fam_rows)
+    families = sorted(set(fam_all))
+    fam_map = {n: i for i, n in enumerate(families)}
+    d = {k: np.concatenate(v) for k, v in out.items()}
+    d.update(
+        X=X, feature_names=np.array(keep), n_state=n_state,
+        instance_ix=np.concatenate(inst_ix),
+        family_ix=np.array([fam_map[n] for n in fam_all], dtype=np.int16),
+        instances=np.array(instances), families=np.array(families),
+        action_vocab=np.array(heads[0]["vocab"]),
+        physics_ix=np.concatenate(phys_ix), physics_names=np.array(tags),
+    )
+    return d
+
+
+def row_physics(d):
+    """Per-ROW physics tag ('base' for a single-file dataset)."""
+    if "physics_ix" not in d:
+        return np.full(len(d["stop"]), "base", dtype=object)
+    return np.asarray(d["physics_names"]).astype(object)[d["physics_ix"]]
+
+
 def decision_id(d):
     """A stable integer id per (instance, stop)."""
     return d["instance_ix"].astype(np.int64) * 100_000 + d["stop"].astype(np.int64)
@@ -72,15 +151,23 @@ def route_class(d):
 SCOPES = {"all": ("short", "medium", "long"), "SM": ("short", "medium")}
 
 
-def split_masks(d, scope="all"):
+def split_masks(d, scope="all", hold_out=(), fit_seeds=None):
     """(fit, stop, test) row masks, restricted to the training scope.
+
+    `hold_out`: physics tags the model may not learn from (leave-one-value-
+    out); their rows leave fit AND stop, so early stopping cannot peek.
+    `fit_seeds`: a subset of FIT_SEEDS to learn from (the learning curve);
+    stop and test are unchanged, so every point is measured the same way.
 
     The TEST mask is never restricted: which routes a model is evaluated on
     is the evaluator's choice, not the trainer's.
     """
     s = d["seed"]
     inscope = np.isin(route_class(d), SCOPES[scope])
-    return (np.isin(s, list(FIT_SEEDS)) & inscope,
+    if hold_out:
+        inscope &= ~np.isin(row_physics(d), list(hold_out))
+    fit = FIT_SEEDS if fit_seeds is None else set(fit_seeds) & FIT_SEEDS
+    return (np.isin(s, list(fit)) & inscope,
             np.isin(s, list(STOP_SEEDS)) & inscope,
             np.isin(s, list(TEST_SEEDS)))
 
@@ -170,9 +257,13 @@ def print_offline(d, pred, feas, masks, names=("fit", "stop", "test")):
         print(f"{nm:6s} {r*60:9.2f} min {t1*100:7.1f}% {n:10d}   {rg*60:8.2f} min")
 
 
-def split_report(d, scope="all"):
-    masks = split_masks(d, scope)
+def split_report(d, scope="all", hold_out=(), fit_seeds=None):
+    masks = split_masks(d, scope, hold_out, fit_seeds)
     print(f"[scope] {scope}: training on {', '.join(SCOPES[scope])} routes")
+    if "physics_names" in d:
+        phys = [str(t) for t in d["physics_names"]]
+        print(f"[physics] learning from {', '.join(t for t in phys if t not in hold_out)}"
+              + (f"; held out: {', '.join(hold_out)}" if hold_out else ""))
     print(f"[data] rows {len(d['X'])}  features {d['X'].shape[1]}")
     for nm, m in zip(("fit", "stop", "test"), masks):
         print(f"  {nm:5s} rows {m.sum():7d}  instances "

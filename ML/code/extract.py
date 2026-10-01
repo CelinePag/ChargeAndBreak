@@ -37,6 +37,15 @@ Gates (all cheap, all catch silent join corruption)
       accounts for ~5e-5 h of disagreement.
   G4  the reconstructed spread is non-negative, and never exceeds the 15 h
       ceiling on a run that was recorded as feasible
+
+Other physics
+-------------
+`--physics kwh300,kw150,...` extracts the teacher's runs on the sensitivity
+instances instead: one physics value per run, one axis changed from the base
+case.  Each value goes to its own file (dataset_phys_<tag>.npz), so memory
+stays bounded by one value at a time; dataset.load_multi joins them.  Those
+runs are the same teacher -- MIP tail, H 24 h, 25 scenarios, cv 0.15, no
+pruning -- only filed as plain `_LA_` in logs/sensitivity.
 """
 from __future__ import annotations
 
@@ -44,6 +53,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 import time
 
@@ -66,6 +76,42 @@ INST_DIR = os.path.join(_ROOT, "instances")
 OUT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
 GUARD_Q = None      # the teacher ran prune_quantile=None on every base run
+
+# physics tag -> (log dir, solution dir, instance dir, log glob)
+_SENS = {"kwh300": "battery_300", "kwh700": "battery_700",
+         "kwh900": "battery_900", "kw150": "charger_power_150",
+         "kw700": "charger_power_700", "kw1000": "charger_power_1000",
+         "cs30": "cs_spacing_30", "cs100": "cs_spacing_100"}
+PHYSICS = {"base": (LOG_DIR, SOL_DIR, INST_DIR, "*LA_MIPTAIL*.txt")}
+PHYSICS.update({
+    tag: (os.path.join(_ROOT, "logs", "sensitivity"),
+          os.path.join(_ROOT, "solutions", "sensitivity"),
+          os.path.join(_ROOT, "instances_sens", sub), f"*__{tag}_LA_*.txt")
+    for tag, sub in _SENS.items()})
+# Chargers of different power along the route: the LA runs of run_la_mixed.py
+# --split train (outputs redirected to ML/la_mixed/).  The instance dir is the
+# TRAINING one, so the test routes' logs, which share the log dir, find no
+# instance and are skipped ("no_instance") -- they can never become rows.
+_LA_MIXED = os.path.join(_ROOT, "ML", "la_mixed")
+PHYSICS["pmix"] = (os.path.join(_LA_MIXED, "logs", "sensitivity"),
+                   os.path.join(_LA_MIXED, "solutions", "sensitivity"),
+                   os.path.join(_ROOT, "ML", "instances_mixed", "train", "pmix"),
+                   "*__pmix_LA_*.txt")
+
+_RE_RUN = re.compile(r"^(?P<inst>.+?)_LA(?:_MIPTAIL)?_\d{8}_\d{6}_\d{3}$")
+
+
+def instance_of(run_id: str) -> str:
+    """'RlongCfewTnone_10__kw150_LA_20260818_233122_000' -> 'RlongCfewTnone_10__kw150'."""
+    m = _RE_RUN.match(run_id)
+    return m.group("inst") if m else run_id.split("_LA_MIPTAIL")[0]
+
+
+def family_seed(inst: str):
+    """'RlongCfewTnone_10__kw150' -> ('RlongCfewTnone', 10): the physics tag is
+    not part of the route family, so every value shares the base split."""
+    fam, seed = inst.split("__")[0].rsplit("_", 1)
+    return fam, int(seed)
 
 # Tolerances for G1, set by the precision each source was PRINTED with:
 # the log writes soc as a whole kWh, cd/sd/sw to 2 dp, t to 3 dp; the
@@ -91,25 +137,26 @@ def reconstruct_spread(sol: dict, traj: list) -> list:
     return h
 
 
-def _solution_for(log_path: str):
+def _solution_for(log_path: str, sol_dir: str = SOL_DIR):
     run_id = os.path.basename(log_path)[:-4]
-    p = os.path.join(SOL_DIR, run_id + ".json")
+    p = os.path.join(sol_dir, run_id + ".json")
     return p if os.path.exists(p) else None
 
 
-def extract_one(log_path: str, state_names, action_names):
+def extract_one(log_path: str, state_names, action_names,
+                sol_dir: str = SOL_DIR, inst_dir: str = INST_DIR):
     """Join one route's logged costs onto its stored states."""
     run_id = os.path.basename(log_path)[:-4]
-    inst = run_id.split("_LA_MIPTAIL")[0]
+    inst = instance_of(run_id)
     rep = dict(instance=inst, run_id=run_id, status="ok", n_dec=0, n_rows=0,
                g1=dict(), g2_max=0.0, g3_delta=None, g4_bad=0, n_log_dec=0,
                halted=False)
 
-    sol_path = _solution_for(log_path)
+    sol_path = _solution_for(log_path, sol_dir)
     if sol_path is None:
         rep["status"] = "no_solution"
         return None, rep
-    inst_path = os.path.join(INST_DIR, inst + ".json")
+    inst_path = os.path.join(inst_dir, inst + ".json")
     if not os.path.exists(inst_path):
         rep["status"] = "no_instance"
         return None, rep
@@ -205,9 +252,9 @@ def extract_one(log_path: str, state_names, action_names):
 
 
 def _worker(args):
-    log_path, state_names, action_names = args
+    log_path, state_names, action_names, sol_dir, inst_dir = args
     try:
-        return extract_one(log_path, state_names, action_names)
+        return extract_one(log_path, state_names, action_names, sol_dir, inst_dir)
     except Exception as exc:               # one bad run must not kill the batch
         return None, dict(instance=os.path.basename(log_path), run_id="",
                           status=f"error:{type(exc).__name__}:{exc}",
@@ -235,22 +282,42 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="0 = all logs")
     ap.add_argument("--jobs", type=int, default=1)
-    ap.add_argument("--out", default="dataset.npz")
+    ap.add_argument("--out", default=None,
+                    help="default: dataset.npz for base, else "
+                         "dataset_phys_<tag>.npz")
+    ap.add_argument("--physics", default="base",
+                    help=f"comma list of {', '.join(PHYSICS)}; one file each")
     args = ap.parse_args()
 
-    logs = sorted(glob.glob(os.path.join(LOG_DIR, "*LA_MIPTAIL*.txt")))
-    if args.limit:
-        logs = logs[: args.limit]
+    tags = [t.strip() for t in args.physics.split(",") if t.strip()]
+    for tag in tags:
+        if tag not in PHYSICS:
+            raise SystemExit(f"unknown physics {tag!r}: {', '.join(PHYSICS)}")
+    if args.out and len(tags) > 1:
+        raise SystemExit("--out names one file; give one --physics value")
     state_names, action_names = _column_order()
-    print(f"[extract] {len(logs)} LA logs | {len(state_names)} state + "
-          f"{len(action_names)} action = {len(state_names)+len(action_names)} features")
+    for tag in tags:
+        out = args.out or ("dataset.npz" if tag == "base"
+                           else f"dataset_phys_{tag}.npz")
+        extract_physics(tag, out, args.jobs, args.limit,
+                        state_names, action_names)
+
+
+def extract_physics(tag, out_name, jobs, limit, state_names, action_names):
+    log_dir, sol_dir, inst_dir, pattern = PHYSICS[tag]
+    logs = sorted(glob.glob(os.path.join(log_dir, pattern)))
+    if limit:
+        logs = logs[:limit]
+    print(f"\n[extract] physics={tag}: {len(logs)} LA logs | "
+          f"{len(state_names)} state + {len(action_names)} action = "
+          f"{len(state_names)+len(action_names)} features")
 
     t0 = time.time()
     all_rows, reps = [], []
-    payload = [(lg, state_names, action_names) for lg in logs]
-    if args.jobs > 1:
+    payload = [(lg, state_names, action_names, sol_dir, inst_dir) for lg in logs]
+    if jobs > 1:
         from multiprocessing import Pool
-        with Pool(args.jobs) as pool:
+        with Pool(jobs) as pool:
             it = pool.imap(_worker, payload, 4)
             for i, (rows, rep) in enumerate(it):
                 reps.append(rep)
@@ -278,7 +345,7 @@ def main():
     good = [r for r in reps if r["status"] == "ok" and r["n_rows"] > 0]
     insts = sorted({r["instance"] for r in good})
     inst_ix = {n: i for i, n in enumerate(insts)}
-    fams = sorted({n.rsplit("_", 1)[0] for n in insts})
+    fams = sorted({family_seed(n)[0] for n in insts})
     fam_ix = {n: i for i, n in enumerate(fams)}
 
     X = np.concatenate([np.stack([r[0] for r in all_rows]),
@@ -288,14 +355,16 @@ def main():
     inst_col, fam_col, seed_col = [], [], []
     for rep in good:
         nm = rep["instance"]
+        fam, seed = family_seed(nm)
         inst_col += [inst_ix[nm]] * rep["n_rows"]
-        fam_col += [fam_ix[nm.rsplit("_", 1)[0]]] * rep["n_rows"]
-        seed_col += [int(nm.rsplit("_", 1)[1])] * rep["n_rows"]
+        fam_col += [fam_ix[fam]] * rep["n_rows"]
+        seed_col += [seed] * rep["n_rows"]
 
     os.makedirs(OUT, exist_ok=True)
-    out = os.path.join(OUT, args.out)
+    out = os.path.join(OUT, out_name)
     np.savez_compressed(
         out,
+        physics=np.array(tag),
         X=X.astype(np.float32),
         feature_names=np.array(state_names + action_names),
         n_state=len(state_names),

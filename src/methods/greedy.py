@@ -159,7 +159,8 @@ def _greedy_durations(full_data: dict, stop: int, action: dict,
     tauq = full_data["Q"].get(stop, 0.0) * y if is_CS else 0.0
 
     if is_CS and y:
-        tauc = _charging_time_needed(state.e_arr, full_data)
+        # this station's curve when the instance has per-station curves
+        tauc = _charging_time_needed(state.e_arr, full_data, stop=stop)
         # Break runs in parallel with charging; only residual time is extra
         taub = max(0.0, break_min - tauc)
     else:
@@ -281,7 +282,8 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
     # ── Priority (i): MUST-CHARGE ─────────────────────────────────────────────
     elif must_charge and is_CS:
         y        = 1
-        tauc_est = _charging_time_needed(state.e_arr, full_data)
+        tauc_est = _charging_time_needed(state.e_arr, full_data,
+                                         stop=stop_global)
         # Insert a break for free only if the charge is long enough to cover it
         if phi == 1 and tauc_est >= Tb30:
             brk    = "b30"
@@ -343,7 +345,7 @@ def greedy_decision(full_data: dict, stop_global: int, state: BEHDV,
                                                 guard_quantile)
         if soc_next - need_on < Emin + safety_buffer_frac * usable:
             o += (full_data.get("Q", {}).get(_stop, 0.0)
-                  + _charging_time_needed(soc_next, full_data))
+                  + _charging_time_needed(soc_next, full_data, stop=_stop))
         return o
 
     if rst is None:
@@ -612,7 +614,7 @@ def run_greedy(full_data: dict,
             break
 
         soc_dep = (_energy_after_charging(vehicle.e_arr_history[-2],
-                                          dur["tauc"], full_data)
+                                          dur["tauc"], full_data, stop=stop)
                    if y else vehicle.e_arr_history[-2])
         dwell_min = (vehicle.t_arr_history[-1] - vehicle.t_arr_history[-2]
                      - D_act) * 60

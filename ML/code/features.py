@@ -60,6 +60,38 @@ def _get(d, i, default=0.0):
     return d.get(str(i), default)
 
 
+N_REACH_CS = 8        # chargers scanned for the fastest one within reach
+
+
+def charger_curve(fd: dict, j: int) -> dict:
+    """Charging curve (Tbar) of charger j.
+
+    A route whose chargers differ carries one curve per charger in
+    fd["TbarK"] (mixed_instances.py); every other route has the single
+    fd["Tbar"], which is then every charger's curve.
+    """
+    tk = fd.get("TbarK")
+    if tk:
+        c = _get(tk, j, None)
+        if c is not None:
+            return c
+    return fd["Tbar"]
+
+
+def charger_kw(fd: dict, j: int) -> float:
+    """Rated power of charger j: the slope of its curve's first, constant-power
+    segment (350 kW in the base case)."""
+    T, Eb = charger_curve(fd, j), fd["Ebar"]
+    dt = float(_get(T, 1)) - float(_get(T, 0))
+    return (float(_get(Eb, 1)) - float(_get(Eb, 0))) / max(dt, 1e-9)
+
+
+def _fd_at(fd: dict, j: int) -> dict:
+    """fd with charger j's curve as THE curve, for the BEHDV helpers."""
+    c = charger_curve(fd, j)
+    return fd if c is fd["Tbar"] else {**fd, "Tbar": c}
+
+
 class Precomp:
     """Per-instance route geometry that never changes during a run.
 
@@ -231,8 +263,11 @@ def state_features(fd: dict, pre: Precomp, stop: int, state,
     f["drive_to_next_cs"] = float(pre.cumD[min(nxt, N)] - pre.cumD[stop])
     f["energy_to_next_cs"] = float(pre.cumE[min(nxt, N)] - pre.cumE[stop])
     f["soc_at_next_cs_frac"] = (e - f["energy_to_next_cs"]) / Ecap
-    f["charge_time_to_full"] = _charging_time_needed(e, fd)
-    f["charge_rate_now_kw"] = (_energy_after_charging(e, 0.1, fd) - e) / 0.1
+    # at a charger: its own curve; elsewhere: the next charger's (identical
+    # to fd["Tbar"] on every route with one charger type)
+    fd_c = _fd_at(fd, stop if stop in pre.K else nxt)
+    f["charge_time_to_full"] = _charging_time_needed(e, fd_c)
+    f["charge_rate_now_kw"] = (_energy_after_charging(e, 0.1, fd_c) - e) / 0.1
     f["e_nom_margin_next_cs"] = usable - f["energy_to_next_cs"]
 
     # -- D. the node we are standing on --------------------------------------
@@ -335,6 +370,28 @@ def state_features(fd: dict, pre: Precomp, stop: int, state,
             f[p + "cu"] = 0.0
             f[p + "q"] = 0.0
             f[p + "slack"] = 48.0
+
+    # -- I. charger power (the `P` feature set) --------------------------------
+    # Every training route has ONE charger type, so there each of these equals
+    # the route's power; they differ only on a route that mixes chargers.
+    # Only the `P` sets read them (fsets.POWER).
+    kw_here = charger_kw(fd, stop) if is_cs else 0.0
+    f["kw_here"] = kw_here
+    for k in range(N_CS_AHEAD):
+        j = pre.cs_ahead(stop, k)
+        f[f"cs{k + 1}_kw"] = charger_kw(fd, j) if j >= 0 else -1.0
+    f["kw_next_ratio"] = (f["cs1_kw"] / kw_here
+                          if (is_cs and f["cs1_kw"] > 0) else 1.0)
+    best_kw, best_drive = -1.0, -1.0
+    for k in range(N_REACH_CS):
+        j = pre.cs_ahead(stop, k)
+        if j < 0 or usable - float(pre.cumE[j] - pre.cumE[stop]) <= 0:
+            break
+        kw = charger_kw(fd, j)
+        if kw > best_kw:
+            best_kw, best_drive = kw, float(pre.cumD[j] - pre.cumD[stop])
+    f["best_kw_reach"] = best_kw
+    f["drive_to_best_kw"] = best_drive
 
     return f, flags
 

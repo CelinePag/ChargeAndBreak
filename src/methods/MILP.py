@@ -34,11 +34,34 @@ Data dict
 ---------
   Produced by instances.make_data().  Full key listing in instances.py docstring.
 
+Per-charger charging curves (2026-10)
+-------------------------------------
+  The PWL charging model (Montoya et al. 2017) links, at every station i,
+
+      ea[i]   = Σ_k λa[i,k]·Ē_k          ed[i] = Σ_k λd[i,k]·Ē_k
+      tauc[i] = Σ_k λd[i,k]·T̄_k − Σ_k λa[i,k]·T̄_k                  (pwl_tc)
+
+  with one route-wide curve T̄ = data["Tbar"].  When the data dict also
+  carries data["TbarK"] = {i: {k: h}} (a charger power per station, see
+  instances.py), pwl_tc uses station i's own T̄_{i,k} instead, through the
+  Param m.TbarK.  Nothing else in the model changes, and nothing else needs
+  to: every power level shares the same energy breakpoints Ē_k (the knee is
+  a fixed fraction of the pack; only the TIME to reach each breakpoint
+  depends on the power), so λ, the SOS2 adjacency and the energy balance are
+  the same as before.  Two quantities need ONE curve that bounds every
+  station: the charging big-M TK (max charging time) and the arrival-time
+  bounds — both take BEHDV.slowest_charging_curve, which keeps them valid.
+  make_subproblem_data slices TbarK to the window (local indices) like every
+  other per-stop dict.  Without TbarK the model is built exactly as before
+  (verified: identical LP files on base and sensitivity instances).
+  Not covered: twosp.py builds its own PWL block and still reads only Tbar.
+
 Dependencies
 ------------
   MILP.py imports compute_time_bounds from instances.py (arrival-time bounds
-  needed when building sub-problems at run-time with perturbed travel times).
-  No other local imports at module level.
+  needed when building sub-problems at run-time with perturbed travel times)
+  and the two charging-curve lookups from BEHDV.py (stdlib only, so no
+  import cycle).  No other local imports at module level.
 
 """
 
@@ -54,6 +77,7 @@ import math as _mi
 import pyomo.environ as pyo
 
 from src.instance_gen.instances import compute_time_bounds
+from src.simulation.BEHDV import charging_curve_at, slowest_charging_curve
 from src.settings import BETA_TW, TRAVEL_TIME_CV_TARGET
 from src.settings import apply_solver_threads as _apply_solver_threads
 from src import paths as _paths
@@ -200,7 +224,9 @@ def _declare_common_params(m, data):
 
     # TK is the 0–100% full-charge time T_R: the natural big-M for every
     # charging-related linearisation (M9: replaces any other charging big-M).
-    m.TK    = pyo.Param(initialize=data["Tbar"][max(R)])
+    # With per-station curves it is the SLOWEST station's, valid at all of
+    # them; without, slowest_charging_curve(data) is data["Tbar"].
+    m.TK    = pyo.Param(initialize=slowest_charging_curve(data)[max(R)])
     m.M_drv = pyo.Param(initialize=data["M_drv"])
     m.M_sd  = pyo.Param(initialize=data["M_sd"])
     m.M_sw  = pyo.Param(initialize=data["M_sw"])
@@ -229,6 +255,11 @@ def _declare_common_params(m, data):
     m.Emin  = pyo.Param(initialize=data["Emin"])
     m.Ebar  = pyo.Param(m.Rset, initialize=data["Ebar"])
     m.Tbar  = pyo.Param(m.Rset, initialize=data["Tbar"])
+    # Per-station curves (data["TbarK"], see the module docstring): declared
+    # only when present, so an instance without them builds the same model.
+    if data.get("TbarK"):
+        m.TbarK = pyo.Param(m.Kset, m.Rset, initialize={
+            (i, k): float(charging_curve_at(data, i)[k]) for i in K for k in R})
     m.Wha   = pyo.Param(m.Cset, initialize=data["Wha"], default=0)
     m.Whf   = pyo.Param(m.Cset, initialize=data["Whf"], default=1e6)
     m.Mlay  = pyo.Param(m.Lset, initialize=data.get("M_lay", {}), default=0)
@@ -278,9 +309,13 @@ def _add_pwl_charging_constraints(m, K, R, Rseg):
         m.ea[i] == sum(m.lam_a[i, k] * m.Ebar[k] for k in R))
     m.pwl_ed = pyo.Constraint(m.Kset, rule=lambda m, i:
         m.ed[i] == sum(m.lam_d[i, k] * m.Ebar[k] for k in R))
+    # Charging time: the station's own curve when the instance has per-station
+    # curves (m.TbarK), the route-wide one otherwise.
+    _per = m.component("TbarK") is not None
+    _T = (lambda i, k: m.TbarK[i, k]) if _per else (lambda i, k: m.Tbar[k])
     m.pwl_tc = pyo.Constraint(m.Kset, rule=lambda m, i:
-        m.tauc[i] == (sum(m.lam_d[i, k] * m.Tbar[k] for k in R)
-                    - sum(m.lam_a[i, k] * m.Tbar[k] for k in R)))
+        m.tauc[i] == (sum(m.lam_d[i, k] * _T(i, k) for k in R)
+                    - sum(m.lam_a[i, k] * _T(i, k) for k in R)))
     m.pwl_ca = pyo.Constraint(m.Kset, rule=lambda m, i:
         sum(m.lam_a[i, k] for k in R) == 1)
     m.pwl_cd = pyo.Constraint(m.Kset, rule=lambda m, i:
@@ -1462,8 +1497,14 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
     Tbar  = full_data["Tbar"]
 
     _man = full_data.get("M", {}).get(start_stop, 5.0 / 60)
+    # bounds with the slowest station's curve (== Tbar without per-station
+    # curves), so they hold whichever station the truck charges at
     lb_t, ub_t = compute_time_bounds(I_loc, C_loc, K_loc, D_loc, S_loc, Q_loc,
-                               Tbar, T_hor, t0=t0, Man_default=_man)
+                               slowest_charging_curve(full_data), T_hor,
+                               t0=t0, Man_default=_man)
+    # per-station curves, sliced to the window like every other per-stop dict
+    TbarK_loc = ({j: charging_curve_at(full_data, start_stop + j) for j in K_loc}
+                 if full_data.get("TbarK") else None)
 
     # Minimum energy needed from each local stop to the next CS or destination.
     # Uses scenario energy within the horizon, nominal beyond.
@@ -1505,6 +1546,7 @@ def make_subproblem_data(full_data: dict, start_stop: int, end_stop: int,
         E0=init_state["ea"],
         Ecap=full_data["Ecap"], Emin=full_data["Emin"],
         Ebar=full_data["Ebar"], Tbar=Tbar,
+        **({"TbarK": TbarK_loc} if TbarK_loc else {}),
         T_hor=T_hor,
         lb_t=lb_t, ub_t=ub_t,
         Tb45=full_data["Tb45"], Tb15=full_data["Tb15"], Tb30=full_data["Tb30"],

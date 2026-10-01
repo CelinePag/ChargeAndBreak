@@ -99,10 +99,22 @@ spread-room check, `g99sr` = + the check and a 0.99 guard.
 | `code/evaluate.py` | closed-loop evaluation of one model on one split |
 | `code/rollout_policy.py` | rollout on top of any student: its k best actions each driven to the end of the route under sampled travel times |
 | `code/run_rollout.py` | the rollout policy on chosen routes, paired with the plain student, the LA and the oracle |
+| `code/endgame_policy.py` | the student until ~3 shifts from the end, then the journal's MILP re-solved to the destination at every stop |
+| `code/run_endgame.py` | the end-game policy on chosen routes (`--set la-extra`: every route where the LA rests more than the oracle) |
+| `code/fpi_policy.py` | one round of fitted policy iteration: the batched branch simulator (`drive_fleet`), the two route-end features, and the student corrected by `G` among its k best actions |
+| `code/fpi_collect.py` | labels from the student's own simulated outcomes: its k best actions at sampled stops, each driven to the end under one shared travel-time draw → `data/fpi_<name>/` |
+| `code/fpi_train.py` | fits `G` = measured minus predicted advantage; offline one-step gain on the stopping routes → `models/<tag>_delta.txt` |
+| `code/fpi_eval.py` | the corrected student vs the student (and the LA, the oracle) on realised times and on fresh draws |
 | `code/configs.py`, `code/run_all.py` | the ablation registry and runner |
 | `code/run_ladder.py` | every arm × feature set × training seed |
 | `code/run_length.py` | trained on short+medium, tested on long routes |
 | `code/ood_eval.py` | base-case models on shifted physics and the use case |
+| `code/run_phys.py` | trees trained across physics: every value (`phys`), and leave-one-value-out (`phys_LO<v>`); data from `extract.py --physics …` → `data/dataset_phys_<tag>.npz`, joined by `dataset.load_multi` |
+| `code/phys_eval.py` | those models on the test routes of each physics value, paired with the LA and Greedy; extra daily rests vs the oracle |
+| `code/mixed_instances.py` | test routes whose chargers change ALONG the route (`pmix` power, `dmix` spacing, `mix` both), built from base test routes → `instances_mixed/` |
+| `code/mixed_eval.py` | the hindsight oracle with one charging curve per charger, a Greedy mirror, and the students on those routes; `la` and `charging --la-only` compare with the LA |
+| `code/learning_curve.py` | the base trees refitted on 2, 4, 7, 12, 19 seeds per family: how many teacher routes the student needs |
+| `code/run_la_mixed.py` | src's own LA, in the stored teacher's configuration, on mixed routes (default: 8 `pmix` routes); outputs redirected to `la_mixed/`. Relies on the per-charger curves added to `src/` on 2026-10-01 (instance field `TbarK`; `CHANGES_IMPLEMENTED.md`, October 2026) |
 | `code/halt_state.py`, `code/diagnose_all.py` | replay infeasible runs; the cause of each |
 | `code/spread_compare.py` | the same models with and without the spread-room check |
 | `code/paper_link.py` | the manuscript's gap-to-oracle, exact definition |
@@ -115,6 +127,13 @@ spread-room check, `g99sr` = + the check and a 0.99 guard.
 
 ```bash
 python ML/code/extract.py                                  # dataset + gates
+python ML/code/extract.py --physics kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100 --jobs 4
+python ML/code/run_phys.py && python ML/code/phys_eval.py    # across physics, leave-one-out
+python ML/code/gbt_train.py --fset P --tag gbt_P102_phys_s1 --seed 1 \
+    --physics base,kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100
+python ML/code/mixed_instances.py && python ML/code/mixed_eval.py oracle \
+    && python ML/code/mixed_eval.py drive                   # chargers mixed along the route
+python ML/code/run_la_mixed.py && python ML/code/mixed_eval.py la --variants pmix
 python ML/code/run_ladder.py --arms gbt,clf,mlp --fsets C,D,F,L --seeds 3
 python ML/code/run_all.py                                  # ablations
 python ML/code/run_length.py --arms gbt,clf,mlp --fsets F,R --seeds 3
@@ -126,6 +145,10 @@ python ML/code/fig_gap.py && python ML/code/fig_ladder.py
 python ML/code/fig_length.py [--variant g95sr|g99sr] && python ML/code/fig_ood.py [--variant ...]
 python ML/code/report.py                                   # -> RESULTS.md
 python ML/code/run_rollout.py --set smoke --guard-q 0.99 --spread-room   # rollout, beyond the teacher
+python ML/code/run_endgame.py --set smoke --guard-q 0.99 --spread-room   # MILP end game
+python ML/code/fpi_collect.py --guard-q 0.99 --spread-room --name r1     # policy iteration:
+python ML/code/fpi_train.py --data r1 --tag fpi1_gbt_F95_base_s1_g99sr   #   labels, correction,
+python ML/code/fpi_eval.py --tag fpi1_gbt_F95_base_s1_g99sr --set test   #   evaluation
 ```
 
 Every runner skips work whose output already exists, so a rerun resumes.

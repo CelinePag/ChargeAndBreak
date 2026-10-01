@@ -17,7 +17,8 @@ Provides two services:
 Design
 ------
 All imports are at module level (no lazy imports).  oracle.py depends on:
-  BEHDV     — _energy_after_charging (energy utility)
+  BEHDV     — _energy_after_charging, slowest_charging_curve (energy utility;
+              per-station charging curves, see MILP.py "Per-charger curves")
   MILP      — build_model, extract_solution (Pyomo model construction)
   instances — compute_time_bounds (re-computes bounds for actual travel times)
 
@@ -47,7 +48,7 @@ import pyomo.environ as pyo
 
 from src.settings import apply_solver_threads as _apply_solver_threads
 
-from src.simulation.BEHDV     import _energy_after_charging
+from src.simulation.BEHDV     import _energy_after_charging, slowest_charging_curve
 from src.methods.MILP      import build_model, extract_solution, add_valid_inequalities
 from src.instance_gen.instances import compute_time_bounds
 from src import paths as _paths
@@ -249,7 +250,8 @@ def check_simulation_feasibility(results: dict, full_data: dict,
             if is_CS and y:
                 tauc_i = (durs[i] if i < len(durs) else {}).get("tauc", 0.0)
                 if tauc_i > 0:
-                    e_dep_c = _energy_after_charging(state.e_arr, tauc_i, full_data)
+                    e_dep_c = _energy_after_charging(state.e_arr, tauc_i,
+                                                     full_data, stop=s)
             if i + 1 < len(states):
                 E_leg_actual = e_dep_c - states[i + 1].e_arr
             else:
@@ -501,7 +503,8 @@ def _warmstart_oracle(model, full_data: dict, sim_results: dict):
         elif b15:      phi_track = 1
 
         if is_CS and y and tauc > 0:
-            ed_val = _energy_after_charging(state.e_arr, tauc, full_data)
+            ed_val = _energy_after_charging(state.e_arr, tauc, full_data,
+                                            stop=s)
         else:
             ed_val = state.e_arr
 
@@ -753,10 +756,12 @@ def oracle_solve(full_data: dict, D_actual_list: list,
             E_actual_dict[i] = _Enom.get(i, 0.0)   # no km → keep nominal
     oracle_data["E"] = E_actual_dict
 
+    # slowest station's curve: == Tbar unless the instance has per-station
+    # curves (TbarK), and then the bound that holds at every station
     lb_t, ub_t = compute_time_bounds(
         oracle_data["I"], oracle_data["C"], oracle_data["K"],
         D_actual_dict, oracle_data["S"], oracle_data["Q"],
-        oracle_data["Tbar"], oracle_data["T_hor"],
+        slowest_charging_curve(oracle_data), oracle_data["T_hor"],
         t0=oracle_data.get("T_START", 8.0))
     oracle_data["lb_t"] = lb_t
     oracle_data["ub_t"] = ub_t
