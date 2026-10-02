@@ -1,0 +1,52 @@
+[eval] kind=torch tag=tmlp_T144_physpmix_charger_s0 on stop: 66 instances
+  25/66  8s
+  50/66  12s
+[eval] 66 routes in 14.7s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_T144_physpmix_charger_s0 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               1.456 ms/decision (median 1.462)
+teacher latency       65947 ms/decision (45,298x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    +0.05 %
+   mean      +0.45 %
+   IQR     [-0.66, +0.69]
+   best/worst -15.02 % / +16.59 %
+   student faster on 33/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.38 %
+   mean      -2.75 %
+   IQR     [-3.81, -1.36]
+   best/worst -16.60 % / +11.51 %
+   student faster on 59/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +2.35 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 73   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   +0.19 %   mean   +0.79 %
+
+rests   student   162  LA   160   mean +0.030/route   fewer on 1/66 routes
+charges student   666  LA   655   mean +0.167/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTnone            n=  1  median +12.19 %  worst +12.19 %
+   RlongCmanyTtight           n=  1  median +10.53 %  worst +10.53 %
+   RmediumCmanyTlarge         n=  2  median  +8.26 %  worst +16.59 %
+   RlongCmediumTmedium        n=  1  median  +2.14 %  worst  +2.14 %
+   RmediumCmediumTnone        n=  2  median  +1.79 %  worst  +3.36 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 2x, left none 0x, charge clamp moved 1x
+spread room: actions removed 40x, charges shortened 1x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_T144_physpmix_charger_s0_g99sr_stop.json

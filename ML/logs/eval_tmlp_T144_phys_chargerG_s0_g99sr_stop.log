@@ -1,0 +1,52 @@
+[eval] kind=torch tag=tmlp_T144_phys_chargerG_s0 on stop: 66 instances
+  25/66  8s
+  50/66  12s
+[eval] 66 routes in 14.6s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_T144_phys_chargerG_s0 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               1.434 ms/decision (median 1.435)
+teacher latency       65947 ms/decision (45,974x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    -0.54 %
+   mean      +0.10 %
+   IQR     [-0.95, +0.38]
+   best/worst -2.51 % / +16.48 %
+   student faster on 42/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.70 %
+   mean      -3.05 %
+   IQR     [-3.99, -1.72]
+   best/worst -16.27 % / +12.23 %
+   student faster on 59/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +1.74 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 59   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   -0.49 %   mean   +0.30 %
+
+rests   student   162  LA   160   mean +0.030/route   fewer on 0/66 routes
+charges student   619  LA   655   mean -0.545/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTtight           n=  1  median +10.33 %  worst +10.33 %
+   RmediumCmanyTlarge         n=  2  median  +9.85 %  worst +16.48 %
+   RmediumCmediumTnone        n=  2  median  +1.63 %  worst  +2.07 %
+   RshortCmanyTlarge          n=  2  median  +1.55 %  worst  +1.57 %
+   RshortCmediumTtight        n=  2  median  +0.88 %  worst  +2.51 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 2x, left none 0x, charge clamp moved 7x
+spread room: actions removed 23x, charges shortened 5x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_T144_phys_chargerG_s0_g99sr_stop.json

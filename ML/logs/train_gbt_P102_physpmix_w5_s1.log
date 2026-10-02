@@ -1,0 +1,39 @@
+[fset] P: 102 features (84 state)
+[scope] all: training on short, medium, long routes
+[physics] learning from base, kwh300, kwh700, kwh900, kw150, kw700, kw1000, cs30, cs100, pmix
+[data] rows 1339024  features 102
+  fit   rows 1020420  instances 1960  decisions 181343
+  stop  rows  107032  instances  202  decisions  18831
+  test  rows  211572  instances  402  decisions  37512
+[weight] pmix rows x5 (12152 rows)
+
+[cost] trees=1200  val_huber=0.17517  23s
+[feas] trees=441  val_logloss=0.01502
+[tauc] trees=460  val_MAE=6.05 min (on 27102 charge rows)
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go  dirty picks
+fit         0.62 min    93.6%     181136       4.58 min          445
+stop        0.87 min    93.6%      18823       4.81 min           68
+test        0.80 min    93.7%      37487       4.38 min          141
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/models/gbt_P102_physpmix_w5_s1_{cost,feas,tauc}.txt  (48s)
+
+top 15 features by gain (cost head):
+   a_rest_min                      5855542
+   a_dwell_min                     1565913
+   a_resets_sd                      663064
+   hz_drive                         529640
+   legs_to_forced_rest              371667
+   a_r1                             232512
+   stops_left                       142164
+   drive_left                       130158
+   hz_stops                         130003
+   hz_n_rests                        89576
+   cust_left                         78514
+   a_residual_break                  78030
+   a_cu1_slack_after                 72416
+   sd_slack                          67312
+   ext_shift_used                    65328

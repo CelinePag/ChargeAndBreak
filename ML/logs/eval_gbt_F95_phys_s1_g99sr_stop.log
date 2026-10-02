@@ -1,0 +1,52 @@
+[eval] kind=gbt tag=gbt_F95_phys_s1 on stop: 66 instances
+  25/66  6s
+  50/66  10s
+[eval] 66 routes in 11.7s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_phys_s1 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               0.994 ms/decision (median 0.995)
+teacher latency       65947 ms/decision (66,369x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    +0.20 %
+   mean      +0.72 %
+   IQR     [-0.58, +1.47]
+   best/worst -1.89 % / +16.33 %
+   student faster on 26/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.16 %
+   mean      -2.45 %
+   IQR     [-3.34, -1.29]
+   best/worst -15.39 % / +15.23 %
+   student faster on 60/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +2.50 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 70   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   +0.32 %   mean   +1.07 %
+
+rests   student   162  LA   160   mean +0.030/route   fewer on 0/66 routes
+charges student   612  LA   655   mean -0.652/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTtight           n=  1  median  +9.45 %  worst  +9.45 %
+   RmediumCmanyTlarge         n=  2  median  +8.30 %  worst +16.33 %
+   RshortCfewTmedium          n=  2  median  +2.59 %  worst  +2.82 %
+   RmediumCmediumTnone        n=  2  median  +2.40 %  worst  +3.50 %
+   RshortCmanyTlarge          n=  2  median  +1.89 %  worst  +2.18 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 2x, left none 0x, charge clamp moved 2x
+spread room: actions removed 37x, charges shortened 2x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_gbt_F95_phys_s1_g99sr_stop.json

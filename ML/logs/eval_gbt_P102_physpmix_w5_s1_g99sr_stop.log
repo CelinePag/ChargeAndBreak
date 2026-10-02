@@ -1,0 +1,52 @@
+[eval] kind=gbt tag=gbt_P102_physpmix_w5_s1 on stop: 66 instances
+  25/66  6s
+  50/66  10s
+[eval] 66 routes in 12.3s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_P102_physpmix_w5_s1 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               1.058 ms/decision (median 1.069)
+teacher latency       65947 ms/decision (62,349x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    +0.56 %
+   mean      +1.60 %
+   IQR     [-0.40, +1.34]
+   best/worst -1.95 % / +36.60 %
+   student faster on 25/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -1.89 %
+   mean      -1.54 %
+   IQR     [-2.95, -1.16]
+   best/worst -15.49 % / +36.60 %
+   student faster on 56/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +2.69 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 76   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   +0.62 %   mean   +1.93 %
+
+rests   student   164  LA   160   mean +0.061/route   fewer on 0/66 routes
+charges student   625  LA   655   mean -0.455/route
+
+worst 5 families (median % vs LA)
+   RshortCmediumTnone         n=  2  median +18.73 %  worst +36.60 %
+   RlongCmanyTtight           n=  1  median  +9.94 %  worst  +9.94 %
+   RmediumCmanyTlarge         n=  2  median  +8.26 %  worst +16.01 %
+   RlongCmanyTlarge           n=  2  median  +4.60 %  worst +10.03 %
+   RmediumCmediumTnone        n=  2  median  +3.34 %  worst  +3.55 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 4x, left none 0x, charge clamp moved 1x
+spread room: actions removed 41x, charges shortened 1x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_gbt_P102_physpmix_w5_s1_g99sr_stop.json

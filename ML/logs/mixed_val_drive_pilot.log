@@ -1,0 +1,36 @@
+[drive] 128 runs -> /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/mixed_val_g99sr.jsonl
+  50/128  15s
+  100/128  20s
+
+========================================================================================================
+MIXED CHARGERS - gap to the oracle (%), short+medium routes, seeds 22-25; paired = mean +/- se of (method - Greedy) in pp
+========================================================================================================
+routes     method                            n  inf   median     mean    TW  +rest            vs Greedy    orc gap
+--------------------------------------------------------------------------------------------------------
+uniform    Greedy                           16    0    +4.46    +5.18    36      0                            0.45
+           trees, base only                 16    0    +2.16    +3.38    24      1       -1.80 +/- 1.13        nan
+           trees, all physics               16    0    +2.56    +2.83    26      0       -2.35 +/- 0.30        nan
+           trees, all physics + power       16    0    +2.74    +2.95    31      0       -2.22 +/- 0.29        nan
+           torch split+list, base only      16    0    +1.79    +1.92    23      0       -3.26 +/- 0.39        nan
+           torch split+list, all physics    16    0    +2.08    +2.77    22      0       -2.41 +/- 0.60        nan
+           torch split+list, T inputs, all phys   16    0    +2.47    +2.41    25      0       -2.76 +/- 0.34        nan
+           ChargerNet, all physics          16    0    +2.38    +2.54    22      0       -2.63 +/- 0.43        nan
+           ChargerNet, g sees speed, all phys   16    0    +1.86    +1.77    21      0       -3.40 +/- 0.47        nan
+           trees + power, + pilot           16    0    +2.28    +2.49    23      0       -2.69 +/- 0.49        nan
+           trees + power, + pilot x5        16    0    +2.91    +2.98    26      0       -2.20 +/- 0.47        nan
+           torch T inputs, + pilot          16    0    +2.25    +2.39    21      0       -2.79 +/- 0.48        nan
+           ChargerNet, + pilot              16    0    +2.41    +2.64    26      0       -2.53 +/- 0.41        nan
+--------------------------------------------------------------------------------------------------------
+pmix       Greedy                           16    2   +10.53   +10.47    42      0                            0.50
+           trees, base only                 16    0    +4.80    +5.03    26      0       -5.31 +/- 0.99        nan
+           trees, all physics               16    0    +5.02    +6.37    22      1       -3.80 +/- 1.52        nan
+           trees, all physics + power       16    0    +6.62    +7.15    30      1       -3.12 +/- 1.49        nan
+           torch split+list, base only      16    0    +9.78   +18.80    40      6       +7.99 +/- 3.88        nan
+           torch split+list, all physics    16    0    +5.36    +9.81    26      3       +0.32 +/- 2.85        nan
+           torch split+list, T inputs, all phys   16    0    +4.60    +5.53    32      0       -5.40 +/- 1.04        nan
+           ChargerNet, all physics          16    0    +4.90    +6.17    23      1       -4.49 +/- 1.46        nan
+           ChargerNet, g sees speed, all phys   16    0    +4.51    +7.55    30      2       -2.58 +/- 2.49        nan
+           trees + power, + pilot           16    0    +4.72    +4.96    17      0       -5.40 +/- 0.82        nan
+           trees + power, + pilot x5        16    0    +4.50    +4.93    17      0       -5.17 +/- 0.74        nan
+           torch T inputs, + pilot          16    0    +3.46    +5.73    22      1       -4.25 +/- 2.52        nan
+           ChargerNet, + pilot              16    0    +3.86    +3.54    21      0       -6.88 +/- 0.91        nan
