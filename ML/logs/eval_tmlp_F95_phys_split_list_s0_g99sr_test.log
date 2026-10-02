@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_F95_phys_split_list_s0 on test: 125 instances
+  25/125  5s
+  50/125  10s
+  75/125  14s
+  100/125  17s
+  125/125  19s
+[eval] 125 routes in 19.4s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_phys_split_list_s0 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               0.788 ms/decision (median 0.790)
+teacher latency       70617 ms/decision (89,637x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.20 %
+   mean      +0.46 %
+   IQR     [-0.97, +0.57]
+   best/worst -25.23 % / +33.32 %
+   student faster on 75/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.88 %
+   mean      -2.57 %
+   IQR     [-3.69, -1.82]
+   best/worst -10.70 % / +21.39 %
+   student faster on 116/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.04 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 96   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   -0.08 %   mean   +0.71 %
+
+rests   student   293  LA   289   mean +0.032/route   fewer on 3/125 routes
+charges student  1091  LA  1174   mean -0.664/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.54 %  worst +10.04 %
+   RshortCmanyTtight          n=  4  median  +2.19 %  worst +24.83 %
+   RshortCfewTnone            n=  4  median  +1.19 %  worst  +4.65 %
+   RlongCmediumTmedium        n=  3  median  +0.85 %  worst +11.37 %
+   RmediumCfewTtight          n=  4  median  +0.82 %  worst +25.16 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 4x, left none 0x, charge clamp moved 1x
+spread room: actions removed 49x, charges shortened 1x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_F95_phys_split_list_s0_g99sr_test.json
