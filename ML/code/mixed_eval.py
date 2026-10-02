@@ -74,7 +74,10 @@ MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           ("gbt", "gbt_P102_physpmix_s1", "trees + power, + pilot"),
           ("gbt", "gbt_P102_physpmix_w5_s1", "trees + power, + pilot x5"),
           ("torch", "tmlp_T144_physpmix_split_list_s0", "torch T inputs, + pilot"),
-          ("torch", "tmlp_T144_physpmix_charger_s0", "ChargerNet, + pilot")]
+          ("torch", "tmlp_T144_physpmix_charger_s0", "ChargerNet, + pilot"),
+          # chosen on the validation routes (2026-10-03): two more seeds for the test
+          ("torch", "tmlp_T144_physpmix_charger_s1", "ChargerNet, + pilot (s1)"),
+          ("torch", "tmlp_T144_physpmix_charger_s2", "ChargerNet, + pilot (s2)")]
 
 
 # which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"

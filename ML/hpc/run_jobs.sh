@@ -8,6 +8,7 @@
 #     bash ML/hpc/run_jobs.sh dagger         # DAgger probe on the stop split
 #     bash ML/hpc/run_jobs.sh extract-pmix   # after `pilot`: the pilot's LA runs -> training rows
 #     bash ML/hpc/run_jobs.sh pilot-models   # after `extract-pmix`: models trained WITH the pilot routes
+#     bash ML/hpc/run_jobs.sh test           # the model chosen on validation: 2 more seeds, test once
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -131,8 +132,41 @@ pilot-models)
   log "pilot-models done"
   ;;
 
+test)
+  # ChargerNet + pilot was CHOSEN on the validation routes (2026-10-03).  Two
+  # more seeds, then every direction-B / pilot model on the TEST routes, once:
+  # base case (125 routes), mixed routes (pmix / dmix / mix, 32 each), and the
+  # LA comparison on its 8 pmix routes.  The other models are ablation rows.
+  T=$(( NCPU < 16 ? NCPU : 16 ))
+  for s in 1 2; do
+    tag=tmlp_T144_physpmix_charger_s$s
+    if [ -f "ML/models/${tag}_torch.pt" ]; then log "test: $tag exists, skipped"; continue; fi
+    log "test: training $tag"
+    python -u ML/code/torch_train.py --tag "$tag" --fset T --physics "$PHYS,pmix" --seed "$s" \
+        --threads "$T" --lambda-list 1 --tau 0.25 --arch charger --g-exclude power \
+        > "$LOGS/train_${tag}.log" 2>&1
+  done
+  for spec in torch:tmlp_T144_physpmix_charger_s0 torch:tmlp_T144_physpmix_charger_s1 \
+              torch:tmlp_T144_physpmix_charger_s2 torch:tmlp_T144_physpmix_split_list_s0 \
+              torch:tmlp_T144_phys_charger_s0 torch:tmlp_T144_phys_split_list_s0 \
+              torch:tmlp_F95_phys_split_list_s0 gbt:gbt_P102_physpmix_s1 \
+              gbt:gbt_P102_physpmix_w5_s1 gbt:gbt_F95_phys_s1; do
+    kind=${spec%%:*}; tag=${spec#*:}
+    out=eval_${tag}_g99sr_test.json
+    if [ -f "ML/results/$out" ]; then continue; fi
+    log "test: $tag on the 125 base-case test routes"
+    python -u ML/code/evaluate.py --kind "$kind" --tag "$tag" --split test \
+        --guard-q 0.99 --spread-room --out "$out" > "$LOGS/eval_${tag}_g99sr_test.log" 2>&1
+  done
+  log "test: mixed test routes (pmix, dmix, mix)"
+  python -u ML/code/mixed_eval.py drive --jobs $(( NCPU < 8 ? NCPU : 8 )) \
+      > "$LOGS/mixed_test_drive_b.log" 2>&1
+  python -u ML/code/mixed_eval.py la --variants pmix > "$LOGS/mixed_test_la_b.log" 2>&1
+  log "test done"
+  ;;
+
 *)
-  echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models"
+  echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   exit 1
   ;;
 esac

@@ -112,7 +112,7 @@ tbody th { font-weight: 600; }
     <div><dt>Base case</dt><dd>The students match the LA. Best: PyTorch model at <span class="num">+0.17 ± 0.30 %</span> route duration vs LA (median <span class="num">−0.07 %</span>), trees <span class="num">+0.48 ± 0.35 %</span>, 0 rule violations in 375 runs each. A decision takes 3 ms instead of 71 s.</dd></div>
     <div><dt>Generalization</dt><dd>Works between charger powers and battery sizes it has seen. Fails below that range (150 kW chargers) and when charger power varies along a route: every student loses 5 to 9 pp, the PyTorch model 22.5 pp, while the LA loses nothing.</dd></div>
     <div><dt>Beating the LA</dt><dd>Three attempts (rollout, policy iteration, MILP end game), all negative. The LA's worst routes are an extra daily rest near the end of long routes; none of the fixes removed it.</dd></div>
-    <div><dt>Direction</dt><dd>Chosen 2 Oct: <strong>B</strong>, a model with structure that compares the chargers ahead, so it can handle routes where charger power varies without needing LA runs on such routes.</dd></div>
+    <div><dt>Direction</dt><dd>Chosen 2 Oct: <strong>B</strong>, a model with structure that compares the chargers ahead. First validation result (3 Oct): structure alone and data alone do not close the mixed-power gap, together they do. ChargerNet trained with 47 mixed-route LA runs loses <span class="num">+0.8 ± 0.5</span> pp when power varies (other models +2 to +6). Test routes pending.</dd></div>
   </dl>
 </section>
 
@@ -122,8 +122,8 @@ tbody th { font-weight: 600; }
     <table>
       <thead><tr><th>Job</th><th>What it answers</th><th>Status</th><th>Expected</th></tr></thead>
       <tbody>
-        <tr><td>B1: ChargerNet and its variant on all physics, then validation</td><td>Does a built-in charger comparison close the mixed-power gap? (The control without structure is trained.)</td><td><span class="chip run">to rerun on the cluster</span></td><td class="n">stage <code>b1</code></td></tr>
-        <tr><td>Pilot models: trees and PyTorch trained with the 47 pilot routes</td><td>The data answer to the same question, judged on the same validation routes</td><td><span class="chip run">to run on the cluster</span></td><td class="n">stage <code>pilot-models</code></td></tr>
+        <tr><td>Test: ChargerNet + pilot (3 seeds) and the ablation rows, once</td><td>Does the validation result hold on the 125 base-case and 32×3 mixed test routes, and against the LA?</td><td><span class="chip run">to run on the cluster</span></td><td class="n">stage <code>test</code></td></tr>
+        <tr><td>B1 and pilot models, validation</td><td>Structure vs data on the 16 mixed-power and 66 uniform validation routes</td><td><span class="chip ok">done</span></td><td class="n">see Generalization</td></tr>
         <tr><td>Pilot: LA on 48 short mixed-power training routes</td><td>Training data from mixed routes</td><td><span class="chip ok">done</span></td><td class="n">47 routes, 12,152 rows</td></tr>
         <tr><td>DAgger probe on 36 validation routes</td><td>Do errors compound at the students' own states?</td><td><span class="chip ok">done</span></td><td class="n">see Data and compute</td></tr>
       </tbody>
@@ -215,6 +215,7 @@ tbody th { font-weight: 600; }
       <tr><td>Charger power or spacing varies along a route</td><td>Train on uniform routes, test on mixed ones</td><td>Mixed spacing costs nothing. Mixed power costs every student 5 to 9 pp and the LA 0.2 pp. Adding charger-power inputs made the trees worse. See the chart below.</td><td><span class="chip bad">fails</span></td></tr>
       <tr><td>Why the PyTorch model collapsed there</td><td>Diagnose before building direction B</td><td>On mixed-power routes, 60 % of the rows it scores have an input outside the training range (10 % on uniform routes), mainly the current charging rate, up to 14 standard deviations out. Trees treat unseen values as the nearest seen one; the network extrapolates.</td><td><span class="chip ok">diagnosed</span></td></tr>
       <tr><td>B0: the same PyTorch recipe on every physics value</td><td>Separate "never saw these powers" from "cannot compare chargers"</td><td>The collapse is gone: mixed power +9.4 % above the oracle (was +17.3 %), like the trees. The comparison problem stays: still about 5 pp worse than on uniform routes. Training on every physics value costs about 1.5 pp on uniform routes (+4.2 % vs +2.7 %).</td><td><span class="chip part">partly</span></td></tr>
+      <tr><td>Direction B: structure vs data (validation routes)</td><td>Close the mixed-power gap with a charger-comparison network, with LA data from mixed routes, or both?</td><td>Cost of mixing on 15 mixed-power validation routes: ChargerNet alone +3.8 ± 1.3 pp (control without structure +3.1), trees with the 47 pilot routes +2.4 ± 0.6, PyTorch without structure plus pilot +3.6 ± 2.2, <strong>ChargerNet plus pilot +0.8 ± 0.5</strong> (Greedy +5.3). Only the combination beats the base-only trees on mixed routes (−1.3 ± 0.5 pp), and it stays at +0.45 ± 0.44 % vs the LA on 66 uniform routes, 0 violations. Chosen among 11 candidates on 15 routes, so the test routes must confirm it.</td><td><span class="chip ok">promising</span></td></tr>
     </tbody>
   </table></div>
 
@@ -284,6 +285,7 @@ tbody th { font-weight: 600; }
 <section aria-labelledby="log">
   <h2 id="log">Change log</h2>
   <ul class="log">
+    <li><span class="num">2026-10-03, later</span> B1 and pilot models validated: ChargerNet + pilot data is the only model that nearly closes the mixed-power gap. Test stage prepared.</li>
     <li><span class="num">2026-10-03</span> Cluster results: pilot done (47 routes extracted), DAgger probe done (no compounding on the base case). B1 failed on an import path in the trainer (fixed, to rerun); pilot-models stage added. An LA decision takes ~12 s on the cluster vs 70–160 s on the laptop.</li>
     <li><span class="num">2026-10-02 16:20</span> Laptop jobs stopped; the remaining runs move to a cluster (<code>ML/hpc/run_jobs.sh</code>). Re-extraction verified, validation oracles solved, B1 control trained.</li>
     <li><span class="num">2026-10-02 15:20</span> B0 result; per-charger inputs added and re-extracting; mixed-power validation routes built; B1 queued.</li>
