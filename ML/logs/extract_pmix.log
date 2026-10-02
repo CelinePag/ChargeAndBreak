@@ -1,0 +1,27 @@
+
+[extract] physics=pmix: 60 LA logs | 253 state + 18 action = 271 features
+[extract] done in 1s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 47/60   excluded: 13
+    no_instance: 8
+    no_solution: 4
+    run_infeasible: 1
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.92e-05 h  over 47 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 2279 / 2279 logged (100.0%)   rows: 12152
+[extract] wrote /mnt/beegfs/users/celinep/ChargeAndBreak/ML/data/dataset_phys_pmix.npz  X=(12152, 271)  instances=47  families=4

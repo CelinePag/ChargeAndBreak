@@ -1,0 +1,19 @@
+[report] probe: 240 labelled decisions (24 teacher checks)
+
+ON-POLICY REGRET (student's executed action, teacher's costs)
+model                        class       n  regret min  wrong  dirty  rest?
+gbt_F95_base_s0              all       108      1.13    12.0%      0      1
+gbt_F95_base_s0              short      36      0.87    16.7%      0      0
+gbt_F95_base_s0              medium     36      1.96     8.3%      0      1
+gbt_F95_base_s0              long       36      0.57    11.1%      0      0
+tmlp_F95_split_list_s0       all       108      0.62    13.0%      0      0
+tmlp_F95_split_list_s0       short      36      0.39    13.9%      0      0
+tmlp_F95_split_list_s0       medium     36      0.05     8.3%      0      0
+tmlp_F95_split_list_s0       long       36      1.43    16.7%      0      0
+
+REFERENCE: offline regret on the teacher's stop-split states
+  gbt_F95_base_s0              teacher states   0.85 min (5507 decisions)   own states   1.13 min (108)
+  tmlp_F95_split_list_s0       teacher states   0.83 min (5507 decisions)   own states   0.62 min (108)
+
+TEACHER CHECK (stops still on the teacher's trajectory)
+  24 checks (24 with a logged teacher decision): same chosen action 24/24; |cost difference| / scenario SEM: median 0.57, 95th pct 1.70 over 124 actions (|N(0,1)|: median 0.67, 95th pct 1.96, if the queried LA is the teacher)
