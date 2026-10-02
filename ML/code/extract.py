@@ -98,11 +98,15 @@ PHYSICS["pmix"] = (os.path.join(_LA_MIXED, "logs", "sensitivity"),
                    os.path.join(_ROOT, "ML", "instances_mixed", "train", "pmix"),
                    "*__pmix_LA_*.txt")
 
-_RE_RUN = re.compile(r"^(?P<inst>.+?)_LA(?:_MIPTAIL)?_\d{8}_\d{6}_\d{3}$")
+# Stored runs end in _<date>_<time>_<ms>; run_la_mixed.py's runs (the pmix
+# pilot) are named by run_simulation_precomputed itself: _LA_S25_H24_<date>_<time>
+_RE_RUN = re.compile(
+    r"^(?P<inst>.+?)_LA(?:_MIPTAIL)?(?:_S\d+_H\d+)?_\d{8}_\d{6}(?:_\d{3})?$")
 
 
 def instance_of(run_id: str) -> str:
-    """'RlongCfewTnone_10__kw150_LA_20260818_233122_000' -> 'RlongCfewTnone_10__kw150'."""
+    """'RlongCfewTnone_10__kw150_LA_20260818_233122_000' -> 'RlongCfewTnone_10__kw150';
+    'RshortCfewTnone_5__pmix_LA_S25_H24_20261002_011500' -> 'RshortCfewTnone_5__pmix'."""
     m = _RE_RUN.match(run_id)
     return m.group("inst") if m else run_id.split("_LA_MIPTAIL")[0]
 
