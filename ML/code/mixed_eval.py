@@ -77,7 +77,19 @@ MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           ("torch", "tmlp_T144_physpmix_charger_s0", "ChargerNet, + pilot"),
           # chosen on the validation routes (2026-10-03): two more seeds for the test
           ("torch", "tmlp_T144_physpmix_charger_s1", "ChargerNet, + pilot (s1)"),
-          ("torch", "tmlp_T144_physpmix_charger_s2", "ChargerNet, + pilot (s2)")]
+          ("torch", "tmlp_T144_physpmix_charger_s2", "ChargerNet, + pilot (s2)"),
+          # more mixed data vs DAgger at equal LA time (2026-10-03): the PyTorch
+          # model with the per-charger inputs, 3 seeds per configuration
+          ("torch", "tmlp_T144_physpmix_split_list_s1", "torch T, + pilot (s1)"),
+          ("torch", "tmlp_T144_physpmix_split_list_s2", "torch T, + pilot (s2)"),
+          ("torch", "tmlp_T144_physpmixall_split_list_s0", "torch T, + all mixed data"),
+          ("torch", "tmlp_T144_physpmixall_split_list_s1", "torch T, + all mixed data (s1)"),
+          ("torch", "tmlp_T144_physpmixall_split_list_s2", "torch T, + all mixed data (s2)"),
+          ("torch", "tmlp_T144_physdg_split_list_s0", "torch T, + DAgger"),
+          ("torch", "tmlp_T144_physdg_split_list_s1", "torch T, + DAgger (s1)"),
+          ("torch", "tmlp_T144_physdg_split_list_s2", "torch T, + DAgger (s2)"),
+          ("gbt", "gbt_P102_physpmixall_s1", "trees + power, + all mixed data"),
+          ("gbt", "gbt_P102_physdg_s1", "trees + power, + DAgger")]
 
 
 # which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"

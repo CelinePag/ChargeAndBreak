@@ -81,6 +81,9 @@ def main():
     ap.add_argument("--routes", default=None,
                     help="base route names; the variant suffix is added "
                          "(default: SUBSET for test, every built route for train)")
+    ap.add_argument("--slice", default="0/1",
+                    help="i/n: this process's share of the routes, so n processes "
+                         "can label one batch in parallel (each skips solved routes)")
     args = ap.parse_args()
 
     from src import paths
@@ -91,9 +94,10 @@ def main():
               else train_routes(args.variant) if args.split == "train" else SUBSET)
     inst_dir = (os.path.join(INST, "train", args.variant) if args.split == "train"
                 else os.path.join(INST, args.variant))
-    names = [f"{r}__{args.variant}" for r in routes if r]
-    print(f"[la_mixed] {args.split}: {len(names)} routes, outputs under {LA_ROOT}",
-          flush=True)
+    i, n = (int(x) for x in args.slice.split("/"))
+    names = [f"{r}__{args.variant}" for r in routes if r][i::n]
+    print(f"[la_mixed] {args.split}: {len(names)} routes (slice {args.slice}), "
+          f"outputs under {LA_ROOT}", flush=True)
     for name in names:
         if la_solutions(name):
             print(f"  [skip] {name}", flush=True)

@@ -104,8 +104,12 @@ def divergence(steps, teacher):
     return 10 ** 9                        # never left the teacher's trajectory
 
 
-def pick_routes(route_set, split, per_family, label, seed, limit):
-    fams = routes(route_set, SPLITS[split])
+def pick_routes(route_set, split, per_family, label, seed, limit,
+                route_seeds=None, lengths=None):
+    seeds = SPLITS[split] if route_seeds is None else set(route_seeds) & SPLITS[split]
+    fams = routes(route_set, seeds)
+    if lengths:
+        fams = {f: v for f, v in fams.items() if f[1:].split("C")[0] in lengths}
     rng = np.random.default_rng(stable_seed("routes", label, route_set, split, seed))
     out = []
     for fam in sorted(fams):
@@ -131,13 +135,23 @@ def main():
     ap.add_argument("--no-spread-room", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0, help="routes (0 = all)")
+    ap.add_argument("--route-seeds", default=None,
+                    help="restrict to these route seeds, e.g. '1-12' (within the split)")
+    ap.add_argument("--lengths", default=None, help="e.g. 'short' or 'short,medium'")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
 
     out_dir = label_dir(args.label, "queries")
     os.makedirs(out_dir, exist_ok=True)
+    rs = None
+    if args.route_seeds:
+        rs = []
+        for part in args.route_seeds.split(","):
+            a, _, b = part.partition("-")
+            rs += list(range(int(a), int(b or a) + 1))
     picked = pick_routes(args.routes, args.split, args.per_family, args.label,
-                         args.seed, args.limit)
+                         args.seed, args.limit, route_seeds=rs,
+                         lengths=args.lengths.split(",") if args.lengths else None)
     models = [m.split(":", 1) for m in args.models.split(",") if m]
     print(f"[rollout] label={args.label} routes={args.routes}/{args.split}: "
           f"{len(picked)} routes x {len(models)} models, {args.stops} queries each")
