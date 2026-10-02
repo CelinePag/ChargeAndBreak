@@ -8,13 +8,18 @@
 #     bash ML/hpc/run_jobs.sh dagger         # DAgger probe on the stop split
 #     bash ML/hpc/run_jobs.sh extract-pmix   # after `pilot`: the pilot's LA runs -> training rows
 #
-# The stages are independent and can run as separate jobs at the same time.
+# The stages are independent and can run at the same time.  On a plain
+# machine (no Slurm), start each in the background and give it its share of
+# the cores with NCPU, e.g.
+#
+#     NCPU=16 nohup bash ML/hpc/run_jobs.sh pilot > ML/logs/nohup_pilot.out 2>&1 &
+#
 # Every step skips work whose output exists, so a killed job is resumed by
-# running the same stage again.  Logs: ML/logs/.
+# running the same stage again.  Logs: ML/logs/ (summary: ML/logs/hpc_jobs.log).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-NCPU=${SLURM_CPUS_PER_TASK:-$(nproc)}
+NCPU=${NCPU:-${SLURM_CPUS_PER_TASK:-$(nproc)}}
 LOGS=ML/logs
 mkdir -p "$LOGS"
 PHYS=base,kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100
