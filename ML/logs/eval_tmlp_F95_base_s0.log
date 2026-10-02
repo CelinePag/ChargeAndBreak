@@ -1,0 +1,54 @@
+﻿[eval] kind=torch tag=tmlp_F95_base_s0 on test: 125 instances
+  25/125  17s
+  50/125  32s
+  75/125  46s
+  100/125  54s
+  125/125  64s
+[eval] 125 routes in 64.2s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_base_s0 on test
+==========================================================================
+routes                125
+completed             124
+infeasible            1   hos_cd=1
+latency               3.010 ms/decision (median 2.878)
+teacher latency       71388 ms/decision (23,716x slower)
+
+vs LA  (paired on 124 routes both completed)
+   median    +0.16 %
+   mean      +2.37 %
+   IQR     [-0.54, +1.48]
+   best/worst -10.14 % / +35.81 %
+   student faster on 53/124 routes
+
+vs GREEDY  (paired on 119 routes both completed)
+   median    -2.26 %
+   mean      -0.69 %
+   IQR     [-3.20, -1.40]
+   best/worst -7.29 % / +33.20 %
+   student faster on 107/119 routes
+
+vs ORACLE (hindsight objective - T_START, 124 routes)
+   median    +2.26 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 122   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 124 routes)
+   median   +0.51 %   mean   +2.89 %
+
+rests   student   294  LA   283   mean +0.089/route   fewer on 1/124 routes
+charges student  1073  LA  1155   mean -0.661/route
+
+worst 5 families (median % vs LA)
+   RshortCmediumTnone         n=  4  median +31.26 %  worst +35.55 %
+   RlongCmediumTlarge         n=  2  median  +4.13 %  worst  +9.93 %
+   RmediumCmanyTnone          n=  4  median  +3.57 %  worst +16.64 %
+   RshortCmanyTtight          n=  4  median  +2.72 %  worst  +3.69 %
+   RshortCfewTnone            n=  4  median  +1.72 %  worst +35.81 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 2x, left none 0x, charge clamp moved 1x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_base_s0_g95_test.json

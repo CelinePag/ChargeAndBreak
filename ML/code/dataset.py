@@ -124,6 +124,82 @@ def load_multi(tags, columns=None):
     return d
 
 
+DAGGER = os.path.join(DATA, "dagger")
+
+
+def add_dagger(d, labels, root=None):
+    """Append DAgger rows (dagger_label.py) for the given labels to a dataset.
+
+    Each (route, label, visiting model) becomes its own instance, so decision
+    ids never collide with the teacher's decisions on the same route; family
+    and seed are the route's, so split_masks files the rows under FIT like the
+    route itself.  Only FIT routes are accepted: a probe on the stop split is
+    for measuring (dagger_report.py), never for training.  Teacher-check rows
+    (states the teacher itself visited) are dropped -- they duplicate rows the
+    dataset already has.  Columns are selected by name, so a dataset loaded
+    with only one feature set's columns (load_multi) works too.  Adds
+    `source` per row: 0 = teacher run, k = the k-th label in `labels`.
+    """
+    import glob
+    root = root or DAGGER
+    names = [str(x) for x in d["feature_names"]]
+    files = [(k, f) for k, lab in enumerate(labels, start=1)
+             for f in sorted(glob.glob(os.path.join(root, lab, "labels", "*.npz")))]
+    if not files:
+        raise SystemExit(f"no DAgger labels for {labels} under {root}")
+
+    instances = [str(x) for x in d["instances"]]
+    families = [str(x) for x in d["families"]]
+    phys = [str(x) for x in d.get("physics_names", ["base"])]
+    add = {k: [] for k in _ROWWISE if k != "seed"}
+    Xs, inst_ix, fam_ix, seed, src, phys_ix = [], [], [], [], [], []
+    for k, f in files:
+        with np.load(f, allow_pickle=True) as z:
+            if int(z["seed"]) not in FIT_SEEDS:
+                raise ValueError(f"{f}: route seed {int(z['seed'])} is not a FIT seed "
+                                 f"-- DAgger rows from it would leak into evaluation")
+            keep = z["is_check"] == 0
+            if not keep.any():
+                continue
+            fn = [str(x) for x in z["feature_names"]]
+            Xs.append(z["X"][keep][:, [fn.index(c) for c in names]])
+            for c in add:
+                add[c].append(z[c][keep])
+            n = int(keep.sum())
+            instances.append(str(z["instance"]))
+            inst_ix.append(np.full(n, len(instances) - 1, dtype=np.int32))
+            fam = str(z["family"])
+            if fam not in families:
+                families.append(fam)
+            fam_ix.append(np.full(n, families.index(fam), dtype=np.int16))
+            seed.append(np.full(n, int(z["seed"]), dtype=np.int16))
+            src.append(np.full(n, k, dtype=np.int8))
+            p = str(z["physics"])
+            if p not in phys:
+                phys.append(p)
+            phys_ix.append(np.full(n, phys.index(p), dtype=np.int8))
+
+    n0 = len(d["stop"])
+    out = dict(d)
+    out["X"] = np.concatenate([d["X"]] + Xs).astype(np.float32)
+    for c in add:
+        out[c] = np.concatenate([d[c]] + add[c]).astype(d[c].dtype)
+    out["seed"] = np.concatenate([d["seed"]] + seed).astype(d["seed"].dtype)
+    out["instance_ix"] = np.concatenate([d["instance_ix"]] + inst_ix).astype(np.int32)
+    out["family_ix"] = np.concatenate([d["family_ix"]] + fam_ix).astype(np.int16)
+    out["instances"] = np.array(instances)
+    out["families"] = np.array(families)
+    out["source"] = np.concatenate([np.zeros(n0, dtype=np.int8)] + src)
+    out["dagger_labels"] = np.array(list(labels))
+    if "physics_ix" in d or phys != ["base"]:
+        base_ix = d["physics_ix"] if "physics_ix" in d else np.zeros(n0, dtype=np.int8)
+        out["physics_ix"] = np.concatenate([base_ix] + phys_ix).astype(np.int8)
+        out["physics_names"] = np.array(phys)
+    print(f"[dagger] +{len(out['stop']) - n0} rows from {len(files)} label files "
+          f"({', '.join(labels)}); dataset now {len(out['stop'])} rows")
+    return out
+
+
 def row_physics(d):
     """Per-ROW physics tag ('base' for a single-file dataset)."""
     if "physics_ix" not in d:
@@ -243,18 +319,36 @@ def teacher_top1(d, mask, pred_cost):
     return float(np.nanmean(true_r[order][start] < 1e-9))
 
 
+def dirty_picks(d, mask, pred_cost, feas, feas_thr=0.5):
+    """Decisions whose argmin(pred | feas >= thr) is a DIRTY action.
+
+    argmin_policy_regret skips dirty actions, so a weak feasibility head is
+    invisible there; this is where it shows (2026-10-01: torch heads selected
+    at epoch 3-5 picked 72-94 dirty actions on the stop split, trees 15, and
+    broke HOS limits in closed loop).
+    """
+    did = decision_id(d)[mask]
+    pred = pred_cost[mask].astype(np.float64) + 1e6 * (feas[mask] < feas_thr)
+    order = np.lexsort((pred, did))
+    did_s = did[order]
+    start = np.flatnonzero(np.r_[True, did_s[1:] != did_s[:-1]])
+    return int((~d["clean"].astype(bool)[mask][order][start]).sum())
+
+
 def print_offline(d, pred, feas, masks, names=("fit", "stop", "test")):
     """The comparison table both arms print, so they are directly comparable."""
     print(f"\n{'='*72}\nOFFLINE POLICY METRICS (argmin over scored actions)\n{'='*72}")
     print(f"{'split':6s} {'mean regret':>12s} {'top-1':>8s} {'decisions':>10s}   "
-          f"{'always-go':>11s}")
+          f"{'always-go':>11s} {'dirty picks':>12s}")
     go_ix = list(d["action_vocab"]).index("y0_go")
     gopred = np.where(d["action_ix"] == go_ix, 0.0, 1.0)
     for nm, m in zip(names, masks):
         r, n = argmin_policy_regret(d, m, pred, feas)
         t1 = teacher_top1(d, m, pred)
         rg, _ = argmin_policy_regret(d, m, gopred)
-        print(f"{nm:6s} {r*60:9.2f} min {t1*100:7.1f}% {n:10d}   {rg*60:8.2f} min")
+        dp = dirty_picks(d, m, pred, feas) if feas is not None else -1
+        print(f"{nm:6s} {r*60:9.2f} min {t1*100:7.1f}% {n:10d}   {rg*60:8.2f} min "
+              f"{dp:12d}")
 
 
 def split_report(d, scope="all", hold_out=(), fit_seeds=None):

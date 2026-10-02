@@ -28,9 +28,12 @@ The draws are seeded from the instance name and the variant, so a rebuild
 is identical.  Test routes go to ML/instances_mixed/<variant>/; TRAINING
 routes (--split train: the LA labels them for the students, seeds 1-19 only)
 go to ML/instances_mixed/train/<variant>/, so no evaluator can pick one up as
-a test route.
+a test route.  VALIDATION routes (--split val, seeds 20-21, added 2026-10-02)
+go to ML/instances_mixed/val/<variant>/: models are chosen there, so the test
+routes are looked at once.
 
     python ML/code/mixed_instances.py [--variants pmix,dmix,mix]
+    python ML/code/mixed_instances.py --split val --variants pmix
     python ML/code/mixed_instances.py --split train --variants pmix \\
         --lengths short --seeds 1-12          # the 2026-10-01 pilot
 """
@@ -59,6 +62,7 @@ from src.settings import (M_LAYBY_H, M_SEQ_H, M_STOP_H,          # noqa: E402
 OUT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "instances_mixed"))
 POWERS_KW = (150.0, 350.0, 700.0, 1000.0)
 TEST_SEEDS = (22, 23, 24, 25)
+VAL_SEEDS = (20, 21)
 # the sensitivity grid, minus long routes (their oracle does not certify
 # within 2 h): the routes the physics-trained models were tested on
 FAMILIES = [f"R{r}C{c}T{t}" for r in ("short", "medium")
@@ -194,18 +198,24 @@ def _seeds(spec):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variants", default="pmix,dmix,mix")
-    ap.add_argument("--split", choices=["test", "train"], default="test")
+    ap.add_argument("--split", choices=["test", "train", "val"], default="test",
+                    help="val: the stopping seeds 20-21, to CHOOSE between models "
+                         "on mixed routes without looking at the test routes")
     ap.add_argument("--seeds", default=None,
-                    help="test: 22-25 (default); train: must lie in 1-19")
+                    help="test: 22-25 (default); val: 20-21; train: must lie in 1-19")
     ap.add_argument("--lengths", default="short,medium")
     args = ap.parse_args()
-    seeds = _seeds(args.seeds) if args.seeds else list(TEST_SEEDS)
+    seeds = (_seeds(args.seeds) if args.seeds
+             else list(VAL_SEEDS) if args.split == "val" else list(TEST_SEEDS))
     if args.split == "train" and any(s > 19 for s in seeds):
         raise SystemExit("training routes must use the fitting seeds 1-19")
+    if args.split == "val" and not set(seeds) <= set(VAL_SEEDS):
+        raise SystemExit("validation routes must use the stopping seeds 20-21")
     lengths = args.lengths.split(",")
     fams = [f for f in FAMILIES if f[1:].split("C")[0] in lengths]
     for v in args.variants.split(","):
-        out_dir = os.path.join(OUT, "train", v) if args.split == "train" else os.path.join(OUT, v)
+        out_dir = (os.path.join(OUT, args.split, v) if args.split in ("train", "val")
+                   else os.path.join(OUT, v))
         os.makedirs(out_dir, exist_ok=True)
         n = 0
         for fam in fams:

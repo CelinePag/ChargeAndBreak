@@ -106,9 +106,10 @@ def baselines(inst):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kind", default="gbt", choices=["gbt", "nn", "clf"],
+    ap.add_argument("--kind", default="gbt", choices=["gbt", "nn", "clf", "torch"],
                     help="which arm: gbt (trees), nn (MLP cost regression), "
-                         "clf (MLP classifier — the deleted project's framing)")
+                         "clf (MLP classifier — the deleted project's framing), "
+                         "torch (PyTorch networks, torch_train.py)")
     ap.add_argument("--tag", default="base")
     ap.add_argument("--split", default="val", choices=list(SPLITS))
     ap.add_argument("--limit", type=int, default=0)

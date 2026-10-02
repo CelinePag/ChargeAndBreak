@@ -1,0 +1,51 @@
+﻿[eval] kind=torch tag=tmlp_F95_list3_s0 on stop: 66 instances
+  25/66  22s
+  50/66  38s
+[eval] 66 routes in 46.5s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_list3_s0 on stop
+==========================================================================
+routes                66
+completed             64
+infeasible            2   hos_sd=2
+latency               4.343 ms/decision (median 4.021)
+teacher latency       67748 ms/decision (15,598x slower)
+
+vs LA  (paired on 64 routes both completed)
+   median    -0.23 %
+   mean      +0.53 %
+   IQR     [-1.07, +0.60]
+   best/worst -2.21 % / +17.76 %
+   student faster on 38/64 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.76 %
+   mean      -2.68 %
+   IQR     [-3.58, -1.80]
+   best/worst -13.59 % / +12.92 %
+   student faster on 59/63 routes
+
+vs ORACLE (hindsight objective - T_START, 64 routes)
+   median    +1.83 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 78   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 64 routes)
+   median   +0.08 %   mean   +0.97 %
+
+rests   student   153  LA   150   mean +0.047/route   fewer on 0/64 routes
+charges student   556  LA   617   mean -0.953/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  1  median  +9.36 %  worst  +9.36 %
+   RmediumCmanyTmedium        n=  2  median  +8.35 %  worst +17.76 %
+   RmediumCfewTnone           n=  2  median  +7.60 %  worst +15.38 %
+   RmediumCmediumTnone        n=  2  median  +1.64 %  worst  +2.55 %
+   RshortCmanyTlarge          n=  2  median  +1.53 %  worst  +1.92 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 2x, left none 0x, charge clamp moved 0x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_list3_s0_g95_stop.json

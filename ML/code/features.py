@@ -61,6 +61,8 @@ def _get(d, i, default=0.0):
 
 
 N_REACH_CS = 8        # chargers scanned for the fastest one within reach
+N_TOK = 6             # chargers ahead described as tokens (section J)
+TOKEN_ATTRS = ("exists", "drive", "soc_frac", "queue", "reach", "kw", "tfull")
 
 
 def charger_curve(fd: dict, j: int) -> dict:
@@ -392,6 +394,35 @@ def state_features(fd: dict, pre: Precomp, stop: int, state,
             best_kw, best_drive = kw, float(pre.cumD[j] - pre.cumD[stop])
     f["best_kw_reach"] = best_kw
     f["drive_to_best_kw"] = best_drive
+
+    # -- J. charger tokens (the `T` feature set, direction B) -----------------
+    # The SAME seven numbers for the charger here (tok0) and each of the next
+    # N_TOK chargers, so a model can apply one function to every charger and
+    # compare them.  `tfull` -- hours to charge from the arrival charge to full
+    # at THAT charger's curve -- varies within a uniform route (arrival charge
+    # differs), so its effect can be learned there and still means the same on
+    # a route whose chargers differ; kW alone never varies within a training
+    # route.  Arrival charge is nominal, as in cs*_soc_frac.  Only the `T` sets
+    # read these (fsets.TOKENS).
+    def _token(p, j, exists, drive, e_at, queue, reach):
+        f[p + "exists"] = float(exists)
+        f[p + "drive"] = drive if exists else -1.0
+        f[p + "soc_frac"] = e_at / Ecap if exists else -1.0
+        f[p + "queue"] = queue if exists else 0.0
+        f[p + "reach"] = float(reach) if exists else 0.0
+        f[p + "kw"] = charger_kw(fd, j) if exists else 0.0
+        f[p + "tfull"] = (_charging_time_needed(max(e_at, Emin), _fd_at(fd, j))
+                          if exists else 0.0)
+
+    _token("tok0_", stop, is_cs, 0.0, e,
+           float(_get(fd["Q"], stop)) if is_cs else 0.0, is_cs)
+    for k in range(N_TOK):
+        j = pre.cs_ahead(stop, k)
+        ok = j >= 0
+        ee = float(pre.cumE[j] - pre.cumE[stop]) if ok else 0.0
+        _token(f"tok{k + 1}_", j, ok,
+               float(pre.cumD[j] - pre.cumD[stop]) if ok else 0.0, e - ee,
+               float(_get(fd["Q"], j)) if ok else 0.0, usable - ee > 0)
 
     return f, flags
 

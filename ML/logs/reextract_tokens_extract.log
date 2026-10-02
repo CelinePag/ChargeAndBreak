@@ -1,0 +1,250 @@
+
+[extract] physics=base: 840 LA logs | 253 state + 18 action = 271 features
+  100/840 rows=75363 23s
+  200/840 rows=156884 43s
+  300/840 rows=220133 58s
+  400/840 rows=268196 70s
+  500/840 rows=315918 83s
+  600/840 rows=351282 92s
+  700/840 rows=375814 100s
+  800/840 rows=401464 108s
+[extract] done in 112s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 830/840   excluded: 10
+    run_infeasible: 10
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.99e-05 h  over 830 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 72595 / 72595 logged (100.0%)   rows: 411118
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset.npz  X=(411118, 271)  instances=830  families=36
+
+[extract] physics=kwh300: 257 LA logs | 253 state + 18 action = 271 features
+  100/257 rows=69203 25s
+  200/257 rows=106134 34s
+[extract] done in 37s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 230/257   excluded: 27
+    run_infeasible: 27
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.99e-05 h  over 230 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 21268 / 21268 logged (100.0%)   rows: 119464
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kwh300.npz  X=(119464, 271)  instances=230  families=11
+
+[extract] physics=kwh700: 252 LA logs | 253 state + 18 action = 271 features
+  100/252 rows=72838 21s
+  200/252 rows=114218 30s
+[extract] done in 33s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 248/252   excluded: 4
+    run_infeasible: 4
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.99e-05 h  over 248 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 22805 / 22805 logged (100.0%)   rows: 128289
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kwh700.npz  X=(128289, 271)  instances=248  families=11
+
+[extract] physics=kwh900: 257 LA logs | 253 state + 18 action = 271 features
+  100/257 rows=72263 18s
+  200/257 rows=114699 26s
+[extract] done in 29s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 250/257   excluded: 7
+    run_infeasible: 7
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.98e-05 h  over 250 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 23058 / 23058 logged (100.0%)   rows: 129775
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kwh900.npz  X=(129775, 271)  instances=250  families=11
+
+[extract] physics=kw150: 257 LA logs | 253 state + 18 action = 271 features
+  100/257 rows=68984 17s
+  200/257 rows=109609 23s
+[extract] done in 26s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 244/257   excluded: 13
+    run_infeasible: 13
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.99e-05 h  over 244 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 22290 / 22290 logged (100.0%)   rows: 124957
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kw150.npz  X=(124957, 271)  instances=244  families=11
+
+[extract] physics=kw700: 254 LA logs | 253 state + 18 action = 271 features
+  100/254 rows=73231 16s
+  200/254 rows=114178 24s
+[extract] done in 27s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 250/254   excluded: 4
+    run_infeasible: 4
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.99e-05 h  over 250 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 22897 / 22897 logged (100.0%)   rows: 128748
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kw700.npz  X=(128748, 271)  instances=250  families=11
+
+[extract] physics=kw1000: 228 LA logs | 253 state + 18 action = 271 features
+  100/228 rows=83641 20s
+  200/228 rows=136941 29s
+[extract] done in 30s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 219/228   excluded: 9
+    run_infeasible: 9
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.97e-05 h  over 219 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 25262 / 25262 logged (100.0%)   rows: 143841
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_kw1000.npz  X=(143841, 271)  instances=219  families=10
+
+[extract] physics=cs30: 85 LA logs | 253 state + 18 action = 271 features
+[extract] done in 12s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 36/85   excluded: 49
+    no_solution: 44
+    run_infeasible: 5
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.87e-05 h  over 36 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 5902 / 5902 logged (100.0%)   rows: 42610
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_cs30.npz  X=(42610, 271)  instances=36  families=4
+
+[extract] physics=cs100: 300 LA logs | 253 state + 18 action = 271 features
+  100/300 rows=45650 12s
+  200/300 rows=78544 18s
+  300/300 rows=98070 24s
+[extract] done in 24s
+
+========================================================================
+VALIDATION GATES
+========================================================================
+usable runs: 210/300   excluded: 90
+    no_solution: 82
+    run_infeasible: 8
+
+G1  log state line vs solution trajectory (max abs diff over runs)
+    [OK ] t_arr      max=0.0005  tol=0.002  runs over tol: 0
+    [OK ] e_arr      max=0.5000  tol=0.510  runs over tol: 0
+    [OK ] cd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sd         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] sw         max=0.0050  tol=0.006  runs over tol: 0
+    [OK ] phi        max=0.0000  tol=0.500  runs over tol: 0
+    [OK ] rho2_used  max=0.0000  tol=0.500  runs over tol: 0
+
+G2  [OK ] t_arr[k+1] == td[k]+D_actual[k]   max=5.00e-05 h  runs over 0.001: 0
+G3  [OK ] arrival - T_START == duration_h  max|d|=4.92e-05 h  over 210 runs, violations: 0
+G4  [OK ] reconstructed spread in [0, 15] h   runs with any bad stop: 0
+
+decisions joined: 19330 / 19330 logged (100.0%)   rows: 98070
+[extract] wrote C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\data\dataset_phys_cs100.npz  X=(98070, 271)  instances=210  families=12

@@ -1,0 +1,52 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s0 on stop: 66 instances
+  25/66  16s
+  50/66  22s
+[eval] 66 routes in 24.9s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s0 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               2.320 ms/decision (median 2.099)
+teacher latency       65947 ms/decision (28,428x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    -0.01 %
+   mean      +0.04 %
+   IQR     [-0.88, +0.81]
+   best/worst -19.69 % / +13.83 %
+   student faster on 34/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.75 %
+   mean      -3.34 %
+   IQR     [-3.62, -2.01]
+   best/worst -22.14 % / +9.94 %
+   student faster on 62/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +1.93 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 69   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   +0.03 %   mean   +0.30 %
+
+rests   student   162  LA   160   mean +0.030/route   fewer on 2/66 routes
+charges student   588  LA   655   mean -1.015/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  1  median  +9.56 %  worst  +9.56 %
+   RlongCmanyTtight           n=  1  median  +9.29 %  worst  +9.29 %
+   RmediumCfewTmedium         n=  2  median  +7.83 %  worst +13.83 %
+   RlongCfewTnone             n=  2  median  +4.87 %  worst +11.12 %
+   RshortCmediumTmedium       n=  2  median  +1.70 %  worst  +2.44 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 5x, left none 0x, charge clamp moved 3x
+spread room: actions removed 40x, charges shortened 2x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s0_g99sr_stop.json

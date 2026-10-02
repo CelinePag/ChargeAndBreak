@@ -1,0 +1,58 @@
+﻿[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[data] rows 411118  features 222
+  fit   rows  317802  instances  639  decisions  56104
+  stop  rows   31355  instances   66  decisions   5509
+  test  rows   61961  instances  125  decisions  10982
+[net] [256, 256, 128] -> 3 heads, 123,651 parameters, 317,802 training rows, 2 threads
+  ep   1  val cost 0.3489  feas 0.0491  tauc 0.0126  lr 1.0e-03  14s *
+  ep   2  val cost 0.2963  feas 0.0388  tauc 0.0109  lr 1.0e-03  26s *
+  ep   3  val cost 0.2458  feas 0.0338  tauc 0.0100  lr 1.0e-03  40s *
+  ep   4  val cost 0.2201  feas 0.0366  tauc 0.0110  lr 1.0e-03  51s *
+  ep   5  val cost 0.1911  feas 0.0334  tauc 0.0099  lr 1.0e-03  63s *
+  ep   6  val cost 0.1646  feas 0.0312  tauc 0.0101  lr 1.0e-03  78s *
+  ep   7  val cost 0.1458  feas 0.0307  tauc 0.0104  lr 1.0e-03  91s *
+  ep   8  val cost 0.1518  feas 0.0300  tauc 0.0097  lr 1.0e-03  103s
+  ep   9  val cost 0.1393  feas 0.0286  tauc 0.0095  lr 1.0e-03  116s *
+  ep  10  val cost 0.1308  feas 0.0288  tauc 0.0097  lr 1.0e-03  126s *
+  ep  11  val cost 0.1271  feas 0.0262  tauc 0.0094  lr 1.0e-03  139s *
+  ep  12  val cost 0.1244  feas 0.0329  tauc 0.0095  lr 1.0e-03  151s
+  ep  13  val cost 0.1207  feas 0.0314  tauc 0.0095  lr 1.0e-03  163s *
+  ep  14  val cost 0.1150  feas 0.0265  tauc 0.0096  lr 1.0e-03  173s *
+  ep  15  val cost 0.1236  feas 0.0273  tauc 0.0094  lr 1.0e-03  186s
+  ep  16  val cost 0.1184  feas 0.0297  tauc 0.0094  lr 1.0e-03  201s
+  ep  17  val cost 0.1142  feas 0.0299  tauc 0.0097  lr 1.0e-03  213s
+  ep  18  val cost 0.1148  feas 0.0267  tauc 0.0094  lr 1.0e-03  225s *
+  ep  19  val cost 0.1128  feas 0.0250  tauc 0.0100  lr 1.0e-03  238s *
+  ep  20  val cost 0.1112  feas 0.0280  tauc 0.0098  lr 1.0e-03  251s
+  ep  21  val cost 0.1112  feas 0.0341  tauc 0.0093  lr 1.0e-03  264s
+  ep  22  val cost 0.1125  feas 0.0261  tauc 0.0098  lr 1.0e-03  278s
+  ep  23  val cost 0.1108  feas 0.0305  tauc 0.0094  lr 5.0e-04  290s
+  ep  24  val cost 0.1086  feas 0.0247  tauc 0.0091  lr 5.0e-04  302s *
+  ep  25  val cost 0.1059  feas 0.0254  tauc 0.0092  lr 5.0e-04  317s *
+  ep  26  val cost 0.1052  feas 0.0244  tauc 0.0092  lr 5.0e-04  332s *
+  ep  27  val cost 0.1077  feas 0.0252  tauc 0.0097  lr 5.0e-04  346s
+  ep  28  val cost 0.1056  feas 0.0340  tauc 0.0093  lr 5.0e-04  358s
+  ep  29  val cost 0.1056  feas 0.0252  tauc 0.0093  lr 5.0e-04  370s
+  ep  30  val cost 0.1106  feas 0.0270  tauc 0.0091  lr 2.5e-04  384s
+  ep  31  val cost 0.1045  feas 0.0246  tauc 0.0092  lr 2.5e-04  398s *
+  ep  32  val cost 0.1064  feas 0.0257  tauc 0.0091  lr 2.5e-04  413s
+  ep  33  val cost 0.1047  feas 0.0279  tauc 0.0091  lr 2.5e-04  427s
+  ep  34  val cost 0.1064  feas 0.0305  tauc 0.0092  lr 2.5e-04  450s
+  ep  35  val cost 0.1068  feas 0.0251  tauc 0.0091  lr 1.3e-04  464s
+  ep  36  val cost 0.1048  feas 0.0268  tauc 0.0091  lr 1.3e-04  472s
+  ep  37  val cost 0.1063  feas 0.0283  tauc 0.0091  lr 1.3e-04  478s
+  ep  38  val cost 0.1053  feas 0.0266  tauc 0.0090  lr 1.3e-04  485s
+  ep  39  val cost 0.1069  feas 0.0267  tauc 0.0090  lr 6.3e-05  497s
+  ep  40  val cost 0.1053  feas 0.0269  tauc 0.0091  lr 6.3e-05  511s
+  ep  41  val cost 0.1051  feas 0.0268  tauc 0.0091  lr 6.3e-05  526s
+[train] best epoch 31 of 41, val 0.1382, 526s
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go
+fit         0.96 min    92.7%      56075       3.19 min
+stop        1.43 min    92.1%       5507       3.10 min
+test        1.12 min    93.0%      10979       3.44 min
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/tmlp_F95_base_s0_torch.pt

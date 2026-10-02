@@ -95,6 +95,7 @@ spread-room check, `g99sr` = + the check and a 0.99 guard.
 | `code/dataset.py` | loading, splits, scopes (all / short+medium) |
 | `code/gbt_train.py`, `code/nn_train.py`, `code/clf_train.py` | the three trainers |
 | `code/gbt_policy.py`, `code/nn_policy.py`, `code/clf_policy.py` | load a model, supply predictions |
+| `code/torch_models.py`, `code/torch_train.py`, `code/torch_policy.py` | the PyTorch arm (kind `torch`, CPU): stage 1 `RowNet` — one trunk, cost / feasibility / charge heads, Huber + margin weights, grouped early stopping; served through the same `policy_core` rule. Decision batches by default, best epoch by stop-split argmin regret (`--select`), optional listwise ranking term (`--lambda-list`, `--tau`); default `--arch split` = `SplitNet`, one trunk per head, each kept at its own best epoch. Chosen on the stop split: `tmlp_F95_split_list_s{0,1,2}` (`--lambda-list 1 --tau 0.25`) |
 | `code/policy_core.py` | **the decision rule and the simulator loop**, shared by every arm; `spread_room`; `candidates` (the k best actions) |
 | `code/evaluate.py` | closed-loop evaluation of one model on one split |
 | `code/rollout_policy.py` | rollout on top of any student: its k best actions each driven to the end of the route under sampled travel times |
@@ -115,10 +116,13 @@ spread-room check, `g99sr` = + the check and a 0.99 guard.
 | `code/mixed_eval.py` | the hindsight oracle with one charging curve per charger, a Greedy mirror, and the students on those routes; `la` and `charging --la-only` compare with the LA |
 | `code/learning_curve.py` | the base trees refitted on 2, 4, 7, 12, 19 seeds per family: how many teacher routes the student needs |
 | `code/run_la_mixed.py` | src's own LA, in the stored teacher's configuration, on mixed routes (default: 8 `pmix` routes); outputs redirected to `la_mixed/`. Relies on the per-charger curves added to `src/` on 2026-10-01 (instance field `TbarK`; `CHANGES_IMPLEMENTED.md`, October 2026) |
+| direction B (2026-10-02) | charger tokens: `features.py` section J (`tok0..tok6` × exists, drive, charge on arrival, queue, reachable, kW, hours to full there), feature set `T` = F + tokens (144; every older set unchanged); `torch_models.ChargerNet` (`--arch charger`, `--fset T`): one network values every charger, charging here is weighed against a soft minimum over reachable chargers ahead, `--g-exclude power` keeps this charger's speed out of the rest of the cost. Mixed-power VALIDATION routes, seeds 20–21: `mixed_instances.py --split val`, `mixed_eval.py --set val` (own result store) — models are chosen there, the test routes are run once |
+| `STATUS.html` | the living summary of the ML side: what was tried, verdicts, what it means for trucking, what runs; updated as results land |
+| `code/dagger_io.py`, `code/dagger_rollout.py`, `code/dagger_label.py`, `code/dagger_report.py` | DAgger (prepared 2026-10-02, not yet run): students drive training routes and their states are snapshotted (`BEHDV.to_checkpoint`, project `.venv`); the LA teacher, src unchanged and in `run_la_mixed.LA_CONFIG`, is asked at sampled stops after the restore (anaconda python, Gurobi); rows are built by `extract.decision_rows`, the function that built the dataset → `data/dagger/<label>/`. `dataset.add_dagger` + `--dagger <labels>` in all four trainers (fit routes only; teacher-check rows dropped). The report gives regret at the student's own states vs at the teacher's, and a check that the queried LA is the teacher |
 | `code/halt_state.py`, `code/diagnose_all.py` | replay infeasible runs; the cause of each |
 | `code/spread_compare.py` | the same models with and without the spread-room check |
 | `code/paper_link.py` | the manuscript's gap-to-oracle, exact definition |
-| `code/ml_style.py`, `code/fig_*.py` | figures in the manuscript's style |
+| `code/ml_style.py`, `code/fig_*.py` | figures in the manuscript's style; `fig_phys.py` (across physics), `fig_mixed.py` (mixed chargers: cost of mixing, energy by charger power), `fig_la_time.py` (time per decision by stop type) |
 | `code/report.py` | writes RESULTS.md from the result stores |
 | `code/legacy_adapt.py`, `legacy/` | the 2026-08 model, restored as built |
 | `code/stats.py`, `code/figures.py` | older per-model statistics and figures |
@@ -149,6 +153,16 @@ python ML/code/run_endgame.py --set smoke --guard-q 0.99 --spread-room   # MILP 
 python ML/code/fpi_collect.py --guard-q 0.99 --spread-room --name r1     # policy iteration:
 python ML/code/fpi_train.py --data r1 --tag fpi1_gbt_F95_base_s1_g99sr   #   labels, correction,
 python ML/code/fpi_eval.py --tag fpi1_gbt_F95_base_s1_g99sr --set test   #   evaluation
+# DAgger (two Pythons: rollout in .venv, labels in anaconda for gurobipy)
+python ML/code/dagger_rollout.py --label probe --routes base --split stop \
+    --models torch:tmlp_F95_split_list_s0 --stops 3 --check-stops 1
+python ML/code/dagger_rollout.py --label probe --routes base --split stop \
+    --models gbt:gbt_F95_base_s0 --stops 3
+<anaconda>/python.exe ML/code/dagger_label.py --label probe [--dry-run]
+python ML/code/dagger_report.py --label probe --reference --check
+python ML/code/dagger_rollout.py --label r1 --routes pmix --split fit --per-family 12 \
+    --models torch:tmlp_F95_split_list_s0,gbt:gbt_F95_base_s0 --stops 10
+python ML/code/torch_train.py --tag tmlp_F95_split_list_dg1_s0 --lambda-list 1 --dagger r1
 ```
 
 Every runner skips work whose output already exists, so a rerun resumes.

@@ -1,0 +1,74 @@
+[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[physics] learning from base, kwh300, kwh700, kwh900, kw150, kw700, kw1000, cs30, cs100
+[data] rows 1326872  features 95
+  fit   rows 1008268  instances 1913  decisions 179064
+  stop  rows  107032  instances  202  decisions  18831
+  test  rows  211572  instances  402  decisions  37512
+[net] split [256, 256, 128] aux [128, 128] -> 3 heads, 181,251 parameters, 1,008,268 training rows / 179,064 decisions, 2 threads
+[loss] batch 192 decisions, select by regret, lambda_list 1 (tau 0.25 h)
+  ep   1  val cost 0.3536  feas 0.0590  tauc 0.0130  regret 1.00 min  list 0.8474  lr 1.0e-03  42s cost* feas* tauc*
+  ep   2  val cost 0.2367  feas 0.0485  tauc 0.0123  regret 1.28 min  list 0.7673  lr 1.0e-03  89s feas* tauc*
+  ep   3  val cost 0.2078  feas 0.0445  tauc 0.0121  regret 0.83 min  list 0.7409  lr 1.0e-03  134s cost* feas* tauc*
+  ep   4  val cost 0.1862  feas 0.0417  tauc 0.0120  regret 0.66 min  list 0.7304  lr 1.0e-03  172s cost* feas* tauc*
+  ep   5  val cost 0.1845  feas 0.0406  tauc 0.0120  regret 0.75 min  list 0.7250  lr 1.0e-03  209s feas* tauc*
+  ep   6  val cost 0.1819  feas 0.0399  tauc 0.0119  regret 0.84 min  list 0.7209  lr 1.0e-03  250s feas* tauc*
+  ep   7  val cost 0.1748  feas 0.0365  tauc 0.0117  regret 1.12 min  list 0.7182  lr 1.0e-03  291s feas* tauc*
+  ep   8  val cost 0.1736  feas 0.0363  tauc 0.0115  regret 0.71 min  list 0.7151  lr 5.0e-04  331s feas* tauc*
+  ep   9  val cost 0.1588  feas 0.0359  tauc 0.0116  regret 0.81 min  list 0.7090  lr 5.0e-04  396s feas*
+  ep  10  val cost 0.1657  feas 0.0333  tauc 0.0114  regret 0.68 min  list 0.7079  lr 5.0e-04  445s feas* tauc*
+  ep  11  val cost 0.1563  feas 0.0351  tauc 0.0113  regret 0.64 min  list 0.7063  lr 5.0e-04  505s cost* tauc*
+  ep  12  val cost 0.1511  feas 0.0334  tauc 0.0115  regret 0.78 min  list 0.7055  lr 5.0e-04  567s
+  ep  13  val cost 0.1506  feas 0.0287  tauc 0.0114  regret 0.58 min  list 0.7049  lr 5.0e-04  633s cost* feas*
+  ep  14  val cost 0.1538  feas 0.0296  tauc 0.0114  regret 0.56 min  list 0.7037  lr 5.0e-04  712s cost*
+  ep  15  val cost 0.1535  feas 0.0315  tauc 0.0113  regret 0.72 min  list 0.7031  lr 5.0e-04  785s tauc*
+  ep  16  val cost 0.1501  feas 0.0299  tauc 0.0113  regret 0.63 min  list 0.7026  lr 5.0e-04  856s
+  ep  17  val cost 0.1506  feas 0.0304  tauc 0.0113  regret 0.78 min  list 0.7013  lr 5.0e-04  911s tauc*
+  ep  18  val cost 0.1515  feas 0.0264  tauc 0.0113  regret 0.85 min  list 0.7005  lr 2.5e-04  961s feas*
+  ep  19  val cost 0.1448  feas 0.0282  tauc 0.0112  regret 0.69 min  list 0.6976  lr 2.5e-04  1009s tauc*
+  ep  20  val cost 0.1438  feas 0.0254  tauc 0.0112  regret 0.63 min  list 0.6970  lr 2.5e-04  1051s feas*
+  ep  21  val cost 0.1417  feas 0.0243  tauc 0.0112  regret 0.77 min  list 0.6967  lr 2.5e-04  1097s feas* tauc*
+  ep  22  val cost 0.1426  feas 0.0274  tauc 0.0113  regret 0.67 min  list 0.6964  lr 1.3e-04  1146s
+  ep  23  val cost 0.1409  feas 0.0259  tauc 0.0112  regret 0.61 min  list 0.6944  lr 1.3e-04  1205s tauc*
+  ep  24  val cost 0.1399  feas 0.0260  tauc 0.0112  regret 0.64 min  list 0.6941  lr 1.3e-04  1252s tauc*
+  ep  25  val cost 0.1402  feas 0.0261  tauc 0.0111  regret 0.65 min  list 0.6940  lr 1.3e-04  1296s tauc*
+  ep  26  val cost 0.1400  feas 0.0242  tauc 0.0112  regret 0.63 min  list 0.6939  lr 6.3e-05  1340s feas*
+  ep  27  val cost 0.1392  feas 0.0236  tauc 0.0112  regret 0.63 min  list 0.6929  lr 6.3e-05  1388s feas*
+  ep  28  val cost 0.1390  feas 0.0228  tauc 0.0112  regret 0.62 min  list 0.6929  lr 6.3e-05  1437s feas*
+  ep  29  val cost 0.1387  feas 0.0228  tauc 0.0112  regret 0.56 min  list 0.6928  lr 6.3e-05  1503s cost*
+  ep  30  val cost 0.1388  feas 0.0230  tauc 0.0111  regret 0.62 min  list 0.6926  lr 6.3e-05  1576s
+  ep  31  val cost 0.1389  feas 0.0224  tauc 0.0112  regret 0.64 min  list 0.6926  lr 6.3e-05  1651s feas*
+  ep  32  val cost 0.1379  feas 0.0242  tauc 0.0111  regret 0.52 min  list 0.6925  lr 6.3e-05  1734s cost* tauc*
+  ep  33  val cost 0.1389  feas 0.0236  tauc 0.0111  regret 0.69 min  list 0.6923  lr 6.3e-05  1816s
+  ep  34  val cost 0.1375  feas 0.0242  tauc 0.0111  regret 0.58 min  list 0.6924  lr 6.3e-05  1876s
+  ep  35  val cost 0.1385  feas 0.0235  tauc 0.0111  regret 0.58 min  list 0.6921  lr 6.3e-05  1927s tauc*
+  ep  36  val cost 0.1384  feas 0.0219  tauc 0.0111  regret 0.63 min  list 0.6921  lr 3.1e-05  1972s feas*
+  ep  37  val cost 0.1384  feas 0.0231  tauc 0.0111  regret 0.61 min  list 0.6916  lr 3.1e-05  2013s
+  ep  38  val cost 0.1382  feas 0.0220  tauc 0.0111  regret 0.61 min  list 0.6917  lr 3.1e-05  2054s
+  ep  39  val cost 0.1381  feas 0.0220  tauc 0.0111  regret 0.62 min  list 0.6916  lr 3.1e-05  2106s
+  ep  40  val cost 0.1382  feas 0.0214  tauc 0.0111  regret 0.64 min  list 0.6916  lr 1.6e-05  2161s feas*
+  ep  41  val cost 0.1380  feas 0.0222  tauc 0.0111  regret 0.63 min  list 0.6913  lr 1.6e-05  2238s
+  ep  42  val cost 0.1380  feas 0.0226  tauc 0.0111  regret 0.63 min  list 0.6913  lr 1.6e-05  2289s
+  ep  43  val cost 0.1380  feas 0.0219  tauc 0.0111  regret 0.62 min  list 0.6913  lr 1.6e-05  2345s
+  ep  44  val cost 0.1379  feas 0.0219  tauc 0.0111  regret 0.64 min  list 0.6913  lr 7.8e-06  2397s
+  ep  45  val cost 0.1379  feas 0.0213  tauc 0.0111  regret 0.62 min  list 0.6912  lr 7.8e-06  2458s feas*
+  ep  46  val cost 0.1377  feas 0.0214  tauc 0.0111  regret 0.62 min  list 0.6912  lr 7.8e-06  2533s
+  ep  47  val cost 0.1377  feas 0.0215  tauc 0.0111  regret 0.62 min  list 0.6912  lr 7.8e-06  2601s
+  ep  48  val cost 0.1379  feas 0.0214  tauc 0.0111  regret 0.63 min  list 0.6912  lr 3.9e-06  2684s
+  ep  49  val cost 0.1377  feas 0.0217  tauc 0.0111  regret 0.62 min  list 0.6910  lr 3.9e-06  2750s
+  ep  50  val cost 0.1379  feas 0.0221  tauc 0.0111  regret 0.63 min  list 0.6911  lr 3.9e-06  2826s
+  ep  51  val cost 0.1376  feas 0.0215  tauc 0.0111  regret 0.63 min  list 0.6911  lr 3.9e-06  2897s
+  ep  52  val cost 0.1378  feas 0.0214  tauc 0.0111  regret 0.63 min  list 0.6910  lr 2.0e-06  2959s
+  ep  53  val cost 0.1378  feas 0.0214  tauc 0.0111  regret 0.63 min  list 0.6911  lr 2.0e-06  3023s
+  ep  54  val cost 0.1379  feas 0.0213  tauc 0.0111  regret 0.63 min  list 0.6911  lr 2.0e-06  3096s
+  ep  55  val cost 0.1379  feas 0.0214  tauc 0.0111  regret 0.63 min  list 0.6911  lr 2.0e-06  3164s
+[train] best epoch {'cost': 32, 'feas': 45, 'tauc': 35} of 55, val {'cost': 0.008597672916948795, 'feas': 0.021303005353709478, 'tauc': 0.011064708885689497} (cost by regret), 3164s
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go  dirty picks
+fit         0.39 min    94.9%     178857       4.59 min          893
+stop        0.61 min    94.7%      18823       4.81 min          113
+test        0.63 min    94.8%      37487       4.38 min          212
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/tmlp_F95_phys_split_list_s0_torch.pt

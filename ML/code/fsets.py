@@ -73,19 +73,31 @@ D_DROP = (
 POWER = ("kw_here", "cs1_kw", "cs2_kw", "cs3_kw", "kw_next_ratio",
          "best_kw_reach", "drive_to_best_kw")
 
+# T: charger tokens (features.py section J, 2026-10-02, direction B) -- the
+# same seven numbers for the charger here and each of the next six, for a
+# model that applies one function to every charger.  Like POWER they are kept
+# out of every older set; T = F + the tokens.
+TOKEN_PREFIX = "tok"
+
+
+def _is_token(n):
+    return n.startswith(TOKEN_PREFIX) and n[len(TOKEN_PREFIX):len(TOKEN_PREFIX)+1].isdigit()
+
+
 # R: features that grow with route length rather than describe the decision
 ROUTE_POS = ("t_elapsed", "stops_left", "drive_left", "energy_left",
              "cs_left", "cust_left", "route_frac_done")
 
 # the single source of truth for valid set ids: the trainers' --fset choices
 # are read from here, so adding a set here is enough to make it trainable
-FSET_IDS = ("C", "D", "F", "L", "R", "F91", "P")
+FSET_IDS = ("C", "D", "F", "L", "R", "F91", "P", "T")
 
 SET_DOC = {"R": "route-local (no whole-route position)",
            "C": "compact (top by importance)", "D": "deduplicated",
            "F": "full engineered", "L": "full + raw lookahead",
            "F91": "full, before the window features",
-           "P": "full + per-charger power"}
+           "P": "full + per-charger power",
+           "T": "full + charger tokens"}
 
 
 def _is_raw(n):
@@ -113,8 +125,12 @@ def resolve(set_id, all_names, all_n_state, arm):
         # every older set is defined without the power block, so adding it
         # to the dataset leaves each of them exactly as it was
         all_names = [n for n in all_names if n not in POWER]
+    if set_id != "T":
+        all_names = [n for n in all_names if not _is_token(n)]   # same, tokens
 
     if set_id == "P":
+        keep = {n for n in all_names if not _is_raw(n)}
+    elif set_id == "T":
         keep = {n for n in all_names if not _is_raw(n)}
     elif set_id == "L":
         keep = set(all_names)

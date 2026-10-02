@@ -226,29 +226,67 @@ def extract_one(log_path: str, state_names, action_names,
             ext_shift_used=int(tr.get("ext_shift_used", 0)),
             stop=dec.stop,
         )
-        sf, _flags = state_features(fd, pre, dec.stop, st, cv, GUARD_Q)
-        regrets = dec.regrets()
-        best = min((a.cost_h for a in dec.clean_actions), default=np.nan)
-        sv = np.array([sf[n] for n in state_names], dtype=np.float32)
-
-        for a in dec.actions:
-            af = action_features(fd, pre, dec.stop, st, key_to_action(a.key), sf)
-            rows.append((
-                sv,
-                np.array([af[n] for n in action_names], dtype=np.float32),
-                ACTION_VOCAB.index(a.key),
-                float(regrets.get(a.key, np.nan)),
-                float(a.cost_h), float(a.std_h),
-                a.ok, a.n, float(a.tauc_h), float(a.taub_h),
-                int(a.clean), dec.stop,
-                int(a.key == dec.chosen), int(dec.tiebreak),
-                float(best), len(dec.actions), len(dec.clean_actions),
-            ))
+        rows.extend(decision_rows(fd, pre, st, cv, dec, state_names, action_names))
         rep["n_dec"] += 1
 
     rep["g1"] = g1
     rep["n_rows"] = len(rows)
     return rows, rep
+
+
+def decision_rows(fd, pre, st, cv, dec, state_names, action_names):
+    """One logged decision -> one row per scored action.
+
+    `st` is anything with BEHDV's attribute protocol: the StaticState rebuilt
+    from a stored run here, a live BEHDV restored from a checkpoint in
+    dagger_label.py.  Both callers go through this function, so a DAgger label
+    can never mean something different from a teacher-run label.
+    """
+    sf, _flags = state_features(fd, pre, dec.stop, st, cv, GUARD_Q)
+    regrets = dec.regrets()
+    best = min((a.cost_h for a in dec.clean_actions), default=np.nan)
+    sv = np.array([sf[n] for n in state_names], dtype=np.float32)
+
+    rows = []
+    for a in dec.actions:
+        af = action_features(fd, pre, dec.stop, st, key_to_action(a.key), sf)
+        rows.append((
+            sv,
+            np.array([af[n] for n in action_names], dtype=np.float32),
+            ACTION_VOCAB.index(a.key),
+            float(regrets.get(a.key, np.nan)),
+            float(a.cost_h), float(a.std_h),
+            a.ok, a.n, float(a.tauc_h), float(a.taub_h),
+            int(a.clean), dec.stop,
+            int(a.key == dec.chosen), int(dec.tiebreak),
+            float(best), len(dec.actions), len(dec.clean_actions),
+        ))
+    return rows
+
+
+def rows_to_arrays(rows):
+    """Row tuples -> the per-row arrays of a dataset file (no index columns)."""
+    X = np.concatenate([np.stack([r[0] for r in rows]),
+                        np.stack([r[1] for r in rows])], axis=1)
+    rest = np.array([r[2:] for r in rows], dtype=np.float64)
+    return dict(
+        X=X.astype(np.float32),
+        action_ix=rest[:, 0].astype(np.int16),
+        regret=rest[:, 1].astype(np.float32),
+        cost=rest[:, 2].astype(np.float64),
+        std=rest[:, 3].astype(np.float32),
+        ok=rest[:, 4].astype(np.int16),
+        n_scen=rest[:, 5].astype(np.int16),
+        tauc=rest[:, 6].astype(np.float32),
+        taub=rest[:, 7].astype(np.float32),
+        clean=rest[:, 8].astype(np.int8),
+        stop=rest[:, 9].astype(np.int32),
+        chosen=rest[:, 10].astype(np.int8),
+        tiebreak=rest[:, 11].astype(np.int8),
+        best_cost=rest[:, 12].astype(np.float64),
+        n_actions=rest[:, 13].astype(np.int8),
+        n_clean=rest[:, 14].astype(np.int8),
+    )
 
 
 def _worker(args):
@@ -348,9 +386,7 @@ def extract_physics(tag, out_name, jobs, limit, state_names, action_names):
     fams = sorted({family_seed(n)[0] for n in insts})
     fam_ix = {n: i for i, n in enumerate(fams)}
 
-    X = np.concatenate([np.stack([r[0] for r in all_rows]),
-                        np.stack([r[1] for r in all_rows])], axis=1)
-    rest = np.array([r[2:] for r in all_rows], dtype=np.float64)
+    arrays = rows_to_arrays(all_rows)
 
     inst_col, fam_col, seed_col = [], [], []
     for rep in good:
@@ -365,24 +401,9 @@ def extract_physics(tag, out_name, jobs, limit, state_names, action_names):
     np.savez_compressed(
         out,
         physics=np.array(tag),
-        X=X.astype(np.float32),
         feature_names=np.array(state_names + action_names),
         n_state=len(state_names),
-        action_ix=rest[:, 0].astype(np.int16),
-        regret=rest[:, 1].astype(np.float32),
-        cost=rest[:, 2].astype(np.float64),
-        std=rest[:, 3].astype(np.float32),
-        ok=rest[:, 4].astype(np.int16),
-        n_scen=rest[:, 5].astype(np.int16),
-        tauc=rest[:, 6].astype(np.float32),
-        taub=rest[:, 7].astype(np.float32),
-        clean=rest[:, 8].astype(np.int8),
-        stop=rest[:, 9].astype(np.int32),
-        chosen=rest[:, 10].astype(np.int8),
-        tiebreak=rest[:, 11].astype(np.int8),
-        best_cost=rest[:, 12].astype(np.float64),
-        n_actions=rest[:, 13].astype(np.int8),
-        n_clean=rest[:, 14].astype(np.int8),
+        **arrays,
         instance_ix=np.array(inst_col, dtype=np.int32),
         family_ix=np.array(fam_col, dtype=np.int16),
         seed=np.array(seed_col, dtype=np.int16),
@@ -390,7 +411,7 @@ def extract_physics(tag, out_name, jobs, limit, state_names, action_names):
         families=np.array(fams),
         action_vocab=np.array(ACTION_VOCAB),
     )
-    print(f"[extract] wrote {out}  X={X.shape}  instances={len(insts)}  "
+    print(f"[extract] wrote {out}  X={arrays['X'].shape}  instances={len(insts)}  "
           f"families={len(fams)}")
 
 

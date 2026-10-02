@@ -1,0 +1,19 @@
+# ChargeAndBreak ML on a Linux cluster.  Python >= 3.11.
+#
+# Gurobi is NOT installed from here: the MILPs call Pyomo's SHELL interface
+# (SolverFactory("gurobi")), which needs the `gurobi_cl` binary and a licence
+# on PATH -- on most clusters `module load gurobi`.  `pip install gurobipy`
+# alone is not enough.
+#
+# torch: the CPU build is enough (no GPU code); to avoid the large CUDA wheel:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+numpy>=1.26
+scipy
+pyomo>=6.7
+matplotlib>=3.8
+openpyxl>=3.1
+python-pptx>=0.6
+joblib
+scikit-learn
+lightgbm>=4
+torch>=2.2

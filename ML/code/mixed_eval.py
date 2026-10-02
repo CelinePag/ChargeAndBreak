@@ -58,14 +58,31 @@ GREEDY_GUARD_Q, GREEDY_SAFETY = 0.95, 0.1
 # (kind, tag, label)
 MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           ("gbt", "gbt_F95_phys_s1", "trees, all physics"),
-          ("gbt", "gbt_P102_phys_s1", "trees, all physics + power")]
+          ("gbt", "gbt_P102_phys_s1", "trees, all physics + power"),
+          # the PyTorch model chosen on the stop split (2026-10-01), base only
+          ("torch", "tmlp_F95_split_list_s0", "torch split+list, base only"),
+          # the same recipe on every physics value (2026-10-02): charger powers
+          # 150-1000 kW are then inside the training range
+          ("torch", "tmlp_F95_phys_split_list_s0", "torch split+list, all physics"),
+          # direction B (2026-10-02), all physics, the charger-token inputs (set T):
+          # no structure / ChargerNet / ChargerNet whose g also sees this
+          # charger's speed.  Chosen on --set val; the test routes are run once.
+          ("torch", "tmlp_T144_phys_split_list_s0", "torch split+list, T inputs, all phys"),
+          ("torch", "tmlp_T144_phys_charger_s0", "ChargerNet, all physics"),
+          ("torch", "tmlp_T144_phys_chargerG_s0", "ChargerNet, g sees speed, all phys")]
+
+
+# which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"
+# (seeds 20-21, ML/instances_mixed/val/<v>/, to choose models on); set by --set
+ROUTE_SET = "test"
 
 
 def instances(variants=VARIANTS, uniform=True):
     """(variant, name, path); 'uniform' = the originals they were built from."""
     out = []
+    root = INST if ROUTE_SET == "test" else os.path.join(INST, ROUTE_SET)
     for v in variants:
-        for p in sorted(glob.glob(os.path.join(INST, v, "*.json"))):
+        for p in sorted(glob.glob(os.path.join(root, v, "*.json"))):
             out.append((v, os.path.splitext(os.path.basename(p))[0], p))
     if uniform:
         seen = sorted({n.split("__")[0] for _, n, _ in out})
@@ -199,7 +216,9 @@ def _drive(job):
 
 
 def store_path(guard_q, spread_room):
-    return os.path.join(RESULTS, f"mixed_g{round(100 * guard_q)}{'sr' if spread_room else ''}.jsonl")
+    tail = "" if ROUTE_SET == "test" else f"_{ROUTE_SET}"
+    return os.path.join(RESULTS, f"mixed{tail}_g{round(100 * guard_q)}"
+                                 f"{'sr' if spread_room else ''}.jsonl")
 
 
 def read_rows(path):
@@ -388,27 +407,28 @@ def _charged(veh, E_real):
     return {st[k]: ea[k + 1] + float(E_real[st[k]]) - ea[k] for k in range(len(st) - 1)}
 
 
-def cmd_charging(args):
-    """Share of the charged energy taken at each charger power, per method.
+def energy_by_power(v, la_only=False, guard_q=0.99, spread_room=True):
+    """{method: {kW: kWh charged}}, {method: {kW: charging stops}}, n routes.
+
     The oracle with hindsight chooses WHERE to charge; this shows whether an
-    online method does too."""
+    online method does too.  la_only restricts to the routes the LA has run
+    and adds the LA.  Greedy and the students are re-driven (deterministic)."""
     import collections
     from features import charger_kw
     from policy_core import load_policy, run_student
-    v = args.variants.split(",")[0]
-    pols = [(lab, load_policy(kind, tag, guard_q=args.guard_q, spread_room=args.spread_room))
+    pols = [(lab, load_policy(kind, tag, guard_q=guard_q, spread_room=spread_room))
             for kind, tag, lab in MODELS
             if os.path.exists(os.path.join(ML, "models", f"{tag}_meta.json"))]
     E_by = collections.defaultdict(collections.Counter)
     n_by = collections.defaultdict(collections.Counter)
     routes = instances([v], uniform=False)
-    if args.la_only:                      # the routes the LA has run, + the LA
+    if la_only:                           # the routes the LA has run, + the LA
         keep = set(la_routes(v))
         routes = [r for r in routes if r[1] in keep]
     for _, name, path in routes:
         fd, D, E, cv = load(path)
         kw = {k: int(round(charger_kw(fd, k))) for k in fd["K"]}
-        la = la_row(v, name) if args.la_only else None
+        la = la_row(v, name) if la_only else None
         if la:
             tr = la["trajectory"]
             for k in range(len(tr) - 1):
@@ -434,15 +454,28 @@ def cmd_charging(args):
                 if st in kw and c > 1e-3:
                     E_by[lab][kw[st]] += c
                     n_by[lab][kw[st]] += 1
+    return ({m: dict(c) for m, c in E_by.items() if c},
+            {m: dict(c) for m, c in n_by.items() if c}, len(routes))
+
+
+def cmd_charging(args):
+    """Share of the charged energy taken at each charger power, per method."""
+    v = args.variants.split(",")[0]
+    E_by, n_by, n_routes = energy_by_power(v, args.la_only, args.guard_q,
+                                           args.spread_room)
     levels = sorted({k for c in E_by.values() for k in c})
     print()
     print(f"{v}: share of charged energy by charger power (charging stops), "
-          f"{len(routes)} routes")
+          f"{n_routes} routes")
     print(f"{'method':30s}" + "".join(f"{k:>13d} kW" for k in levels) + f"{'kWh':>9s}")
-    for lab in ["oracle"] + (["LA"] if E_by["LA"] else []) + ["Greedy"] + [l for l, _ in pols]:
+    labs = ["oracle"] + (["LA"] if "LA" in E_by else []) + ["Greedy"] + [
+        lab for _k, _t, lab in MODELS if lab in E_by]
+    for lab in labs:
+        n_by.setdefault(lab, {})
         tot = sum(E_by[lab].values()) or 1.0
-        print(f"{lab:30s}" + "".join(f"{100*E_by[lab][k]/tot:9.1f}% ({n_by[lab][k]:3d})"
-                                     for k in levels) + f"{tot:9.0f}")
+        print(f"{lab:30s}" + "".join(
+            f"{100*E_by[lab].get(k, 0)/tot:9.1f}% ({n_by[lab].get(k, 0):3d})"
+            for k in levels) + f"{tot:9.0f}")
 
 
 def main():
@@ -455,8 +488,13 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--guard-q", type=float, default=0.99)
     ap.add_argument("--no-spread-room", dest="spread_room", action="store_false")
+    ap.add_argument("--set", default="test", choices=["test", "val"],
+                    help="val: the seed 20-21 routes (mixed_instances.py --split val), "
+                         "results in their own store, to choose models on")
     ap.set_defaults(spread_room=True)
     args = ap.parse_args()
+    global ROUTE_SET
+    ROUTE_SET = args.set
     {"oracle": cmd_oracle, "drive": cmd_drive, "report": cmd_report,
      "charging": cmd_charging, "la": cmd_la}[args.cmd](args)
 

@@ -117,6 +117,9 @@ def main():
                          "choose.  Early stopping then falls back to the "
                          "round count the selection run settled on, since "
                          "there is no held-out set left to stop on.")
+    ap.add_argument("--dagger", default="",
+                    help="comma list of DAgger labels (dagger_label.py) whose "
+                         "rows join the data, e.g. 'r1,r2'")
     args = ap.parse_args()
 
     os.makedirs(MODELS, exist_ok=True)
@@ -134,6 +137,9 @@ def main():
         d = load_multi(tags, columns=set(want) | {"a_y"})
     else:
         d = load(args.data)
+    if args.dagger:
+        from dataset import add_dagger
+        d = add_dagger(d, [t for t in args.dagger.split(",") if t])
     # -- feature set: select columns BY NAME from the dataset's superset -----
     _all = [str(x) for x in d["feature_names"]]
     # masks that need a specific column are taken from the SUPERSET, so a set

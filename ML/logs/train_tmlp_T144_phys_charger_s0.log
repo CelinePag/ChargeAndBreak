@@ -1,0 +1,13 @@
+[fset] T: 144 features (126 state)
+[scope] all: training on short, medium, long routes
+[physics] learning from base, kwh300, kwh700, kwh900, kw150, kw700, kw1000, cs30, cs100
+[data] rows 1326872  features 144
+  fit   rows 1008268  instances 1913  decisions 179064
+  stop  rows  107032  instances  202  decisions  18831
+  test  rows  211572  instances  402  decisions  37512
+[net] charger [256, 256, 128] aux [128, 128], g reads 90 of 144 inputs -> 3 heads, 206,245 parameters, 1,008,268 training rows / 179,064 decisions, 2 threads
+[loss] batch 192 decisions, select by regret, lambda_list 1 (tau 0.25 h)
+  ep   1  val cost 0.3900  feas 0.0624  tauc 0.0128  regret 1.14 min  list 0.8554  lr 1.0e-03  65s cost* feas* tauc*
+  ep   2  val cost 0.2591  feas 0.0535  tauc 0.0121  regret 1.12 min  list 0.7750  lr 1.0e-03  131s cost* feas* tauc*
+  ep   3  val cost 0.2149  feas 0.0489  tauc 0.0117  regret 0.83 min  list 0.7466  lr 1.0e-03  196s cost* feas* tauc*
+  ep   4  val cost 0.1998  feas 0.0455  tauc 0.0116  regret 0.93 min  list 0.7355  lr 1.0e-03  259s feas* tauc*

@@ -1,0 +1,25 @@
+2026-10-01 20:10  torch chain started (pid 23588)
+2026-10-01 20:30  rc=0  ML/code/torch_train.py --tag tmlp_F95_split_s0 --seed 0 --threads 2 --lambda-list 0
+2026-10-01 20:50  rc=0  ML/code/torch_train.py --tag tmlp_F95_split_list_s0 --seed 0 --threads 2 --lambda-list 1 --tau 0.25
+2026-10-01 20:50  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_s0 --split stop --guard-q 0.95 --out eval_tmlp_F95_split_s0_g95_stop.json
+2026-10-01 20:51  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s0 --split stop --guard-q 0.95 --out eval_tmlp_F95_split_list_s0_g95_stop.json
+2026-10-01 20:53  rc=0  ML/code/evaluate.py --kind gbt --tag gbt_F95_base_s0 --split stop --guard-q 0.99 --spread-room --out eval_gbt_F95_base_s0_g99sr_stop.json
+2026-10-01 20:53  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_list_s0 --split stop --guard-q 0.99 --spread-room --out eval_tmlp_F95_list_s0_g99sr_stop.json
+2026-10-01 20:54  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_s0 --split stop --guard-q 0.99 --spread-room --out eval_tmlp_F95_split_s0_g99sr_stop.json
+2026-10-01 20:55  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s0 --split stop --guard-q 0.99 --spread-room --out eval_tmlp_F95_split_list_s0_g99sr_stop.json
+2026-10-01 20:55  torch chain done
+2026-10-01 20:56  torch test chain started (pid 10844)
+2026-10-01 21:13  rc=0  ML/code/torch_train.py --tag tmlp_F95_split_list_s1 --seed 1 --threads 2 --lambda-list 1 --tau 0.25
+2026-10-01 21:32  rc=0  ML/code/torch_train.py --tag tmlp_F95_split_list_s2 --seed 2 --threads 2 --lambda-list 1 --tau 0.25
+2026-10-01 21:33  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s0 --split test --guard-q 0.99 --spread-room --out eval_tmlp_F95_split_list_s0_g99sr_test.json
+2026-10-01 21:34  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s0 --split test --guard-q 0.95 --out eval_tmlp_F95_split_list_s0_g95_test.json
+2026-10-01 21:35  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s1 --split test --guard-q 0.99 --spread-room --out eval_tmlp_F95_split_list_s1_g99sr_test.json
+2026-10-01 21:36  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s1 --split test --guard-q 0.95 --out eval_tmlp_F95_split_list_s1_g95_test.json
+2026-10-01 21:36  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s2 --split test --guard-q 0.99 --spread-room --out eval_tmlp_F95_split_list_s2_g99sr_test.json
+2026-10-01 21:37  rc=0  ML/code/evaluate.py --kind torch --tag tmlp_F95_split_list_s2 --split test --guard-q 0.95 --out eval_tmlp_F95_split_list_s2_g95_test.json
+2026-10-01 21:37  torch test chain done
+2026-10-02 14:20  B0 chain started (pid 20172)
+2026-10-02 15:13  rc=0  ML/code/torch_train.py --tag tmlp_F95_phys_split_list_s0 --physics base,kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100 --seed 0 --threads 2 --lambda-list 1 --tau 0.25
+2026-10-02 15:14  rc=0  ML/code/mixed_eval.py drive --jobs 2
+2026-10-02 15:14  rc=0  ML/code/mixed_eval.py la --variants pmix
+2026-10-02 15:14  B0 chain done

@@ -323,10 +323,14 @@ def run_student(fd, D_real, E_real, policy: StudentPolicy, cv=0.15):
 
 def load_policy(kind: str, tag: str, feas_thr=0.5, guard_q=None,
                 spread_room=False):
-    """Factory: 'gbt' (trees), 'nn' (MLP regression), 'clf' (MLP classifier)."""
+    """Factory: 'gbt' (trees), 'nn' (MLP regression), 'clf' (MLP classifier),
+    'torch' (PyTorch networks, torch_train.py)."""
     if kind == "gbt":
         from gbt_policy import GBTPolicy
         pol = GBTPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
+    elif kind == "torch":
+        from torch_policy import TorchPolicy
+        pol = TorchPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)
     elif kind == "nn":
         from nn_policy import NNPolicy
         pol = NNPolicy(tag=tag, feas_thr=feas_thr, guard_q=guard_q)

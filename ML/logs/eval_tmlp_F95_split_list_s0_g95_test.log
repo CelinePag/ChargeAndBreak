@@ -1,0 +1,54 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s0 on test: 125 instances
+  25/125  11s
+  50/125  21s
+  75/125  26s
+  100/125  30s
+  125/125  34s
+[eval] 125 routes in 33.8s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s0 on test
+==========================================================================
+routes                125
+completed             123
+infeasible            2   hos_spread=2
+latency               1.668 ms/decision (median 1.655)
+teacher latency       71069 ms/decision (42,598x slower)
+
+vs LA  (paired on 123 routes both completed)
+   median    -0.12 %
+   mean      -0.19 %
+   IQR     [-0.95, +0.68]
+   best/worst -25.12 % / +16.93 %
+   student faster on 72/123 routes
+
+vs GREEDY  (paired on 118 routes both completed)
+   median    -2.81 %
+   mean      -2.83 %
+   IQR     [-3.81, -1.80]
+   best/worst -10.82 % / +16.36 %
+   student faster on 115/118 routes
+
+vs ORACLE (hindsight objective - T_START, 123 routes)
+   median    +1.89 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 117   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 123 routes)
+   median   -0.01 %   mean   +0.22 %
+
+rests   student   285  LA   286   mean -0.008/route   fewer on 4/123 routes
+charges student  1044  LA  1162   mean -0.959/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.40 %  worst +10.65 %
+   RmediumCfewTmedium         n=  4  median  +0.89 %  worst  +0.99 %
+   RmediumCmediumTtight       n=  4  median  +0.76 %  worst +15.16 %
+   RshortCmanyTtight          n=  4  median  +0.52 %  worst  +2.44 %
+   RshortCfewTnone            n=  4  median  +0.51 %  worst  +2.21 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 12x, left none 0x, charge clamp moved 1x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s0_g95_test.json

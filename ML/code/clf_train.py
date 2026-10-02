@@ -146,11 +146,17 @@ def main():
                          "against 5.3 for a two-example class, so a spurious "
                          "11-hour rest became nearly free. 'none' reproduces "
                          "its best setting; the others reproduce the failure.")
+    ap.add_argument("--dagger", default="",
+                    help="comma list of DAgger labels (dagger_label.py) whose "
+                         "rows join the data, e.g. 'r1,r2'")
     args = ap.parse_args()
 
     hidden = tuple(int(x) for x in args.hidden.split(","))
     os.makedirs(MODELS, exist_ok=True)
     d = load(args.data)
+    if args.dagger:
+        from dataset import add_dagger
+        d = add_dagger(d, [t for t in args.dagger.split(",") if t])
     names = [str(x) for x in d["feature_names"]]
     n_state = int(d["n_state"])
     vocab = [str(x) for x in d["action_vocab"]]

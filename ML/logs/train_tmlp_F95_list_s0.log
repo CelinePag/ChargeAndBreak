@@ -1,0 +1,33 @@
+﻿[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[data] rows 411118  features 222
+  fit   rows  317802  instances  639  decisions  56104
+  stop  rows   31355  instances   66  decisions   5509
+  test  rows   61961  instances  125  decisions  10982
+[net] [256, 256, 128] -> 3 heads, 123,651 parameters, 317,802 training rows / 56,104 decisions, 2 threads
+[loss] batch 192 decisions, select by regret, lambda_list 1 (tau 0.25 h)
+  ep   1  val cost 0.4239  feas 0.0561  tauc 0.0129  regret 1.16 min  list 0.9468  lr 1.0e-03  19s *
+  ep   2  val cost 0.2988  feas 0.0457  tauc 0.0107  regret 1.35 min  list 0.8065  lr 1.0e-03  37s
+  ep   3  val cost 0.2691  feas 0.0471  tauc 0.0111  regret 1.19 min  list 0.7844  lr 1.0e-03  50s
+  ep   4  val cost 0.2116  feas 0.0380  tauc 0.0106  regret 1.40 min  list 0.7773  lr 1.0e-03  62s
+  ep   5  val cost 0.1961  feas 0.0406  tauc 0.0104  regret 0.77 min  list 0.7681  lr 1.0e-03  77s *
+  ep   6  val cost 0.1617  feas 0.0350  tauc 0.0119  regret 1.17 min  list 0.7554  lr 1.0e-03  98s
+  ep   7  val cost 0.1530  feas 0.0373  tauc 0.0119  regret 1.42 min  list 0.7494  lr 1.0e-03  122s
+  ep   8  val cost 0.1449  feas 0.0391  tauc 0.0104  regret 1.32 min  list 0.7442  lr 1.0e-03  144s
+  ep   9  val cost 0.1383  feas 0.0378  tauc 0.0106  regret 1.12 min  list 0.7411  lr 5.0e-04  167s
+  ep  10  val cost 0.1302  feas 0.0313  tauc 0.0096  regret 0.88 min  list 0.7345  lr 5.0e-04  187s
+  ep  11  val cost 0.1296  feas 0.0315  tauc 0.0103  regret 0.84 min  list 0.7322  lr 5.0e-04  205s
+  ep  12  val cost 0.1356  feas 0.0292  tauc 0.0096  regret 0.96 min  list 0.7308  lr 5.0e-04  224s
+  ep  13  val cost 0.1216  feas 0.0317  tauc 0.0098  regret 0.84 min  list 0.7299  lr 2.5e-04  241s
+  ep  14  val cost 0.1228  feas 0.0268  tauc 0.0097  regret 0.91 min  list 0.7264  lr 2.5e-04  254s
+  ep  15  val cost 0.1196  feas 0.0277  tauc 0.0099  regret 0.96 min  list 0.7261  lr 2.5e-04  273s
+[train] best epoch 5 of 15, val regret 0.0128, 273s
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go
+fit         0.81 min    93.9%      56075       3.19 min
+stop        0.77 min    93.8%       5507       3.10 min
+test        0.72 min    94.3%      10979       3.44 min
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/tmlp_F95_list_s0_torch.pt
