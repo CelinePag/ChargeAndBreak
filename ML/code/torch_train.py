@@ -59,6 +59,12 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# the repo root, for `src` (features.py needs it for the charger arch); every
+# other script does the same -- without it the import only worked where the
+# project happened to be pip-installed
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 import torch                                                       # noqa: E402
 import torch.nn.functional as F                                    # noqa: E402

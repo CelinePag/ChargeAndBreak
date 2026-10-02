@@ -103,7 +103,7 @@ tbody th { font-weight: 600; }
   <div class="eyebrow">ChargeAndBreak · imitation learning side · CPAIOR 2027 short paper</div>
   <h1>ChargeAndBreak ML Status</h1>
   <p class="lede">Learned policies for an electric truck's charging, break and rest decisions under EU driving-time rules, trained to imitate the look-ahead MILP (the LA). This page records what we tried, what worked, what it means for the trucking problem, and what runs next. It is updated as results come in.</p>
-  <p class="meta">Updated 2 Oct 2026, 16:20 · numbers on held-out routes unless stated · ± is one standard error over routes</p>
+  <p class="meta">Updated 3 Oct 2026 · numbers on held-out routes unless stated · ± is one standard error over routes</p>
 </header>
 
 <section aria-labelledby="where">
@@ -122,10 +122,10 @@ tbody th { font-weight: 600; }
     <table>
       <thead><tr><th>Job</th><th>What it answers</th><th>Status</th><th>Expected</th></tr></thead>
       <tbody>
-        <tr><td>Pilot: LA on 48 short mixed-power training routes</td><td>Does LA data from mixed routes close the 5–9 pp gap?</td><td><span class="chip run">32 / 48, moving to HPC</span></td><td class="n">stage <code>pilot</code></td></tr>
-        <tr><td>B1: ChargerNet and its variant on all physics, then validation</td><td>Does a built-in charger comparison close the mixed-power gap? (The control without structure is trained.)</td><td><span class="chip run">1 / 3 trained, moving to HPC</span></td><td class="n">stage <code>b1</code></td></tr>
-        <tr><td>DAgger probe on 36 validation routes</td><td>Are students' decisions worse at the states they reach themselves than at the LA's states?</td><td><span class="chip run">moving to HPC</span></td><td class="n">stage <code>dagger</code></td></tr>
-        <tr><td>Re-extraction with per-charger inputs; mixed-power validation oracles</td><td>Data and validation routes for direction B</td><td><span class="chip ok">done</span></td><td class="n">2 Oct, 16:00</td></tr>
+        <tr><td>B1: ChargerNet and its variant on all physics, then validation</td><td>Does a built-in charger comparison close the mixed-power gap? (The control without structure is trained.)</td><td><span class="chip run">to rerun on the cluster</span></td><td class="n">stage <code>b1</code></td></tr>
+        <tr><td>Pilot models: trees and PyTorch trained with the 47 pilot routes</td><td>The data answer to the same question, judged on the same validation routes</td><td><span class="chip run">to run on the cluster</span></td><td class="n">stage <code>pilot-models</code></td></tr>
+        <tr><td>Pilot: LA on 48 short mixed-power training routes</td><td>Training data from mixed routes</td><td><span class="chip ok">done</span></td><td class="n">47 routes, 12,152 rows</td></tr>
+        <tr><td>DAgger probe on 36 validation routes</td><td>Do errors compound at the students' own states?</td><td><span class="chip ok">done</span></td><td class="n">see Data and compute</td></tr>
       </tbody>
     </table>
   </div>
@@ -241,7 +241,7 @@ tbody th { font-weight: 600; }
       <tr><td>Learning curve</td><td>How many LA routes a student needs</td><td>65 training routes: +0.87 pp vs LA. 639 routes: +0.26 pp. About 10 % of the data gets within 1 pp; closing the last point needs all of it.</td><td><span class="chip ok">informative</span></td></tr>
       <tr><td>LA decision time</td><td>What the LA costs to run</td><td>71 s per stop on average: 110 s at chargers (99th percentile 6.6 min), 59 s at laybys, 67 s at customers. Fine for one driver, so speed alone does not justify the ML.</td><td><span class="chip ok">measured</span></td></tr>
       <tr><td>Students as a planning tool</td><td>Do they rank battery and charger options like the LA?</td><td>Large effects right (300 kWh battery: +5.0 h vs LA +5.1 h; 150 kW chargers: +11.0 vs +10.0 h). Gains from upgrades underestimated by 30–70 %. Not pursued as the paper's contribution.</td><td><span class="chip part">dropped</span></td></tr>
-      <tr><td>DAgger</td><td>Ask the LA at the states the student reaches itself</td><td>Built and tested end to end. At states the LA visited, a fresh LA query gives the same action (2 of 2) and costs within scenario noise. Probe queued.</td><td><span class="chip run">queued</span></td></tr>
+      <tr><td>DAgger probe (base case, 36 validation routes, 108 states per model)</td><td>Do errors compound at the states the student reaches itself?</td><td>No. Regret per decision at its own states vs at the LA's: trees 1.13 vs 0.85 min, PyTorch 0.62 vs 0.83 min, both within noise. Students disagree with the LA more often there (12–13 %), but cheaply. The queried LA is the teacher: same action at 24 of 24 of the LA's own states, costs within scenario noise. On the base case DAgger has little to fix; mixed routes remain untested.</td><td><span class="chip part">little to fix</span></td></tr>
     </tbody>
   </table></div>
 </section>
@@ -284,6 +284,7 @@ tbody th { font-weight: 600; }
 <section aria-labelledby="log">
   <h2 id="log">Change log</h2>
   <ul class="log">
+    <li><span class="num">2026-10-03</span> Cluster results: pilot done (47 routes extracted), DAgger probe done (no compounding on the base case). B1 failed on an import path in the trainer (fixed, to rerun); pilot-models stage added. An LA decision takes ~12 s on the cluster vs 70–160 s on the laptop.</li>
     <li><span class="num">2026-10-02 16:20</span> Laptop jobs stopped; the remaining runs move to a cluster (<code>ML/hpc/run_jobs.sh</code>). Re-extraction verified, validation oracles solved, B1 control trained.</li>
     <li><span class="num">2026-10-02 15:20</span> B0 result; per-charger inputs added and re-extracting; mixed-power validation routes built; B1 queued.</li>
     <li><span class="num">2026-10-02</span> First version. PyTorch parity on test; PyTorch collapse on mixed routes diagnosed; direction B chosen; B0, pilot and DAgger probe running.</li>

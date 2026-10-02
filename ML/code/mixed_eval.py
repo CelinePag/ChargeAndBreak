@@ -69,7 +69,12 @@ MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           # charger's speed.  Chosen on --set val; the test routes are run once.
           ("torch", "tmlp_T144_phys_split_list_s0", "torch split+list, T inputs, all phys"),
           ("torch", "tmlp_T144_phys_charger_s0", "ChargerNet, all physics"),
-          ("torch", "tmlp_T144_phys_chargerG_s0", "ChargerNet, g sees speed, all phys")]
+          ("torch", "tmlp_T144_phys_chargerG_s0", "ChargerNet, g sees speed, all phys"),
+          # the data answer (2026-10-03): the 47 pmix pilot routes added to training
+          ("gbt", "gbt_P102_physpmix_s1", "trees + power, + pilot"),
+          ("gbt", "gbt_P102_physpmix_w5_s1", "trees + power, + pilot x5"),
+          ("torch", "tmlp_T144_physpmix_split_list_s0", "torch T inputs, + pilot"),
+          ("torch", "tmlp_T144_physpmix_charger_s0", "ChargerNet, + pilot")]
 
 
 # which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"

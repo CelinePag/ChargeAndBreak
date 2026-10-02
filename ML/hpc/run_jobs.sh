@@ -7,6 +7,7 @@
 #     bash ML/hpc/run_jobs.sh b1             # direction B: train + validate (validation routes only)
 #     bash ML/hpc/run_jobs.sh dagger         # DAgger probe on the stop split
 #     bash ML/hpc/run_jobs.sh extract-pmix   # after `pilot`: the pilot's LA runs -> training rows
+#     bash ML/hpc/run_jobs.sh pilot-models   # after `extract-pmix`: models trained WITH the pilot routes
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -94,8 +95,44 @@ extract-pmix)
   log "extract done"
   ;;
 
+pilot-models)
+  # the DATA answer to mixed chargers, next to b1's STRUCTURE answer: the same
+  # models with the 47 pilot routes added to every physics value.  Validation
+  # routes only, like b1.
+  T=$(( NCPU < 16 ? NCPU : 16 ))
+  PHYSP=$PHYS,pmix
+  fit() {
+    local tag=$1; shift
+    if [ -f "ML/models/${tag}_meta.json" ]; then log "pilot-models: $tag exists, skipped"; return; fi
+    log "pilot-models: training $tag"
+    "$@" > "$LOGS/train_${tag}.log" 2>&1
+  }
+  fit gbt_P102_physpmix_s1    python -u ML/code/gbt_train.py --tag gbt_P102_physpmix_s1 --fset P \
+      --physics "$PHYSP" --seed 1
+  fit gbt_P102_physpmix_w5_s1 python -u ML/code/gbt_train.py --tag gbt_P102_physpmix_w5_s1 --fset P \
+      --physics "$PHYSP" --seed 1 --weight-physics pmix=5
+  TCOMMON="--fset T --physics $PHYSP --seed 0 --threads $T --lambda-list 1 --tau 0.25"
+  fit tmlp_T144_physpmix_split_list_s0 python -u ML/code/torch_train.py \
+      --tag tmlp_T144_physpmix_split_list_s0 $TCOMMON --arch split
+  fit tmlp_T144_physpmix_charger_s0 python -u ML/code/torch_train.py \
+      --tag tmlp_T144_physpmix_charger_s0 $TCOMMON --arch charger --g-exclude power
+  for spec in gbt:gbt_P102_physpmix_s1 gbt:gbt_P102_physpmix_w5_s1 \
+              torch:tmlp_T144_physpmix_split_list_s0 torch:tmlp_T144_physpmix_charger_s0; do
+    kind=${spec%%:*}; tag=${spec#*:}
+    out=eval_${tag}_g99sr_stop.json
+    if [ -f "ML/results/$out" ]; then continue; fi
+    log "pilot-models: validating $tag on the uniform stop split"
+    python -u ML/code/evaluate.py --kind "$kind" --tag "$tag" --split stop \
+        --guard-q 0.99 --spread-room --out "$out" > "$LOGS/eval_${tag}_g99sr_stop.log" 2>&1
+  done
+  log "pilot-models: mixed-power validation routes"
+  python -u ML/code/mixed_eval.py drive --set val --variants pmix \
+      --jobs $(( NCPU < 8 ? NCPU : 8 )) > "$LOGS/mixed_val_drive_pilot.log" 2>&1
+  log "pilot-models done"
+  ;;
+
 *)
-  echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix"
+  echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models"
   exit 1
   ;;
 esac
