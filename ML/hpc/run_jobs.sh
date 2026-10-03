@@ -13,6 +13,9 @@
 #     bash ML/hpc/run_jobs.sh curve-la i/n   # one of n parallel shares of their LA runs
 #     bash ML/hpc/run_jobs.sh dagger-pmix i/n  # DAgger on the pilot routes, one of n label shares
 #     bash ML/hpc/run_jobs.sh curve-train    # after both: extract, train, test once
+#     bash ML/hpc/run_jobs.sh la-test i/n    # LA on the 24 mixed test routes without one
+#     bash ML/hpc/run_jobs.sh dagger2 i/n    # DAgger round 2, one of n label shares
+#     bash ML/hpc/run_jobs.sh final          # after both: 121-route point, round-2 models, test
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -254,9 +257,86 @@ curve-train)
   log "curve-train done"
   ;;
 
+# ── round 3 (2026-10-03): more LA reference, DAgger round 2, the 121 point ──
+# Phase 1 (LA, parallel shares): la-test i/n and dagger2 i/n.
+# Phase 2 (only when every phase-1 share is done): final.
+la-test)
+  # the LA on the 24 mixed-power TEST routes it has not run (8 already have it)
+  la_threads
+  SL=${2:-0/1}
+  log "la-test $SL: LA on the remaining mixed test routes (CB_GRB_THREADS=$CB_GRB_THREADS)"
+  python -u ML/code/run_la_mixed.py --split test --routes all --slice "$SL" \
+      >> "$LOGS/la_mixed_test_all_${SL/\//of}.log" 2>&1
+  log "la-test $SL done"
+  ;;
+
+dagger2)
+  # DAgger round 2: the student trained with round-1 labels drives the same 48
+  # short routes; the LA corrects it where it has left the LA's trajectory.
+  la_threads
+  SL=${2:-0/1}
+  if [ "${SL%%/*}" = "0" ]; then
+    log "dagger2: rollout of tmlp_T144_physdg_split_list_s0 on the pilot's 48 short routes"
+    python -u ML/code/dagger_rollout.py --label dgpmix2 --routes pmix --split fit \
+        --route-seeds 1-12 --lengths short --per-family 12 --stops 999 \
+        --models torch:tmlp_T144_physdg_split_list_s0 >> "$LOGS/dagger_pmix2.log" 2>&1
+    touch ML/data/dagger/dgpmix2/queries/.done
+  else
+    while [ ! -f ML/data/dagger/dgpmix2/queries/.done ]; do sleep 30; done
+  fi
+  log "dagger2 $SL: LA labels (CB_GRB_THREADS=$CB_GRB_THREADS)"
+  python -u ML/code/dagger_label.py --label dgpmix2 --slice "$SL" \
+      >> "$LOGS/dagger_pmix2_label_${SL/\//of}.log" 2>&1
+  log "dagger2 $SL done"
+  ;;
+
+final)
+  # refuse to start while any LA work is still running (round 2 trained on 89
+  # of 121 routes because training started before the LA shares had finished)
+  if pgrep -f "run_la_mixed.py|dagger_label.py|dagger_rollout.py" > /dev/null; then
+    echo "LA work is still running -- wait until every la-test / dagger2 share says done"
+    exit 1
+  fi
+  T=$(( NCPU < 16 ? NCPU : 16 ))
+  log "final: extract every mixed training route (121 usable expected)"
+  python -u ML/code/extract.py --physics pmix > "$LOGS/extract_pmix_121.log" 2>&1
+  TC="--fset T --threads $T --lambda-list 1 --tau 0.25 --arch split"
+  fitm() {
+    local tag=$1; shift
+    if [ -f "ML/models/${tag}_meta.json" ]; then log "final: $tag exists, skipped"; return; fi
+    log "final: training $tag"
+    "$@" > "$LOGS/train_${tag}.log" 2>&1
+  }
+  for s in 0 1 2; do
+    fitm tmlp_T144_physpmix121_split_list_s$s python -u ML/code/torch_train.py \
+        --tag tmlp_T144_physpmix121_split_list_s$s --physics "$PHYS,pmix" --seed $s $TC
+    fitm tmlp_T144_physdg2_split_list_s$s python -u ML/code/torch_train.py \
+        --tag tmlp_T144_physdg2_split_list_s$s --physics "$PHYS" --dagger dgpmix,dgpmix2 --seed $s $TC
+  done
+  fitm gbt_P102_physpmix121_s1 python -u ML/code/gbt_train.py --tag gbt_P102_physpmix121_s1 \
+      --fset P --physics "$PHYS,pmix" --seed 1
+  for spec in torch:tmlp_T144_physpmix121_split_list_s0 torch:tmlp_T144_physpmix121_split_list_s1 \
+              torch:tmlp_T144_physpmix121_split_list_s2 torch:tmlp_T144_physdg2_split_list_s0 \
+              torch:tmlp_T144_physdg2_split_list_s1 torch:tmlp_T144_physdg2_split_list_s2 \
+              gbt:gbt_P102_physpmix121_s1; do
+    kind=${spec%%:*}; tag=${spec#*:}
+    out=eval_${tag}_g99sr_test.json
+    if [ -f "ML/results/$out" ]; then continue; fi
+    log "final: $tag on the 125 base-case test routes"
+    python -u ML/code/evaluate.py --kind "$kind" --tag "$tag" --split test \
+        --guard-q 0.99 --spread-room --out "$out" > "$LOGS/eval_${tag}_g99sr_test.log" 2>&1
+  done
+  log "final: mixed test routes, then the LA comparison on every route it has run"
+  python -u ML/code/mixed_eval.py drive --jobs $(( NCPU < 8 ? NCPU : 8 )) \
+      > "$LOGS/mixed_test_drive_final.log" 2>&1
+  python -u ML/code/mixed_eval.py la --variants pmix > "$LOGS/mixed_test_la_final.log" 2>&1
+  log "final done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
+  echo "       |la-test i/n|dagger2 i/n|final"
   exit 1
   ;;
 esac

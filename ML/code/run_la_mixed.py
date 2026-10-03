@@ -80,7 +80,8 @@ def main():
     ap.add_argument("--split", choices=["test", "train"], default="test")
     ap.add_argument("--routes", default=None,
                     help="base route names; the variant suffix is added "
-                         "(default: SUBSET for test, every built route for train)")
+                         "(default: SUBSET for test, every built route for train; "
+                         "'all' = every built route of the split)")
     ap.add_argument("--slice", default="0/1",
                     help="i/n: this process's share of the routes, so n processes "
                          "can label one batch in parallel (each skips solved routes)")
@@ -90,10 +91,15 @@ def main():
     paths.redirect_outputs(LA_ROOT)          # before anything can write
     from src.simulation.runner_dispatch import run_algorithm
 
-    routes = (args.routes.split(",") if args.routes
-              else train_routes(args.variant) if args.split == "train" else SUBSET)
     inst_dir = (os.path.join(INST, "train", args.variant) if args.split == "train"
                 else os.path.join(INST, args.variant))
+    if args.routes == "all":                 # every built route of this split
+        routes = sorted((os.path.splitext(os.path.basename(p))[0].split("__")[0]
+                         for p in glob.glob(os.path.join(inst_dir, "*.json"))),
+                        key=lambda n: (int(n.rsplit("_", 1)[1]), n))
+    else:
+        routes = (args.routes.split(",") if args.routes
+                  else train_routes(args.variant) if args.split == "train" else SUBSET)
     i, n = (int(x) for x in args.slice.split("/"))
     names = [f"{r}__{args.variant}" for r in routes if r][i::n]
     print(f"[la_mixed] {args.split}: {len(names)} routes (slice {args.slice}), "

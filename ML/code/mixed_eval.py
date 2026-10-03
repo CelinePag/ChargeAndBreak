@@ -89,7 +89,17 @@ MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           ("torch", "tmlp_T144_physdg_split_list_s1", "torch T, + DAgger (s1)"),
           ("torch", "tmlp_T144_physdg_split_list_s2", "torch T, + DAgger (s2)"),
           ("gbt", "gbt_P102_physpmixall_s1", "trees + power, + all mixed data"),
-          ("gbt", "gbt_P102_physdg_s1", "trees + power, + DAgger")]
+          ("gbt", "gbt_P102_physdg_s1", "trees + power, + DAgger"),
+          # NB "all mixed data" above = the 89 routes extracted before the last
+          # LA shares finished (data frozen as pmix89).  Round 3 (2026-10-03):
+          # every usable route (121) and DAgger round 2 (labels r1 + r2)
+          ("torch", "tmlp_T144_physpmix121_split_list_s0", "torch T, + 121 mixed routes"),
+          ("torch", "tmlp_T144_physpmix121_split_list_s1", "torch T, + 121 mixed routes (s1)"),
+          ("torch", "tmlp_T144_physpmix121_split_list_s2", "torch T, + 121 mixed routes (s2)"),
+          ("torch", "tmlp_T144_physdg2_split_list_s0", "torch T, + DAgger x2"),
+          ("torch", "tmlp_T144_physdg2_split_list_s1", "torch T, + DAgger x2 (s1)"),
+          ("torch", "tmlp_T144_physdg2_split_list_s2", "torch T, + DAgger x2 (s2)"),
+          ("gbt", "gbt_P102_physpmix121_s1", "trees + power, + 121 mixed routes")]
 
 
 # which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"
