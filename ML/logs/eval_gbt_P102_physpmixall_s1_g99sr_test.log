@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_P102_physpmixall_s1 on test: 125 instances
+  25/125  7s
+  50/125  12s
+  75/125  16s
+  100/125  19s
+  125/125  23s
+[eval] 125 routes in 22.8s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_P102_physpmixall_s1 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               1.037 ms/decision (median 1.034)
+teacher latency       70617 ms/decision (68,101x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    +0.18 %
+   mean      +0.30 %
+   IQR     [-0.44, +1.02]
+   best/worst -22.53 % / +26.09 %
+   student faster on 56/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.43 %
+   mean      -2.59 %
+   IQR     [-3.37, -1.43]
+   best/worst -11.48 % / +0.66 %
+   student faster on 117/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.31 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 96   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.31 %   mean   +0.62 %
+
+rests   student   288  LA   289   mean -0.008/route   fewer on 4/125 routes
+charges student  1120  LA  1174   mean -0.432/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.42 %  worst  +9.64 %
+   RmediumCmanyTmedium        n=  4  median  +1.48 %  worst  +1.92 %
+   RshortCmanyTtight          n=  4  median  +1.39 %  worst  +2.98 %
+   RmediumCfewTlarge          n=  4  median  +1.35 %  worst  +1.50 %
+   RshortCfewTlarge           n=  4  median  +1.19 %  worst  +2.64 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 3x, left none 0x, charge clamp moved 2x
+spread room: actions removed 77x, charges shortened 2x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_gbt_P102_physpmixall_s1_g99sr_test.json

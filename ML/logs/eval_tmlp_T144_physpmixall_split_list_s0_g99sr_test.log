@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_T144_physpmixall_split_list_s0 on test: 125 instances
+  25/125  6s
+  50/125  10s
+  75/125  14s
+  100/125  17s
+  125/125  20s
+[eval] 125 routes in 19.8s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_T144_physpmixall_split_list_s0 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               0.824 ms/decision (median 0.826)
+teacher latency       70617 ms/decision (85,668x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.23 %
+   mean      -0.01 %
+   IQR     [-0.75, +0.59]
+   best/worst -25.12 % / +15.29 %
+   student faster on 70/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.73 %
+   mean      -2.69 %
+   IQR     [-3.63, -1.69]
+   best/worst -11.68 % / +8.50 %
+   student faster on 114/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.03 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 89   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.18 %   mean   +0.24 %
+
+rests   student   289  LA   289   mean +0.000/route   fewer on 2/125 routes
+charges student  1128  LA  1174   mean -0.368/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.47 %  worst +11.06 %
+   RshortCmediumTnone         n=  4  median  +1.31 %  worst  +3.44 %
+   RshortCfewTmedium          n=  4  median  +1.07 %  worst  +1.99 %
+   RmediumCmediumTlarge       n=  4  median  +1.03 %  worst  +2.44 %
+   RmediumCmanyTmedium        n=  4  median  +0.91 %  worst  +1.33 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 8x, left none 0x, charge clamp moved 4x
+spread room: actions removed 62x, charges shortened 2x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_T144_physpmixall_split_list_s0_g99sr_test.json
