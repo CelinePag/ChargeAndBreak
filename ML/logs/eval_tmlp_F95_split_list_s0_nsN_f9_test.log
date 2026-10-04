@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s0 on test: 125 instances
+  25/125  12s
+  50/125  21s
+  75/125  29s
+  100/125  36s
+  125/125  41s
+[eval] 125 routes in 41.3s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s0 on test
+==========================================================================
+routes                125
+completed             116
+infeasible            9   hos_cd=2, hos_sd=6, stranding=1
+latency               2.267 ms/decision (median 2.129)
+teacher latency       72048 ms/decision (31,776x slower)
+
+vs LA  (paired on 116 routes both completed)
+   median    -0.01 %
+   mean      +0.23 %
+   IQR     [-0.78, +0.76]
+   best/worst -23.90 % / +30.51 %
+   student faster on 58/116 routes
+
+vs GREEDY  (paired on 111 routes both completed)
+   median    -2.76 %
+   mean      -2.50 %
+   IQR     [-3.74, -1.80]
+   best/worst -10.59 % / +24.04 %
+   student faster on 106/111 routes
+
+vs ORACLE (hindsight objective - T_START, 116 routes)
+   median    +1.95 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 99   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 116 routes)
+   median   +0.13 %   mean   +0.52 %
+
+rests   student   257  LA   256   mean +0.009/route   fewer on 3/116 routes
+charges student   950  LA  1040   mean -0.776/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  1  median +10.12 %  worst +10.12 %
+   RshortCmediumTlarge        n=  3  median  +2.52 %  worst +30.51 %
+   RmediumCfewTmedium         n=  4  median  +1.04 %  worst  +1.23 %
+   RmediumCmanyTnone          n=  4  median  +1.03 %  worst  +2.16 %
+   RmediumCfewTnone           n=  4  median  +0.77 %  worst  +1.11 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 0x, left none 0x, charge clamp moved 0x
+NO SHIELD: picks the guard (q=0.99) would have blocked 55/11695, charges below its reach minimum 3
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s0_nsN_f9_test.json

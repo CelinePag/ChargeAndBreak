@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_F95_base_s2 on test: 125 instances
+  25/125  20s
+  50/125  35s
+  75/125  47s
+  100/125  56s
+  125/125  64s
+[eval] 125 routes in 63.8s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_base_s2 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               4.190 ms/decision (median 4.153)
+teacher latency       70617 ms/decision (16,854x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.19 %
+   mean      -0.01 %
+   IQR     [-0.76, +0.65]
+   best/worst -25.31 % / +24.89 %
+   student faster on 75/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.67 %
+   mean      -2.87 %
+   IQR     [-3.80, -1.74]
+   best/worst -11.60 % / +8.32 %
+   student faster on 118/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +1.93 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 108   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.06 %   mean   +0.37 %
+
+rests   student   289  LA   289   mean +0.000/route   fewer on 4/125 routes
+charges student  1068  LA  1174   mean -0.848/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.45 %  worst +10.17 %
+   RshortCmanyTtight          n=  4  median  +0.68 %  worst  +1.92 %
+   RmediumCmanyTnone          n=  4  median  +0.66 %  worst  +1.90 %
+   RlongCmanyTnone            n=  1  median  +0.45 %  worst  +0.45 %
+   RmediumCmanyTtight         n=  4  median  +0.39 %  worst  +2.29 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 0x, left none 0x, charge clamp moved 0x
+NO SHIELD: picks the guard (q=0.99) would have blocked 26/11932, charges below its reach minimum 0
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_gbt_F95_base_s2_nsN_f9_test.json

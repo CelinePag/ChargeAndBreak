@@ -1,0 +1,823 @@
+Improving the Planning of Stochastic 
+Tasks with Ava ilability Windows Using
+Prediction
+Alexis Guigal1,3(B )
+, Emmanuel Hyon1,2
+, and Claire H anen1,2
+1 Sorbonne Universit´e, CNRS, LIP6, Pa ris, France
+{alexis.guigal,Emmanuel.hyon,claire.hanen}@lip6.fr 
+2 Paris Nanterre University, Nanterre, France 
+3 Thales DMS, Elancourt, France
+Abstract. We consider a dynamic stochastic capacity problem in which 
+tasks arrive according to a Poisson Process. Release times, stochastic 
+deadlines and masses characterize tasks. A task might be scheduled 
+within its time windows at a given time slot of bounded mass capac-
+ity. Each non-empty slot induces a deterministic setup cost. We aim to 
+deﬁne a dynamic scheduling policy that maximizes the expected mass 
+of scheduled tasks minus the setup costs over a long time horizon. This 
+type of problem has many applications in planning, scheduling, and yield 
+management. We use a rolling horizon approach: at each step, a particu-
+lar case of the Multiple Knapsack with Restriction Assignment must be 
+solved. We present and benchmark m yopic heuristics, lookahead heuris-
+tics, and the exact solution provided by integer linear programming. We
+provide an extensive comparison in our dynamic and stochastic context.
+Finally, rather than searching for the most robust heuristic, we devise an
+algorithm selection process, based on random forests, to select the most
+eﬀective heuristic for a given instance, considering its parameters. This
+achieves signiﬁcant improvements.
+Keywords: Stochastic Capacity Planning · Rolling Horizon · 
+Algorithm Selection · Multiple Knapsack with Assignment Restrictions
+1
+Introduction 
+In this work, we address a challenging problem involving a dynamic stochastic 
+capacity process with a ﬁnite horizon. The problem entails the arrival of tasks 
+according to a Poisson process, and release times with a constant determinis-
+tic distance from their arrival time. The tasks have stochastic deadlines and 
+stochastic masses, all distributed according to known probabilities. A task can 
+be scheduled in one time slot within its time window. Each nonempty slot has a
+deterministic mass capacity and a setup cost. Upon arrival, each task’s stochas-
+tic elements are known, and performing a task yields a reward equal to its mass.
+Decisions are made sequentially at the beginning of each slot to determine the
+c The Author(s), under exclusive license to Springer Nature Switzerland AG 2026 
+T. Guns (Ed.): CPAIOR 2026, LNCS 16595, pp. 191–206, 2026.
+https://doi.org/10.1007/978-3-032-27242-3_12
+
+192
+A. Guigal et al.
+optimal policy that maximizes the expected value (rewards minus costs) over
+the entire horizon.
+The study of a real satellite launch complex is the basis of this work [2,16]. 
+Launching a rocket yields a setup cost, and there is a limited weight of embedded 
+satellites. Demands are made online. But this model ﬁnds applications in various
+ﬁelds such as healthcare management [1], resource reservation [12], production 
+[10,13] and transportation [4]. However, the dynamic (online data and decisions 
+with respect to time) and stochastic (random data) settings of our problem with
+time windows was not considered previously.
+Exact methods are acknowledged to lack scalability for large-scale dynamic 
+stochastic problems. Hence, stochastic dynamic programming is used to solve 
+a general sto chastic capacity reservation problem, where arriving orders can be
+placed in one knapsack [13] or in several knapsacks [11]. However, the time 
+horizon is limited to at most ﬁve periods. Crainic [4] highlights the challenges 
+faced by state-of-the-art solvers, which struggle to eﬃciently solve even simple 
+mo dels with a horizon of only two periods.
+Given the complexity of dynamic programming or stochastic programming 
+approaches for such problems (see [10]), Rolling Horizon methods have been pro-
+posed as an alternative (see [18] for a survey). In these methods, decisions for the 
+dynamic problem are determined at each time step by solving a static version of 
+the problem over a short or medium-term horizon. Nevertheless, Rolling Hori-
+zon methods present several limitations. First, the static problem must be solved 
+quickly . Second, solving a static, deterministic version of the problem neglects
+future uncertainties. Finally, the optimal static policy does not necessarily cor-
+respond to the optimal dynamic policy (see [18]). Hence, there is currently no 
+eﬃcient method for solving stochastic and d ynamic problems where the decision
+at each stage is NP-complete.
+This motivates a careful analysis of the static case, which, in our context, 
+turns out to be a Multiple Knapsack with Assignment Restrictions (MKAR) [5, 
+6]. It is proven to be NP-complete in [6], which also provides a heuristic with error
+guarantees (see [3] for Multi Knapsack without restrictions). Another possible 
+approach to the static problem is the Restricted Bin packing Problem [9] and 
+its reﬁnement with time windows [8,15]. However, this approach is incompatible 
+with our requirements, since it allows multiple bins to have identical execution 
+dates. At last, based on classical scheduling methods (e.g. Earliest Deadline First,
+Best Fit), [2] introduces some heuristics to solve MKAR, and [16] presents a 
+dynamic programming algorithm for unit masses. Given these developments, we 
+argue that it is critical to evaluate the practical eﬃciency of ILP approaches, t he
+performance of existing and novel heuristics, as well as the relevance of adapting
+literature-based heuristics [3,6,8,9], especially in realistic scenarios with large
+horizons.
+To address the neglect of future uncertainties, lookahead methods include 
+future forecast in the rolling horizon [7,19]. However, stochastic programming 
+remains ineﬃcient in this context, whereas the scenario-sampling framework
+proposed by [12] appears to be the most appropriate way.
+
+Planning of Stochastic Tasks with Prediction
+193
+From an operational perspective, it is important to know which method is 
+most eﬀective to compute the global optimal instead of the static one for a 
+given instance. As we have at our disposal a large set of heuristics, then, we use
+Algorithm selection (see [14]). It is a framework to select an algorithm from a 
+portfolio on a case-by-case basis. The association between the i nstance and the
+selection of the algorithm is based on supervised machine learning.
+We propose, in this work, new resolution heuristics, and we conduct a com-
+putational evaluation using a large set of diverse instances. Inspired by the work
+of [12], we devise a lookahead resolution algorithm for this stochastic multiple 
+knapsack with assignment restriction, which we show to perform very well. At 
+last, we propose a new approach of algorithm selection that, up to our knowl-
+edge, has never done before for r olling horizon. It allows us to determine the
+best dynamic policy based on the instance characteristics that improves the
+performance by 50%.
+The rest of the paper is organized as follows: Sect. 2 introduces our p roblem.
+Section 3 is focused on static analysis, while Sect. 4 focuses on lookahead heuris-
+tics. Then Sect. 5 is devoted to the numerical assessment o f the heuristics, and
+Sect. 6 details the algorithm selection and it beneﬁts.
+2
+Problem Deﬁnition 
+We consider a stochastic scheduling problem where tasks randomly arrive to be 
+performed on a cumulative resource during a random and discrete time window. 
+A task that misses its deadline is considered to be lost. A rolling horizon decision 
+process is used to decide which tasks are to be performed at each time slot. The
+objective function adds up a setup cost for each used slot and a gain for each
+on-time task. In this section, we outline the problem features.
+2.1
+Time, Tasks, Constraints, Objective 
+We assume discrete time units, called slots. Slot t corresponds to the continuous 
+time interval [t, t + 1). We call the horizon the N consecutive available slots 
+corresponding to the interval [0, N]. For each slot t, the scheduler can decide to 
+open a cumulative resource of capacity Ct, with a resulting setup cost σt. We
+then say that slot t is open. Only one resource can be opened at slot t.
+Tasks arrive in the system following a continuous Process of intensity λ. This 
+means that the probability that k tasks arrive during slot t equals
+Pr(Nt = k) = e−λ λk
+k! .
+(1) 
+An arriving task i is characterized by the following parameters:
+arrival time ai the slot during which it arrives;
+release time ri = ai + A is the minimal slot in which it can be scheduled. The
+constant delay A > 0, does not depend on the task;
+
+194
+A. Guigal et al.
+deadline di = ri + Di, where Di is a uniform random variable in [D, D] with D 
+(respectively D) at the lower bound (respectively upper) of the availability
+duration. The task i must be scheduled before slot di;
+mass an integer mi measures the usage of the cumulative resource. The mass 
+mi is a random variable according to a discrete uniform distribution μ with
+support in [1, M].
+All random variables are independent. The task i and its parameters are 
+known by the scheduler from slot ai + 1. It can be scheduled in an open slot of 
+its time window [ri, di), or rejected. If i is scheduled, it induces a gain of m i.
+In an open slot t, the set P[t] of scheduled jobs must ﬁt within the resource’s
+capacity. So we can state the following constraints:
+– Open slot: P[t] = ∅ only if t is open.
+– Capacity constraint: 
+i∈P[t] 
+mi ≤Ct
+(2) 
+– Time window constraints: 
+∀i ∈ P[t],
+ri ≤t < di
+(3) 
+Hence, the decision of the system consists of opening slots and scheduling 
+tasks in their time windows in open slots. Considering a realization I of the 
+random variables on a horizon N, a schedule, or plan, is denoted by PI, and 
+we model the decision to open a slot t by a binary variable yPI
+t
+. We denote by
+PI[t] the set of tasks scheduled in slot t according to PI. A schedule fulﬁlls the
+constraints (2)(3). The gain of the schedule is the sum of the masses of scheduled 
+tasks minus the setup costs of open slots: 
+G(PI) = 
+N 
+t=1
+−σt · yPI
+t
++
+i∈PI[t]
+mi .
+(4) 
+By extension if PI is a plan, and t a time slot we also denote by G(PI[t]) 
+the gain of slot t: 0 if no task is scheduled,
+i∈PI [t] mi − σt otherwise. So, 
+our objective would be to design rolling horizon scheduling policies that would
+attempt to maximize the expected value of the gain: E G(PI) .
+Notice that in the rest of the paper, when the realization is ﬁxed, the super-
+script I is omitted. We intro duce some notations that will be used in the next
+sections for a schedule:
+– St = {i such that ai = t} is the s et of tasks that arrive at time t.
+– Rt = {i unscheduled before t, ai < t < di} is the set of already known tasks
+to consider from t.
+– Ft = {i ∈ Rt, ri ≤ t < di} the s et of unscheduled tasks that can be scheduled
+in slot t
+– Zt = {i ∈ Ft, di = t + 1} the set of schedulable tasks whose deadline is t + 1.
+Notice that we have: Rt = Rt−1 ∪ St−1 \ (P[t −1] ∪Zt−1).
+
+Planning of Stochastic Tasks with Prediction
+195
+2.2
+Rolling Horizon and Uncertainty Consideration 
+At each time slot t, one must decide whether t is open and which tasks are to 
+be executed. The method to determine this decision can be an online algorithm 
+or an oﬄine algorithm based on a certain amount of information. The eﬃciency
+of the resolution method directly depends on the way uncertainty is considered
+and also on the time horizon used for the calculation.
+If we consider the whole set of possible realizations of random variables, 
+and decision-making according to the full knowledge of these realizations to 
+maximize our expected objective, the combinatorial explosion of scenarios makes
+it impossible to take into account the uncertainty up to a large horizon N in
+practice.
+That is why we would rather consider rolling horizon policies.
+Principle of the Rolling Horizon in a Random Setting. A policy with a rolling 
+horizon involves making the decision at the current stage based on information 
+and forecasts that consider the future up to a given ﬁnite horizon of length 
+H < N, called the rolling horizon. For our problem, the rolling horizon H will 
+have maximum size H = D + A. At each time step t, we will calculate a decision 
+in interval [t, t + H) to be taken at the current slot based on the a vailable
+information and forecast over the rolling horizon. This part is called the static
+optimization problem, which is solved either exactly or by an approximation
+algorithm. Then, the decisions issued from the static solutions apply for slot t.
+The information is then updated for the next time slot, and a new static problem
+is considered.
+In the static problem, uncertainty is either unconsidered (myopic policies) or 
+a part o f forecasting is considered (lookahead policies).
+No Consideration of Uncertainty: Myopic Policy.
+For each slot t, in the 
+static problem, we consider only the set of known tasks (here Rt 
+= 
+{ i unscheduled before t, ai < t < di}) to make the decision.
+The generic algorithm for myopic methods is given by Algorithm 1. At each t 
+slot, we update the set Rt of known tasks (line 4). And we compute the decision 
+P[t] using the function SCHEDULE (line 5): in practice, this is done with one
+of the diﬀerent algorithms solving the deterministic problem for the slot t that
+we will see in Sect. 3. Then we update planning and gain.
+Partial Consideration: Lookahead Policy. In addition to Rt, we consider random 
+evolutions from the current slot t over a small horizon (the lookahead period) 
+of several steps after t. The lookahead period is signiﬁcantly shorter than the 
+rolling horizon. Nevertheless, even with a partial consideration of the future, we 
+do not necessarily avoid a combinatorial explosion. That is why some methods, 
+called approximation by sampling, only consider a subset of all possible scenarios 
+in order to evaluate the best action. The challenge is to consider a suﬃciently
+large set of samples for the approximation to be realistic. For our problem, we
+consider at slot t samples of tasks arrived during slot t (and thus released at
+t + A).
+
+196
+A. Guigal et al.
+Algorithm 1. Myopic Algorithm 
+Ensure: P : The schedule, w : Total gain 
+1: w ← 0 
+2: P ← ∅ 
+3: for t ∈ 1, .., N do 
+4:
+Rt ← Rt−1 ∪ St−1\(P[t − 1] ∪ Zt−1) 
+5:
+P ← SCHEDU LE(t, Rt, H)
+compute a planning of [t, t + H]
+6:
+P[t] ←P [t]
+7:
+w ←w + G(P[t])
+8: end for
+3
+Algorithms for the Static Problem
+In this section, we present the algorithms we tested and used to solve the under-
+lying static deterministic scheduling problem on a ﬁxed horizon starting at time 
+t0. They must be solved at each time step of the r olling horizon approach. We
+start by modeling the problem with an integer linear program, and then present
+the principles of our diﬀerent heuristics.
+3.1
+Integer Linear Program 
+We deﬁne the following decision variables:
+– Xit: is 1 if task i is in slot t, and 0 otherwise
+– Yt: is 1 if slot t is open, and 0 otherwise
+At each slot t0: 
+max 
+i∈Rt0 t∈[ri,di[ 
+mi × Xi,t − 
+t∈[t0..t0+H] 
+σt
+×Yt 
+1 : s. c.
+t∈[ri,di[ Xi,t ≤ 1,
+i
+ 
+∈ Rt0 
+2 :
+Xi,t ≤ Yt,
+i
+ 
+∈ Rt0, t ∈ [ri, di) 
+3 :
+i∈Ft Xi,t ≥ Yt,
+t
+ 
+∈ [t0..t0 + H] 
+4 :
+i∈Rt0 mi × Xi,t ≤ Ct,
+t
+ 
+∈ [t0..t0 + H]. 
+5 :
+Xit, Yt ∈ {0, 1}
+i ∈ Rt0, t ∈ [t0..t0 + H]. 
+Our objective function is to maximize the mass of scheduled tasks while min-
+imizing the cost of open slots. Constraint 1 indicates that each task is scheduled 
+in at most one slot. Constraint 2 expresses that if we have a task in a slot, this
+slot is open. Constraint 3 indicates that if our slot is open, there is at least one
+task in this slot. Constraint 4 expresses that the sum of the masses of the tasks
+in the slot is smaller than the capacity of the slot. At last, we have the integrity
+constraints.
+
+Planning of Stochastic Tasks with Prediction
+197
+3.2
+Greedy Heuristics 
+We notice that most of the myopic heuristics (even in [8,9]) are organized into 
+two parts (see Algorithm 2): A ﬁrst part (1) that sorts out tasks in a chosen 
+order, and a second one (2) which decides where to place tasks, taken in the
+predeﬁned order, in the diﬀerent slots.
+Finally, we check that the next slot to launch (the slot t) has a positive gain: 
+the gain of all tasks compensates for the loss of t he slot opening (3). The goal
+is to have the best combination of sorting and placement strategies.
+Algorithm 2. SCHEDULE(t, Rt, H) for greedy heuristics 
+Require: t : starting slot, Rt : the set of known unscheduled tasks, H : Rolling horizon 
+Ensure: P[t] : = The set of tasks for slot t 
+1: Rt ← SortingT asks( Rt)
+2: P ←PlacementTasks(t, Rt, H)
+3: P[t] ←V erifLaunch(P[t])
+Tasks Sorting Strategies. We propose six sorting heuristics. When ties appear 
+during sort, they are broken using the release date for all of them except in FIFO, 
+which uses the deadline. The heuristics are:
+– FIFO ascending order of releases dates
+– EDF ascending order of deadlines
+– Mass descending order of task masses
+– LCF [8] sorting according aﬃnity with the other tasks. A task has an aﬃnity 
+with another task if both tasks can ﬁt into the same bin. The sort is done each 
+time a task is placed in a slot. 
+– Poly Ascending order of a score assigned to tasks. The score of a task is the
+sum of its ranks in the two sorting methods EDF and Mass.
+– ZigZag [9] Instead of being an ascending or descending sort, it ﬁrst takes 
+the task closest to the median mass a nd then alternates between the larger and
+smaller masses around the median task.
+Placement Strategies. The placement phases should decide in which slot the 
+next task should be placed. Notice that if a task cannot be placed within its 
+time window, it is discarded. For a time slot t, we say that a task i is available 
+at t if it is unscheduled y et (if ri ≤t < di and if the remaining capacity of slot
+t is less than mi). We also say in this case that slot t can accommodate task i.
+Assume that task i is the current task. The placement strategies are: 
+– First-Fit: We schedule i in the ﬁrst open slot that can accommodate it. 
+– Best-Fit: we place i in the already open slot with the smallest remaining
+capacity that can accommodate the task. If no open slot can accommodate it, a
+
+198
+A. Guigal et al.
+new slot is opened if possible within the task’s time window if possible. 
+– Store: The list of tasks is scanned to constitute a subset of tasks that can be 
+performed simultaneously with i (their time windows overlap and their masses 
+do not exceed the maximal capacity). And once we can no longer add a new task, 
+then we schedule all the tasks of the subset in the ﬁrst slot that can accommodate
+them together.
+– Fill: The ﬁll strategy opens the next slot to accommodate the next unscheduled
+task of the given sorting, and then uses another sorting to ﬁll this slot (according
+to non-increasing masses).
+The next two heuristics are based on the cardinality of the subsets of available
+tasks at each time slot:
+– Max-Fit [9]: We schedule i in the slot with the most available tasks. 
+– Min-Fit : We sc hedule i in the slot with the fewest available tasks.
+Below, we list the diﬀerent heuristics implemented, and deﬁne the acronyms 
+that will be used to designate these heuristics later. Acronyms are of the form 
+xx yy where xx is the placement algorithm and yy the task sorting algorithm,
+for example: bf edf is the heuristic that uses EDF to sort tasks and Best Fit to
+schedule tasks.
+Placing/sort
+FIFO
+EDF
+Mass
+LCF
+Zigzag
+Poly 
+First-Fit
+ﬀ ﬁfo
+ﬀ edf
+ﬀ m
+ﬀ lcf
+ﬀ zigzag
+ﬀ pol y
+First-Fit Fill
+ﬀf ﬁfo
+ﬀf edf
+ﬀf m
+ﬀf lcf
+ﬀf zigzag
+ﬀf pol y
+Best-Fit
+bf ﬁfo
+bf edf
+bf m
+bf lcf
+bf zigzag
+bf pol y
+Store
+s ﬁfo
+s edf
+s m
+s lcf
+s zigzag
+s pol y
+Store Fill
+sf ﬁfo
+sf edf
+sf m
+sf lcf
+sf zigzag
+sf pol y
+Max-Fit
+maxf ﬁfo
+maxf edf
+maxf m
+maxf lcf
+maxf zigzag
+maxf pol y
+Min-Fit
+minf ﬁfo
+minf edf
+minf m
+minf lcf
+minf zigzag
+minf pol y
+3.3
+Other Myopic Heuristics 
+Heuristic Based on the Continuous Relaxation of the ILP. We intro-
+duced several heuristics based on the continuous relaxation of the ILP. Let us 
+note ˆX and ˆY the values of the continuous variables at the optimum. We used 
+three ways to build a feasible integer solution: 
+– ContLP1: We retrieve the most probable open slots (in descending order of 
+ˆYt) in the system and, slot by slot, we put the most likely tasks (in descending 
+order of ˆXi,t with t the chosen slot) that could appear in the chosen slot. 
+– ContLP2: We retrieve the set of most likely tasks in the system (in descending
+order of ˆXi,t) and put them in the most probable slot in which the chosen task
+can appear (the slot t).
+– Dawande (DLP): For an MKAR, Dawande et al. [6] proposed an algorithm 
+to get a feasible integer solution from the continuous relaxation based on an 
+iterated network ﬂow problem. We adapted this heuristic to our problem by
+considering setup costs and coupled it with a myopic heuristic.
+
+Planning of Stochastic Tasks with Prediction
+199
+Adaptation of Multiple Knapsack Heuristics of the Literature. We also 
+adapted several heuristics from the literature on multi-knapsac k problems.
+– H34: Adapted from [3] in which the authors studied a multiple knapsack prob-
+lem. They proposed a polynomial-time heuristic 3/4-approximation algorithm by 
+dividing the tasks into groups according to their mass and placing them so as to 
+ﬁll at least 3 /4 of the Knapsacks. We added time windows to their model and
+slightly modiﬁed the gain considered.
+– MKH: Adapted from [6] in which an MKAR is solved by an algorithm that 
+consists of approximately solving knapsack problems independently of each other 
+for each slot in the horizon. Then to select the slot with the best gain and keep 
+the schedule of this slot. The pro cess is repeated on the remaining slots and
+tasks until there are no more available tasks or slots. We added setup costs
+considerations to this framework.
+4
+Lookahead Algorithms 
+In this section, we present heuristics that partially consider future tasks by 
+sampling, inspired by the article by Van Hentenryck [12]. In this paper, the 
+authors address a stochastic online reservation problem. At each time slot, a 
+single task may randomly arrive with random parameters and must be allocated 
+to one of the B resources, which have limited capacity. Upon each arrival, an 
+irrevocable decision must be made whether to allocate the request to a resource 
+or not. The objective is to maximize the expected overall payoﬀ by summing the 
+gains from the tasks assigned to the diﬀerent resources at the horizon time. They 
+use a lookahead heuristic: at each time slot t, if a task arrived at t, the algorithm
+samples diﬀerent possible scenarios for slot t + 1 and retrieves a ﬁnal decision
+for slot t. Several diﬀerent strategies are proposed, among which we choose to
+adapt the consensus strategy.
+The features of our model that diﬀer from those of [12] are that a variable 
+number of tasks may arrive at any given time. Moreover, several tasks may be 
+scheduled at each time step, and our tasks have time windows. Algorithm 3 
+summarizes our adaptation of a lookahead approach. Starting from a partial 
+schedule P, it outputs the ﬁnal decision P[t] at time t. To this purpose, the 
+algorithm will give a score to each possible subset of tasks that can be executed 
+in slot t, recorded in listCombi, and then choose the one with the maximum 
+score (line 11). The scores have an initial value 0 (lines 1–5). The scoring of the 
+combinations (lines 5 to 10) is done by repeating a stochastic forecast for the 
+near future a large number (nbScenario) of times. In each Scenario, the algorithm 
+GET SAM P LE simulates the arrival of new tasks during slot t and adds this 
+subset of new tasks to the currently known tasks Rt to get set R (line 6). A
+schedule P is then computed with a myopic algorithm SCHEDULE on this set
+of tasks in the slots t to t + H (line 7). Notice that at time t, P [t] only contains
+tasks i such that ai < t since tasks of the sample are not schedulable at t. So
+it is in the list listCombi computed at line 1. The score of this combination is
+incremented by the overall gain of P on the rolling horizon (line 9).
+
+200
+A. Guigal et al.
+Algorithm 3. Lookahead-Consensus (P,Rt, t) 
+Require: P, Rt, t 
+Ensure: P[t] 
+1: Compute the list listCombi of subsets of Ft, 
+2: for combi ∈ listCombi do
+Score initalization 
+3:
+score(combi) ← 0 
+4: end for 
+5: for i = 1 to nbScenario do
+Run stochastic lookahead scenarii 
+6:
+R ← Rt ∪ GET SAM P LE(t)
+Add sample subset of tasks arriving in slot t 
+7:
+P ← SCHEDU LE(t, R , H)
+Compute a static schedule on [t, t + H ]
+8:
+combi ←P [t]
+Retrieve the slot t
+9:
+score(combi) ←score(combi) + G(P )
+10: end for
+11: P[t] ←
+arg max
+c∈listCombi
+score(c)
+Schedule the subset with highest score in slot t
+5
+Measuring the E ﬃciency
+5.1
+Test Plan and Simulation 
+We detail now how we evaluate the expected objective of each of the scheduling 
+algorithms. This is done by Monte Carlo sim ulations on diﬀerent relevant scenar-
+ios of the problem. Table 1 is our test plan and records all the parameter values 
+we use in our tests. To build an instance (also called a set of parameters) for 
+each ﬁeld, we pick one value from among those available. By combining them all, 
+we get our 10800 instances. Let us specify that the parameter Rolling Horizon
+describes the length of the horizon with respect to the maximal length of the
+rolling window.
+We compute the expected overall objective for a given algorithm using the 
+Monte Carlo principle. A Replication is the realization of a random path over a 
+horizon N of the system governed by the assessed algorithm. We note by G(PIn) 
+the objective collected during the running of n-th replication In. For a ﬁxed 
+set of parameters j and a given algorithm, we replicate the simulations a large
+number of times (L) to obtain the expected total objective, that is:
+fj = 1
+L
+=L
+=1
+G(PI ) .
+In order to get precise comparisons between heuristics, we also compute the 
+95% conﬁdence interval, the size of which decreases with the number of replica-
+tions. We kept the value of L as large as possible (L = 250 for Greedy heuristics, 
+L = 500 for H34 and MKH heuristics), except when the running times of the
+simulations were too long (L = 20 for continuous relaxation of the ILP and
+Lookahead heuristics and L = 10 for the ILP).
+
+Planning of Stochastic Tasks with Prediction
+201
+Table 1. Test Plan parameters.
+Parameter
+Values
+Caption 
+Rolling Horizon [2, 15%H, 30%H, 50%H, H] H is the m aximal horizon
+CSlot
+[8, 16, 24]
+maximum capacity of a slot
+Ratio
+[ 1 
+4 , 1 
+2 , 3 
+4, 1]
+parameter used to t une masses
+Mass
+[1, Ratio · CSlot]
+variation interval of mas ses
+λ
+[ 1 
+4 , 1 
+2 , 1, 3, 5]
+arrival rate of the Po isson process
+Delay A
+[1, 6, 12]
+delay between arrival a nd release
+SC
+[0, 10, 50, 90]
+setup cost as % of the slot capacity
+D
+1, 6, 12
+Maximum availability duration (D = 1)
+N
+960
+general simulation h orizon
+5.2
+Results 
+For the results, we selected the heuristics that appear to be the best once for 
+a subset of parameters, as well as the best heuristics of the diﬀerent articles 
+adapted to our model as baselines and the ILP. The main metric that we use to 
+compare the results is the average deviation rate from the best. For a resolution 
+method π ∈ Π, we deﬁne this value eπ(J) as the Cesaro mean of the average 
+percentage diﬀerence, per set of parameters j ∈ J, b etween (f π
+j ) the gain of
+π and the gain of the best resolution method (f ∗
+j ). When conﬁdence intervals
+cross, we ﬁx f π
+j −f ∗
+j = 0. It is equal to:
+eπ(J) = 1
+|J| ·
+j∈J
+f ∗
+j −f π
+j
+f ∗
+j
+.
+(5) 
+The lower this value is, the closer, on average, our resolution method is to the 
+best resolution method for sets of parameters.
+Results for Static Problems. ILP builds an optimal solution. Myopic heuris-
+tics obtain average deviation rates around 7% for MKH, around 10% for both 
+ContLP1, and greedy with bf, ﬀ, minf placement s trategies, around 20% for
+greedy with maxf and stock placement strategies, and up to 30% for H34 and
+DLP.
+Results for Dynamic Problems. Figure 1 shows the average deviation rates 
+of the whole set of policies. It can be seen that the ILP method has an aver-
+age deviation rate strictly greater than zero, which means that for several sets 
+of parameters, it i s no longer the best method. However, on average, the ILP
+remains the most eﬃcient resolution method.
+Moreover, baselines from the literature, such as ﬀlcf in [8], or even H34 
+in [3] show on average performances lower than those of the sf edf heuristic, 
+recognized as the most robust among myopic heuristics. Finally, c sf edf, which
+
+202
+A. Guigal et al.
+Fig. 1. Comparison of the average deviation rate from the best. In red, baseline algo-
+rithms of the literature, in yellow, lo okahead algorithms, and in blue, myopic heuristics.
+(Color ﬁgure online)
+is consensus lookahead with scheduling by sf edf, stands out as the most robust 
+among l ookahead heuristics, and more generally among all evaluated heuristics.
+Table 2 gives the mean computation time of one replication for diﬀerent cat-
+egories of resolution. First of all, ILP often requires more than 2 minutes to 
+solve an instance. This underlines its major drawback: its computation time. 
+The other categories of solving methods include: fast heuristics (such as Greedy, 
+both H34 and MKH ), which are up to 2000 times faster than ILP, and slow 
+heuristics (lookahead and continuous relaxation heuristics), which, in general, 
+oﬀer comparable computation times, except when processing numerous small
+tasks, which makes lookahead very slow. Thus, apart from this particular case,
+slow heuristics require on average 2 s per instance, which is 12 times less time
+than ILP, but remain 160 times slower than fast heuristics.
+Limiting the rolling horizon is a way to reduce computation time. Thus, in 
+ILP by limiting the horizon to 30%H, one can reduce the computation time to 
+24.62 s per set of parameters, while maintaining the same level of performance 
+(which is not guaranteed for shorter rolling horizons). For the other solving 
+methods, a similar phenomenon is observed: increasing the rolling h orizon does
+not improve the results compared to a horizon of only 2 slots (i.e. considering
+only one additional slot beyond the current one). This phenomenon seems to be
+related to the greedy characteristics of the algorithms.
+We introduce now, for a given algorithm π and a subset of parameters J , 
+the value ecπ(J ) which measures the gap between eπ(J ) and the mean of the 
+average deviation rate of the other methods. We have:
+ecπ(J ) =
+eπ(J ) × |Π|
+π ∈Π eπ (J ) .
+
+Planning of Stochastic Tasks with Prediction
+203
+Table 2. Mean running time of a replication f or each horizon value.
+Methods
+H = 2 H = 15%H H = 30%H H = 50%H H = H
+Greedy
+0.011 s 0.015 s
+0.015 s
+0.020 s
+0.028 s 
+ILP
+3.36 s 11.77 s
+24.62 s
+324.9 s
+348.56 s 
+Lookahead
+6.80 s 9.60 s
+9.64 s
+9.62 s
+9.30 s 
+ContLP
+1.29 s 1.48 s
+1.65 s
+2.00 s
+3.83 s 
+MKH & H34 0.014 s 0.018 s
+0.024 s
+0.023 s
+0.035 s 
+The heatmap in Fig. 2 exhibits the quality of a method for a subset of parameters. 
+We observe that ILP provides lower results than some heuristics when the arrival 
+rate is low. Also, one sees that ILP clearly surpasses heuristics when the cost 
+of opening a slot is almost e qual to the capacity of the slot, that is to say, in
+situations where it is optimal either to ﬁll the slot completely or not to schedule
+any task.
+6
+Heuristic Selection with Random F orest Prediction
+We observed that, even if some myopic and lookahead heuristics give good 
+results, their performances still remain lower than those obtained with the ILP. 
+Furthermore, if lookahead policies have better results than myopic ones, they 
+turn out to be much slower. We have therefore not identiﬁed a r obust heuristic
+able to reach the results obtained by the ILP on all instances. This is why we
+present our method for selecting the most appropriate heuristic for an instance
+Fig. 2. Comparison of resolution methods with ecπ(J ). Each column corresponds to a 
+subset of parameters J with ﬁxed (λ, SC, CSlot). Blue color indicates the good quality
+of the resolution method. (Color ﬁgure online)
+
+204
+A. Guigal et al.
+in order to improve the quality of the solution while maintaining a low execution 
+speed. For this aim, we follow the algorithm selection framework presented in
+[14]. Let us detail the d iﬀerent steps.
+Portfolio Selection. First, we determine the set of algorithms that we will con-
+sider as the smallest group of heuristics suﬃcient to obtain the best payout. 
+We only keep algorithms that have been the best at least once on the whole 
+set of instances. We then retain myopic greedy ones (bf edf, ﬀ lcf, ﬀf edf, ﬀf ﬁfo, 
+minf edf, minf lcf, s edf, sf edf, sf zigzag), multiple Knapsack (MKH, H34), con-
+tinued relaxation (ContLP1, DLP ﬀm), and Lookahead heuristics (c MKH,
+c s edf, c sf edf, c ﬀm). A second portfolio is selected, keeping only faster heuris-
+tics (Greedy and multiple Knapsack).
+Learning Model. The machine learning model used is a multi-class classiﬁcation 
+model in which each algorithm is a class, and the label is 1 if, for an instance the 
+algorithm b elongs to the best ones and 0 otherwise. The prediction is performed
+with a random forest algorithm implemented in [17]. We then use a Grid Search 
+algorithm to optimize the h yperparameters of the random forest.
+Learning Sets. We proceed with the learning by dividing our data (retrieved 
+from the previous test plan and experimentations) as follows: we randomly pick 
+up 60% for the training set, 20% for the test set. The remaining 20% is the 
+evaluation set and will be used later. We validate our learning since our metrics 
+do not deteriorate on the test set, and the values obtained are very good (macro-
+avg equals 0.87 for precision, 0.89 for recall, and 0.88 for F1-Score). Note that
+a classiﬁcation is considered correct for an instance if it anticipates one of the
+heuristics with the best gain.
+Including testing and hyper-parameterization, the learning process takes 61.6 
+minutes. Once it is achieved, we get a mapping between a set of parameters and 
+the best of the associated portfolio algorithms. Thus, we obtain an algorithm 
+(called prediction) that takes the parameter set as input, applies matching to
+the best predicted dynamic heuristic, and performs scheduling with it.
+We represent the average deviation rate computed on instances that belong 
+to the evaluation set. W e compare our prediction algorithm with the ﬁrst port-
+folio in Fig. 3a and with the second portfolio, containing o nly fast heuristics,
+in Fig. 3b. We keep the best heuristic (adding consensus in Fig. 3a). We also 
+add an additional score oracle, which represents the optimal prediction score, 
+obtained in the case where the prediction does not commit any error. We notice 
+that prediction reaches a score very close to that of the oracle and surpasses 
+all the individual heuristics. For the ﬁrst portfolio, the prediction score is 3.6% 
+and we achieve 29% reduction in error compared to c sf edf. We are also faster, 
+with a mean running time of a replication equal to 3.41 s. This is because we are 
+replacing a consensus heuristic with a fast heuristic in 41, 7% of cases. Further-
+more, we have a 13% diﬀerence between the error of prediction and that of the
+oracle. Considering only fast heuristics, the prediction score reaches 4.66%, so
+we have a 34% reduction in error compared to sf edf. Finally, we are only 5%
+oﬀbetween the error of our prediction and that of the oracle (4.41%).
+
+Planning of Stochastic Tasks with Prediction
+205
+Thus, this algorithm provides a very robust solution method while retaining 
+the speed of a myopic heuristic. And if we prioritize robustness, we still have 
+a method that is both faster and more eﬃcient than the most robust heuristic
+available.
+Fig. 3. Comparison of the average deviation rate to the best with prediction a nd oracle
+scores (only on evaluated data).
+7
+Conclusion 
+In this work, we studied a stochastic capacity problem. We solved it with a 
+Rolling Horizon approach, for which we propose an extensive benchmark of 
+heuristics. We highlighted that some basic heuristics perform very well, while 
+heuristics from the literature are not eﬀective. We also observed that the best 
+results were obtained by integer linear programming, at the cost of signiﬁcantly 
+larger computational time. We also proposed a lookahead approach that outper-
+forms all the heuristics studied and provides an alternative faster than the usual 
+recourse methods. Finally, we devised an algorithm selection approach based on 
+AI and data visualization that allowed to obtain results similar to linear pro-
+gramming in a far shorter time. Expanding the portfolio of heuristics to cover
+all cases where ILP is signiﬁcantly better than other algorithms is an area for
+improvement of this work.
+Acknowledgments. The authors would like to thank Thales DMS for its support
+and for allowing this work to be carried out during the hours dedicated to the PhD.
+References 
+1. Addis, B., Carello, G., Grosso, A., T`anfani, E.: Operating room scheduling and 
+rescheduling: a rolling horizon approach. Flex. Serv. Manuf. J. (2016)
+2. Benammar, N., Chr´etienne, P., Hyon, E., Jean-Marie, A.: Approches par horizon 
+roulant pour un probl`eme de planiﬁcation stochastique. In: ROADEF (2020)
+
+206
+A. Guigal et al.
+3. Caprara, A.: A 3/4-approximation algorithm for multiple subset sum. J. Heuristics
+9 (2003)
+4. Crainic, T.: Multi-period bin packing model and eﬀective constructive heuristics 
+for corridor-based logistics c apacity planning. Comput. Oper. Res. 132 (2021)
+5. Dahl, G., Foldnes, N.: LP based heuristics for the multiple knapsack problem with
+assignment restrictions. Ann. Oper. Res., 91–104 (2006)
+6. Dawande, M., Kalagnanam, M., Keskinocak, M., Salman, F.S., Ravi, R.: Approxi-
+mation algorithms for the multiple knapsack problem with assignment restrictions.
+J. Comb. Optim. 4(2), 171–186 (2000)
+7. DeYong, G.D., Cattani, K.D.: Fenced in? Stochastic and deterministic planning 
+models in a time-fenced, rolling h orizon scheduling system. Eur. J. Oper. Res.
+251(1), 85–95 (2016)
+8. Fleszar, K.: A new MILP model and fast heuristics for the variable-sized bin pack-
+ing problem with time windows. Comput. Ind. Eng. 175 (2023)
+9. Fu, Y.: Heuristic/meta-heuristic methods for restricted bin pac king problem. J.
+Heurist. 26 (2020)
+10. Gioia, D.G., Fadda, E., Brandimarte, P.: Rolling horizon policies for multi-stage 
+stochastic assemble-to-order p roblems. Int. J. Prod. Res. 62(14), 5108–5126 (2024)
+11. Hartman, J., Perry, T.: Approximating the solution of a dynamic, stochastic mul-
+tiple k napsack problem. Control. Cybern. 35(3), 535–550 (2006)
+12. Hentenryck, P.V., Bent, R., Mercier, L., Vergados, Y.: Online stochastic reserva tion
+systems. Ann. Oper. Res. 171, 101–127 (2009)
+13. Kleywegt, A., Papastavrou, J.: The dynamic and stochastic knapsack problem.
+Oper. Res. 46(1), 17–35 (1998)
+14. Kotthoﬀ, L.: Algorithm selection for combinatorial search problems: a surv ey. AI
+Mag. 35(3), 48–60 (2014)
+15. Liu, Q., et al.: Algorithms for the variable-sized bin packing p roblem with time
+windows. Comput. Ind. Eng. (2021)
+16. Meng-G´erard, J., Chr´etienne, P., Baptiste, P., Sourd, F.: On maximizing the proﬁt 
+of a satellite launcher: selecting a nd scheduling tasks with time windows and setups.
+Discret. Appl. Math. 156 (2009)
+17. Pedregosa, F., et al.: Scikit-learn: machine learning in Python. J . Mach. Learn.
+Res. 12, 2825–2830 (2011)
+18. Sahin, F., Narayanan, A., Powell Robinson, E.: Rolling horizon planning in supply 
+chains: review, implications and d irections for future research. Int. J. Prod. Res.
+(2013)
+19. Sam`a, M., D’Ariano, A., Pacciarelli, D.: Optimal aircraft traﬃc ﬂow management 
+at a terminal control area during disturbances. In: 15th EURO Working Group on
+Transportation (EWGT), pp. 460–469 (2012)

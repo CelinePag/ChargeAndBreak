@@ -118,6 +118,13 @@ def main():
     ap.add_argument("--spread-room", action="store_true",
                     help="count the charge and the stop overhead against the "
                          "15 h spread (policy_core.spread_room); off by default")
+    ap.add_argument("--no-shield", action="store_true",
+                    help="no rule layer: no forcing, no spread room, no minimum "
+                         "charge; only the feasibility head filters.  --guard-q "
+                         "then only sets the 'would have been blocked' counters")
+    ap.add_argument("--nominal-features", action="store_true",
+                    help="compute the input features at xi = 1, as in training, "
+                         "whatever --guard-q the shield uses")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -134,13 +141,20 @@ def main():
 
     pol = load_policy(args.kind, args.tag, feas_thr=args.feas_thr,
                       guard_q=args.guard_q, spread_room=args.spread_room)
+    pol.shield = not args.no_shield
+    if args.nominal_features:
+        pol.feature_q = None
     rows = []
     t0 = time.time()
     for i, inst in enumerate(keep):
         fd, D_real, E_real, cv = load_instance_json(
             os.path.join(INST, inst + ".json"))
         fd["_horizon_h"] = 24.0
+        c0 = (pol.n_forced, pol.n_unsafe, pol.n_short_charge)
         r = run_student(fd, D_real, E_real, pol, cv=cv)
+        r["n_forced"] = pol.n_forced - c0[0]
+        r["n_unsafe"] = pol.n_unsafe - c0[1]
+        r["n_short_charge"] = pol.n_short_charge - c0[2]
         r["instance"] = inst
         r["family"] = inst.rsplit("_", 1)[0]
         r.update(baselines(inst))
@@ -275,9 +289,14 @@ def report(rows, args, wall):
     if POL is not None:
         print(f"policy: forcing left 1 action {POL.n_forced}x, left none "
               f"{POL.n_empty}x, charge clamp moved {POL.n_clamped}x")
-        if POL.spread_room:
+        if POL.spread_room and POL.shield:
             print(f"spread room: actions removed {POL.n_spread_dropped}x, "
                   f"charges shortened {POL.n_spread_cut}x")
+        if not POL.shield:
+            nd = sum(r["decisions"] for r in rows)
+            print(f"NO SHIELD: picks the guard (q={args.guard_q}) would have "
+                  f"blocked {POL.n_unsafe}/{nd}, charges below its reach "
+                  f"minimum {POL.n_short_charge}")
 
 
 if __name__ == "__main__":

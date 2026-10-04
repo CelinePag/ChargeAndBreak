@@ -99,7 +99,33 @@ MODELS = [("gbt", "gbt_F95_base_s1", "trees, base only"),
           ("torch", "tmlp_T144_physdg2_split_list_s0", "torch T, + DAgger x2"),
           ("torch", "tmlp_T144_physdg2_split_list_s1", "torch T, + DAgger x2 (s1)"),
           ("torch", "tmlp_T144_physdg2_split_list_s2", "torch T, + DAgger x2 (s2)"),
-          ("gbt", "gbt_P102_physpmix121_s1", "trees + power, + 121 mixed routes")]
+          ("gbt", "gbt_P102_physpmix121_s1", "trees + power, + 121 mixed routes"),
+          # is the uniform pool diluting the mixed data? (2026-10-04)  Mixed
+          # routes only (epochs chosen on mixed seeds 11-12), with and without
+          # the DAgger labels; and the pool with the 121 routes weighted x5/x20.
+          # Seed 0 of each chosen on --set val; the winner gets seeds 1-2.
+          ("torch", "tmlp_T144_pmixonly_split_list_s0", "torch T, mixed only"),
+          ("torch", "tmlp_T144_pmixonly_split_list_s1", "torch T, mixed only (s1)"),
+          ("torch", "tmlp_T144_pmixonly_split_list_s2", "torch T, mixed only (s2)"),
+          ("torch", "tmlp_T144_pmixonlydg2_split_list_s0", "torch T, mixed only + DAgger x2"),
+          ("torch", "tmlp_T144_pmixonlydg2_split_list_s1", "torch T, mixed only + DAgger x2 (s1)"),
+          ("torch", "tmlp_T144_pmixonlydg2_split_list_s2", "torch T, mixed only + DAgger x2 (s2)"),
+          ("torch", "tmlp_T144_physpmix121w5_split_list_s0", "torch T, + 121 mixed x5"),
+          ("torch", "tmlp_T144_physpmix121w5_split_list_s1", "torch T, + 121 mixed x5 (s1)"),
+          ("torch", "tmlp_T144_physpmix121w5_split_list_s2", "torch T, + 121 mixed x5 (s2)"),
+          ("torch", "tmlp_T144_physpmix121w20_split_list_s0", "torch T, + 121 mixed x20"),
+          ("torch", "tmlp_T144_physpmix121w20_split_list_s1", "torch T, + 121 mixed x20 (s1)"),
+          ("torch", "tmlp_T144_physpmix121w20_split_list_s2", "torch T, + 121 mixed x20 (s2)"),
+          # power AND spacing mixed training routes (cluster stage mix-train)
+          ("torch", "tmlp_T144_physmix_split_list_s0", "torch T, + pmix + mix routes"),
+          ("torch", "tmlp_T144_physmix_split_list_s1", "torch T, + pmix + mix routes (s1)"),
+          ("torch", "tmlp_T144_physmix_split_list_s2", "torch T, + pmix + mix routes (s2)"),
+          ("torch", "tmlp_T144_mixonly_split_list_s0", "torch T, pmix + mix only"),
+          ("torch", "tmlp_T144_mixonly_split_list_s1", "torch T, pmix + mix only (s1)"),
+          ("torch", "tmlp_T144_mixonly_split_list_s2", "torch T, pmix + mix only (s2)"),
+          ("torch", "tmlp_T144_physmixw5_split_list_s0", "torch T, + pmix + mix x5"),
+          ("torch", "tmlp_T144_physmixw5_split_list_s1", "torch T, + pmix + mix x5 (s1)"),
+          ("torch", "tmlp_T144_physmixw5_split_list_s2", "torch T, + pmix + mix x5 (s2)")]
 
 
 # which route set: "test" (seeds 22-25, ML/instances_mixed/<v>/) or "val"

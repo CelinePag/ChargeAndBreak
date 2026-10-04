@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s0 on test: 125 instances
+  25/125  12s
+  50/125  21s
+  75/125  29s
+  100/125  35s
+  125/125  40s
+[eval] 125 routes in 40.2s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s0 on test
+==========================================================================
+routes                125
+completed             121
+infeasible            4   hos_cd=1, hos_sd=1, stranding=2
+latency               2.232 ms/decision (median 2.222)
+teacher latency       71388 ms/decision (31,978x slower)
+
+vs LA  (paired on 121 routes both completed)
+   median    -0.01 %
+   mean      +1.14 %
+   IQR     [-0.51, +1.04]
+   best/worst -23.90 % / +37.67 %
+   student faster on 61/121 routes
+
+vs GREEDY  (paired on 116 routes both completed)
+   median    -2.42 %
+   mean      -1.61 %
+   IQR     [-3.38, -1.57]
+   best/worst -10.53 % / +30.85 %
+   student faster on 106/116 routes
+
+vs ORACLE (hindsight objective - T_START, 121 routes)
+   median    +2.06 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 106   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 121 routes)
+   median   +0.45 %   mean   +1.57 %
+
+rests   student   277  LA   270   mean +0.058/route   fewer on 2/121 routes
+charges student  1008  LA  1101   mean -0.769/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTnone            n=  1  median +11.37 %  worst +11.37 %
+   RlongCmediumTlarge         n=  2  median  +4.81 %  worst +11.54 %
+   RshortCmediumTlarge        n=  3  median  +2.52 %  worst +37.67 %
+   RshortCmanyTtight          n=  4  median  +2.30 %  worst  +2.52 %
+   RlongCfewTmedium           n=  3  median  +1.16 %  worst +20.80 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 0x, left none 0x, charge clamp moved 0x
+NO SHIELD: picks the guard (q=0.99) would have blocked 16/11803, charges below its reach minimum 1
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s0_nsN_f99_test.json

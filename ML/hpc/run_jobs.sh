@@ -16,6 +16,10 @@
 #     bash ML/hpc/run_jobs.sh la-test i/n    # LA on the 24 mixed test routes without one
 #     bash ML/hpc/run_jobs.sh dagger2 i/n    # DAgger round 2, one of n label shares
 #     bash ML/hpc/run_jobs.sh final          # after both: 121-route point, round-2 models, test
+#     bash ML/hpc/run_jobs.sh mix-build      # power AND spacing mixed: 124 training + 16 validation routes
+#     bash ML/hpc/run_jobs.sh mix-la i/n     # one of n shares: LA on those training routes, then the 32 test routes
+#     bash ML/hpc/run_jobs.sh mix-oracle     # hindsight oracle on the 16 validation routes
+#     bash ML/hpc/run_jobs.sh mix-train      # after all of them: extract, train, validate, test once
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -333,10 +337,88 @@ final)
   log "final done"
   ;;
 
+mix-build)
+  # Power AND spacing mixed along the route (variant "mix"), same families and
+  # seeds as the 124 power-mixed training routes, plus validation seeds 20-21
+  log "mix-build: power+spacing mixed routes (training and validation)"
+  python -u ML/code/mixed_instances.py --split train --variants mix --lengths short --seeds 1-19
+  python -u ML/code/mixed_instances.py --split train --variants mix --lengths medium --seeds 1-12
+  python -u ML/code/mixed_instances.py --split val --variants mix
+  log "mix-build done"
+  ;;
+
+mix-la)
+  # one share: bash ML/hpc/run_jobs.sh mix-la 0/4  (and 1/4, 2/4, 3/4).  Routes
+  # go seed by seed, so a share stopped early still covers every family.
+  la_threads
+  SL=${2:-0/1}
+  log "mix-la $SL: LA on the mix training routes (CB_GRB_THREADS=$CB_GRB_THREADS)"
+  python -u ML/code/run_la_mixed.py --variant mix --split train --slice "$SL" \
+      >> "$LOGS/la_mix_train_${SL/\//of}.log" 2>&1
+  log "mix-la $SL: LA on the 32 mix test routes"
+  python -u ML/code/run_la_mixed.py --variant mix --split test --routes all --slice "$SL" \
+      >> "$LOGS/la_mix_test_${SL/\//of}.log" 2>&1
+  log "mix-la $SL done"
+  ;;
+
+mix-oracle)
+  log "mix-oracle: hindsight oracle on the mix validation routes"
+  python -u ML/code/mixed_eval.py oracle --set val --variants mix \
+      > "$LOGS/mixed_val_oracle_mix.log" 2>&1
+  log "mix-oracle done"
+  ;;
+
+mix-train)
+  if pgrep -f "run_la_mixed.py|mixed_eval.py oracle" > /dev/null; then
+    echo "LA or oracle work is still running -- wait until every mix-la share and mix-oracle say done"
+    exit 1
+  fi
+  T=$(( NCPU < 16 ? NCPU : 16 ))
+  log "mix-train: extract the mix training routes"
+  python -u ML/code/extract.py --physics mix > "$LOGS/extract_mix.log" 2>&1
+  TC="--fset T --threads $T --lambda-list 1 --tau 0.25 --arch split"
+  fitm() {
+    local tag=$1; shift
+    if [ -f "ML/models/${tag}_meta.json" ]; then log "mix-train: $tag exists, skipped"; return; fi
+    log "mix-train: training $tag"
+    "$@" > "$LOGS/train_${tag}.log" 2>&1
+  }
+  for s in 0 1 2; do
+    # the pool + both kinds of mixed routes / mixed routes only / pool, mixed x5
+    fitm tmlp_T144_physmix_split_list_s$s python -u ML/code/torch_train.py \
+        --tag tmlp_T144_physmix_split_list_s$s --physics "$PHYS,pmix,mix" --seed $s $TC
+    fitm tmlp_T144_mixonly_split_list_s$s python -u ML/code/torch_train.py \
+        --tag tmlp_T144_mixonly_split_list_s$s --physics "pmix,mix" --stop-seeds 11,12 \
+        --seed $s $TC
+    fitm tmlp_T144_physmixw5_split_list_s$s python -u ML/code/torch_train.py \
+        --tag tmlp_T144_physmixw5_split_list_s$s --physics "$PHYS,pmix,mix" \
+        --weight-physics pmix=5,mix=5 --seed $s $TC
+  done
+  for cfg in physmix mixonly physmixw5; do
+    for s in 0 1 2; do
+      tag=tmlp_T144_${cfg}_split_list_s$s
+      out=eval_${tag}_g99sr_test.json
+      if [ -f "ML/results/$out" ]; then continue; fi
+      log "mix-train: $tag on the 125 base-case test routes"
+      python -u ML/code/evaluate.py --kind torch --tag "$tag" --split test \
+          --guard-q 0.99 --spread-room --out "$out" > "$LOGS/eval_${tag}_g99sr_test.log" 2>&1
+    done
+  done
+  J=$(( NCPU < 8 ? NCPU : 8 ))
+  log "mix-train: validation routes (pmix + mix), then the test routes"
+  python -u ML/code/mixed_eval.py drive --set val --variants pmix,mix --jobs $J \
+      > "$LOGS/mixed_val_drive_mix.log" 2>&1
+  python -u ML/code/mixed_eval.py drive --jobs $J > "$LOGS/mixed_test_drive_mix.log" 2>&1
+  python -u ML/code/mixed_eval.py la --variants pmix > "$LOGS/mixed_test_la_pmix_mix.log" 2>&1
+  python -u ML/code/mixed_eval.py la --variants mix > "$LOGS/mixed_test_la_mix.log" 2>&1
+  log "mix-train done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train"
   exit 1
   ;;
 esac

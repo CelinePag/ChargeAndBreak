@@ -97,6 +97,12 @@ PHYSICS["pmix"] = (os.path.join(_LA_MIXED, "logs", "sensitivity"),
                    os.path.join(_LA_MIXED, "solutions", "sensitivity"),
                    os.path.join(_ROOT, "ML", "instances_mixed", "train", "pmix"),
                    "*__pmix_LA_*.txt")
+# Power AND spacing mixed (2026-10-04), same layout.  "*__mix_LA_*" cannot
+# match a pmix or dmix run: the double underscore sits right before "mix".
+PHYSICS["mix"] = (os.path.join(_LA_MIXED, "logs", "sensitivity"),
+                  os.path.join(_LA_MIXED, "solutions", "sensitivity"),
+                  os.path.join(_ROOT, "ML", "instances_mixed", "train", "mix"),
+                  "*__mix_LA_*.txt")
 
 # Stored runs end in _<date>_<time>_<ms>; run_la_mixed.py's runs (the pmix
 # pilot) are named by run_simulation_precomputed itself: _LA_S25_H24_<date>_<time>

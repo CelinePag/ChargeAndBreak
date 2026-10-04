@@ -200,7 +200,25 @@ def main():
     ap.add_argument("--dagger", default="",
                     help="comma list of DAgger labels (dagger_label.py) whose "
                          "rows join the data, e.g. 'r1,r2'")
+    ap.add_argument("--fit-seeds", default=None,
+                    help="learn only from these seeds, e.g. '1-10,13-19'")
+    ap.add_argument("--stop-seeds", default=None,
+                    help="choose epochs on these seeds instead of 20-21 (they "
+                         "leave fit); for data with no seed-20/21 routes")
+    ap.add_argument("--weight-physics", default="",
+                    help="'tag=k': every decision of that physics is visited k "
+                         "times per epoch, so all three heads and the ranking "
+                         "term see it k times (integer k)")
     args = ap.parse_args()
+
+    def _seeds(spec):
+        if not spec:
+            return None
+        out = set()
+        for part in spec.split(","):
+            a, _, b = part.partition("-")
+            out |= set(range(int(a), int(b or a) + 1))
+        return out
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
@@ -225,7 +243,8 @@ def main():
     names, n_state = resolve(args.fset, _all, int(d["n_state"]), ARM)
     X = d["X"][:, [_all.index(n) for n in names]].astype(np.float32)
     print(f"[fset] {args.fset}: {len(names)} features ({n_state} state)")
-    tr, va, te = split_report(d, args.scope, hold_out)
+    tr, va, te = split_report(d, args.scope, hold_out,
+                              _seeds(args.fit_seeds), _seeds(args.stop_seeds))
 
     # -- standardisation from the TRAINING rows only --------------------------
     mean = X[tr].mean(0)
@@ -252,6 +271,18 @@ def main():
     tab = decision_table(d)
     first = tab.max(1)                          # any row of each decision
     dec_tr = np.flatnonzero(tr[first])
+    if args.weight_physics:
+        if args.batch_by != "decisions":
+            ap.error("--weight-physics needs --batch-by decisions")
+        from dataset import row_physics
+        dec_phys = row_physics(d)[first[dec_tr]]
+        extra = []
+        for part in args.weight_physics.split(","):
+            tag, _, k = part.partition("=")
+            sel = dec_tr[dec_phys == tag]
+            extra += [sel] * (int(k) - 1)
+            print(f"[weight] {tag}: {len(sel)} decisions x{int(k)}")
+        dec_tr = np.concatenate([dec_tr] + extra)
 
     config = dict(arch=args.arch, n_in=len(names),
                   hidden=[int(h) for h in args.hidden.split(",")],

@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_F95_base_s2 on test: 125 instances
+  25/125  21s
+  50/125  37s
+  75/125  51s
+  100/125  60s
+  125/125  69s
+[eval] 125 routes in 69.1s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_base_s2 on test
+==========================================================================
+routes                125
+completed             120
+infeasible            5   hos_cd=3, hos_sd=1, stranding=1
+latency               4.635 ms/decision (median 4.512)
+teacher latency       71081 ms/decision (15,336x slower)
+
+vs LA  (paired on 120 routes both completed)
+   median    -0.07 %
+   mean      +1.12 %
+   IQR     [-0.73, +1.25]
+   best/worst -24.27 % / +29.03 %
+   student faster on 65/120 routes
+
+vs GREEDY  (paired on 115 routes both completed)
+   median    -2.65 %
+   mean      -2.24 %
+   IQR     [-3.83, -1.58]
+   best/worst -11.84 % / +14.91 %
+   student faster on 107/115 routes
+
+vs ORACLE (hindsight objective - T_START, 120 routes)
+   median    +2.04 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 132   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 120 routes)
+   median   +0.26 %   mean   +1.64 %
+
+rests   student   275  LA   267   mean +0.067/route   fewer on 3/120 routes
+charges student   996  LA  1090   mean -0.783/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTnone            n=  1  median +10.83 %  worst +10.83 %
+   RmediumCmanyTtight         n=  4  median  +8.35 %  worst +19.47 %
+   RlongCfewTtight            n=  2  median  +4.64 %  worst  +9.65 %
+   RlongCmediumTlarge         n=  2  median  +4.46 %  worst +10.20 %
+   RmediumCmediumTtight       n=  4  median  +0.79 %  worst +14.93 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 0x, left none 0x, charge clamp moved 0x
+NO SHIELD: picks the guard (q=0.99) would have blocked 19/11854, charges below its reach minimum 0
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_gbt_F95_base_s2_nsN_f99_test.json

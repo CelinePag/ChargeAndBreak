@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_F95_base_s1 on test: 125 instances
+  25/125  20s
+  50/125  35s
+  75/125  48s
+  100/125  57s
+  125/125  65s
+[eval] 125 routes in 65.2s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_base_s1 on test
+==========================================================================
+routes                125
+completed             122
+infeasible            3   hos_cd=1, hos_sd=2
+latency               4.330 ms/decision (median 4.282)
+teacher latency       70658 ms/decision (16,318x slower)
+
+vs LA  (paired on 122 routes both completed)
+   median    -0.14 %
+   mean      +0.01 %
+   IQR     [-0.82, +0.71]
+   best/worst -22.85 % / +24.70 %
+   student faster on 72/122 routes
+
+vs GREEDY  (paired on 117 routes both completed)
+   median    -2.63 %
+   mean      -2.96 %
+   IQR     [-3.76, -1.83]
+   best/worst -15.12 % / +6.88 %
+   student faster on 114/117 routes
+
+vs ORACLE (hindsight objective - T_START, 122 routes)
+   median    +1.97 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 110   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 122 routes)
+   median   +0.08 %   mean   +0.39 %
+
+rests   student   275  LA   275   mean +0.000/route   fewer on 3/122 routes
+charges student  1028  LA  1127   mean -0.811/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.35 %  worst +10.26 %
+   RshortCmanyTmedium         n=  4  median  +0.85 %  worst  +1.35 %
+   RmediumCmediumTlarge       n=  4  median  +0.79 %  worst  +2.04 %
+   RshortCmanyTtight          n=  4  median  +0.74 %  worst  +1.82 %
+   RmediumCfewTmedium         n=  4  median  +0.51 %  worst  +1.12 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 0x, left none 0x, charge clamp moved 0x
+NO SHIELD: picks the guard (q=0.99) would have blocked 35/11925, charges below its reach minimum 0
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_gbt_F95_base_s1_nsN_f9_test.json

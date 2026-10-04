@@ -227,13 +227,16 @@ def route_class(d):
 SCOPES = {"all": ("short", "medium", "long"), "SM": ("short", "medium")}
 
 
-def split_masks(d, scope="all", hold_out=(), fit_seeds=None):
+def split_masks(d, scope="all", hold_out=(), fit_seeds=None, stop_seeds=None):
     """(fit, stop, test) row masks, restricted to the training scope.
 
     `hold_out`: physics tags the model may not learn from (leave-one-value-
     out); their rows leave fit AND stop, so early stopping cannot peek.
     `fit_seeds`: a subset of FIT_SEEDS to learn from (the learning curve);
     stop and test are unchanged, so every point is measured the same way.
+    `stop_seeds`: early-stop on these seeds instead of STOP_SEEDS, and take
+    them out of fit.  For a dataset with no routes at seeds 20-21 (the mixed
+    training routes run 1-19); the test seeds can never be chosen.
 
     The TEST mask is never restricted: which routes a model is evaluated on
     is the evaluator's choice, not the trainer's.
@@ -243,8 +246,14 @@ def split_masks(d, scope="all", hold_out=(), fit_seeds=None):
     if hold_out:
         inscope &= ~np.isin(row_physics(d), list(hold_out))
     fit = FIT_SEEDS if fit_seeds is None else set(fit_seeds) & FIT_SEEDS
+    stop = STOP_SEEDS
+    if stop_seeds is not None:
+        stop = set(stop_seeds)
+        if stop & set(TEST_SEEDS):
+            raise ValueError(f"stop seeds {sorted(stop)} overlap the test seeds")
+        fit = set(fit) - stop
     return (np.isin(s, list(fit)) & inscope,
-            np.isin(s, list(STOP_SEEDS)) & inscope,
+            np.isin(s, list(stop)) & inscope,
             np.isin(s, list(TEST_SEEDS)))
 
 
@@ -343,6 +352,9 @@ def print_offline(d, pred, feas, masks, names=("fit", "stop", "test")):
     go_ix = list(d["action_vocab"]).index("y0_go")
     gopred = np.where(d["action_ix"] == go_ix, 0.0, 1.0)
     for nm, m in zip(names, masks):
+        if not m.any():                 # e.g. mixed training data: no test seeds
+            print(f"{nm:6s} {'(no rows)':>12s}")
+            continue
         r, n = argmin_policy_regret(d, m, pred, feas)
         t1 = teacher_top1(d, m, pred)
         rg, _ = argmin_policy_regret(d, m, gopred)
@@ -351,8 +363,8 @@ def print_offline(d, pred, feas, masks, names=("fit", "stop", "test")):
               f"{dp:12d}")
 
 
-def split_report(d, scope="all", hold_out=(), fit_seeds=None):
-    masks = split_masks(d, scope, hold_out, fit_seeds)
+def split_report(d, scope="all", hold_out=(), fit_seeds=None, stop_seeds=None):
+    masks = split_masks(d, scope, hold_out, fit_seeds, stop_seeds)
     print(f"[scope] {scope}: training on {', '.join(SCOPES[scope])} routes")
     if "physics_names" in d:
         phys = [str(t) for t in d["physics_names"]]

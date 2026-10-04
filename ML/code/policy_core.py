@@ -54,7 +54,7 @@ from src.simulation.BEHDV import (BEHDV, _charging_time_needed,     # noqa: E402
                                   _energy_after_charging)
 from src.simulation.Simulation import enumerate_actions             # noqa: E402
 from src.simulation.supervisor import (_action_min_dwell,           # noqa: E402
-                                       action_passes)
+                                       action_passes, compute_flags)
 
 from features import (Precomp, action_features, action_key,         # noqa: E402
                       charger_curve, state_features)
@@ -134,6 +134,18 @@ class StudentPolicy:
         self.spread_room = False
         self.n_spread_dropped = 0   # actions removed: even the minimum charge
         self.n_spread_cut = 0       # charges shortened to fit the spread
+        # Opt-in (evaluate.py --no-shield): no rule layer at all -- no forcing,
+        # no spread room, no minimum charge.  The feasibility head is the only
+        # filter, as the scenario scores are for the LA (which runs with
+        # prune_quantile=None).  guard_q then only drives the counters below:
+        # how often the model picks what the guard would have blocked.
+        self.shield = True
+        self.n_unsafe = 0           # discrete picks that fail action_passes
+        self.n_short_charge = 0     # charges below the guard's reach minimum
+        # Quantile the input features are computed at.  "guard" (default)
+        # reproduces every earlier result; None is nominal (xi = 1), which is
+        # what the training rows used (extract.GUARD_Q).
+        self.feature_q = "guard"
 
     # -- to be implemented per arm -------------------------------------------
     def _predict(self, rows):
@@ -157,10 +169,17 @@ class StudentPolicy:
         batch of vehicles can share one _predict call (fpi_policy.drive_fleet);
         rows are predicted independently, so batching changes no value."""
         acts = enumerate_actions(stop, state, fd, charge_only=False)
-        sf, flags = state_features(fd, pre, stop, state, cv, self.guard_q)
+        fq = self.guard_q if self.feature_q == "guard" else self.feature_q
+        sf, flags = state_features(fd, pre, stop, state, cv, fq)
+        if fq != self.guard_q:
+            flags = compute_flags(fd, stop, state, cv, self.guard_q)
 
-        legal = [a for a in acts if action_passes(fd, stop, state, a, flags)]
-        if self.spread_room and legal:
+        if not self.shield:
+            legal = list(acts)
+        else:
+            legal = [a for a in acts
+                     if action_passes(fd, stop, state, a, flags)]
+        if self.shield and self.spread_room and legal:
             # drop non-rest actions whose dwell cannot fit the spread even with
             # the least charge the next leg needs (none, for y=0); if that
             # would leave nothing, keep the unfiltered set
@@ -204,6 +223,11 @@ class StudentPolicy:
             raw = float(self._predict_tauc(row) if raw is None else raw)
             lo = charge_needed_to_reach(fd, state.e_arr, flags)
             hi = _charging_time_needed(state.e_arr, fd)
+            if not self.shield:
+                # only physics: no negative charge, nothing past full
+                if raw < lo - 1e-6:
+                    self.n_short_charge += 1
+                return min(max(raw, 0.0), hi)
             if self.spread_room:
                 room = spread_room(fd, stop, act, flags)
                 if room is not None and room < hi:
@@ -220,6 +244,8 @@ class StudentPolicy:
         legal, rows, cost, feas, flags = self._score(fd, pre, stop, state, cv)
         j = int(np.argmin(cost + 1e6 * (feas < self.feas_thr)))
         act = legal[j]
+        if not self.shield and not action_passes(fd, stop, state, act, flags):
+            self.n_unsafe += 1
         tc = self._charge_hours(fd, stop, state, act, rows[j:j + 1], flags)
         return act, tc, action_key(act.get("y", 0), act.get("break_type"),
                                    act.get("rest_type"))

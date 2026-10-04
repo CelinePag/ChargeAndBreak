@@ -32,12 +32,27 @@ CONFIGS = {   # name: (LA work, method labels = seeds)
     "torch, + pilot (47 routes)": ("2,279 dec.", ["torch T inputs, + pilot", "torch T, + pilot (s1)", "torch T, + pilot (s2)"]),
     "torch, + 89 mixed routes": ("6,451 dec.", ["torch T, + all mixed data", "torch T, + all mixed data (s1)",
                                                 "torch T, + all mixed data (s2)"]),
+    "torch, + 121 mixed routes": ("8,246 dec.", ["torch T, + 121 mixed routes", "torch T, + 121 mixed routes (s1)",
+                                                 "torch T, + 121 mixed routes (s2)"]),
+    "torch, + DAgger x2": ("3,557 calls", ["torch T, + DAgger x2", "torch T, + DAgger x2 (s1)",
+                                           "torch T, + DAgger x2 (s2)"]),
     "trees, no mixed data": ("0", ["trees, all physics + power"]),
     "trees, + DAgger": ("1,781 calls", ["trees + power, + DAgger"]),
     "trees, + pilot (47 routes)": ("2,279 dec.", ["trees + power, + pilot"]),
     "trees, + 89 mixed routes": ("6,451 dec.", ["trees + power, + all mixed data"]),
+    "trees, + 121 mixed routes": ("8,246 dec.", ["trees + power, + 121 mixed routes"]),
 }
-REF = {"torch": "torch, no mixed data", "trees": "trees, no mixed data"}
+
+# the LA itself on every mixed test route it has run (uniform: the stored teacher run)
+for b in sorted({b for (_m, vv, b) in G if vv == "pmix"}):
+    for vv, nm in (("uniform", b), ("pmix", f"{b}__pmix")):
+        la = me.la_row(vv, nm)
+        o = me.read_oracle(vv, nm)
+        if la and la["completed"] and o and (o["gap"] or 0) <= 0.01:
+            G[("LA", vv, b)] = (me._gap(la, o), la["rests"], o["rests"])
+CONFIGS["LA (the teacher)"] = ("—", ["LA"])
+REF = {"torch": "torch, no mixed data", "trees": "trees, no mixed data",
+       "LA (the teacher)": "LA (the teacher)"}
 
 
 def mean_over_seeds(labels, v, b):
@@ -57,7 +72,7 @@ for v in ("pmix", "mix", "dmix"):
     print(f"{'configuration':30s} {'LA work':>12s} {'uniform':>8s} {'mixed':>8s} "
           f"{'cost of mixing':>16s} {'mixed vs no data':>18s} {'+rest':>6s}")
     for name, (work, labels) in CONFIGS.items():
-        ref = CONFIGS[REF[name.split(",")[0]]][1]
+        ref = CONFIGS[REF.get(name, REF.get(name.split(",")[0], name))][1]
         ch, vs, u, x, extra = [], [], [], [], 0.0
         for b in bases:
             a, c = mean_over_seeds(labels, "uniform", b), mean_over_seeds(labels, v, b)
@@ -72,12 +87,28 @@ for v in ("pmix", "mix", "dmix"):
         print(f"{name:30s} {work:>12s} {np.mean(u):+8.2f} {np.mean(x):+8.2f} "
               f"{np.mean(ch):+8.2f} ± {se(ch):4.2f} {np.mean(vs):+10.2f} ± {se(vs):4.2f} {extra:6.1f}")
 
+print("\nVS THE LA on the mixed-power test routes it has run: cost of mixing, method minus LA, paired")
+la_b = sorted({b for (m, vv, b) in G if m == "LA" and vv == "pmix" and ("LA", "uniform", b) in G})
+for name, (work, labels) in CONFIGS.items():
+    if name.startswith("LA"):
+        continue
+    d = []
+    for b in la_b:
+        a, c = mean_over_seeds(labels, "uniform", b), mean_over_seeds(labels, "pmix", b)
+        if a and c:
+            d.append((c[0] - a[0]) - (G[("LA", "pmix", b)][0] - G[("LA", "uniform", b)][0]))
+    if len(d) > 1:
+        print(f"  {name:30s} {np.mean(d):+6.2f} ± {se(d):4.2f} pp  (n={len(d)})")
+
 print("\nBASE-CASE TEST ROUTES (125, g99sr), paired vs the LA, route mean over seeds")
 R = os.path.join(HERE, "..", "results")
 TAGS = {"torch, no mixed data": ["tmlp_T144_phys_split_list_s0"],
         "torch, + DAgger": [f"tmlp_T144_physdg_split_list_s{i}" for i in range(3)],
         "torch, + pilot (47 routes)": [f"tmlp_T144_physpmix_split_list_s{i}" for i in range(3)],
         "torch, + 89 mixed routes": [f"tmlp_T144_physpmixall_split_list_s{i}" for i in range(3)],
+        "torch, + 121 mixed routes": [f"tmlp_T144_physpmix121_split_list_s{i}" for i in range(3)],
+        "torch, + DAgger x2": [f"tmlp_T144_physdg2_split_list_s{i}" for i in range(3)],
+        "trees, + 121 mixed routes": ["gbt_P102_physpmix121_s1"],
         "trees, + DAgger": ["gbt_P102_physdg_s1"],
         "trees, + pilot (47 routes)": ["gbt_P102_physpmix_s1"],
         "trees, + 89 mixed routes": ["gbt_P102_physpmixall_s1"]}

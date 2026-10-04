@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s0 on test: 125 instances
+  25/125  14s
+  50/125  24s
+  75/125  32s
+  100/125  37s
+  125/125  43s
+[eval] 125 routes in 43.0s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s0 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               2.363 ms/decision (median 2.305)
+teacher latency       70617 ms/decision (29,885x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.06 %
+   mean      +0.13 %
+   IQR     [-0.76, +0.83]
+   best/worst -23.90 % / +16.92 %
+   student faster on 65/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.55 %
+   mean      -2.48 %
+   IQR     [-3.72, -1.67]
+   best/worst -11.61 % / +16.35 %
+   student faster on 114/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.01 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 112   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.15 %   mean   +0.46 %
+
+rests   student   291  LA   289   mean +0.016/route   fewer on 1/125 routes
+charges student  1070  LA  1174   mean -0.832/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.52 %  worst +10.75 %
+   RshortCmediumTtight        n=  4  median  +1.40 %  worst  +1.83 %
+   RmediumCmanyTnone          n=  4  median  +0.95 %  worst  +1.51 %
+   RmediumCfewTmedium         n=  4  median  +0.91 %  worst  +1.58 %
+   RlongCmediumTmedium        n=  3  median  +0.83 %  worst  +0.84 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 17x, left none 0x, charge clamp moved 7x
+spread room: actions removed 75x, charges shortened 5x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s0_g99srN_test.json
