@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_T144_physdg2_split_list_s2 on test: 125 instances
+  25/125  6s
+  50/125  10s
+  75/125  14s
+  100/125  17s
+  125/125  20s
+[eval] 125 routes in 20.0s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_T144_physdg2_split_list_s2 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               0.819 ms/decision (median 0.822)
+teacher latency       70617 ms/decision (86,262x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.15 %
+   mean      +0.05 %
+   IQR     [-0.71, +0.64]
+   best/worst -25.24 % / +15.76 %
+   student faster on 72/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.76 %
+   mean      -2.76 %
+   IQR     [-3.67, -1.75]
+   best/worst -11.60 % / +8.06 %
+   student faster on 115/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.02 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 91   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.05 %   mean   +0.26 %
+
+rests   student   290  LA   289   mean +0.008/route   fewer on 2/125 routes
+charges student  1104  LA  1174   mean -0.560/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.79 %  worst +10.94 %
+   RshortCmanyTtight          n=  4  median  +1.19 %  worst  +1.89 %
+   RmediumCmanyTnone          n=  4  median  +1.17 %  worst +15.76 %
+   RshortCfewTnone            n=  4  median  +0.88 %  worst  +2.90 %
+   RshortCfewTmedium          n=  4  median  +0.79 %  worst  +3.24 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 4x, left none 0x, charge clamp moved 3x
+spread room: actions removed 73x, charges shortened 2x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_T144_physdg2_split_list_s2_g99sr_test.json
