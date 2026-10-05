@@ -289,7 +289,8 @@ def cmd_drive(args):
     done = {(r["method"], r["instance"]) for r in read_rows(store)}
     methods = [("Greedy", None, None)] + [
         (lab, kind, tag) for kind, tag, lab in MODELS
-        if os.path.exists(os.path.join(ML, "models", f"{tag}_meta.json"))]
+        if os.path.exists(os.path.join(ML, "models", f"{tag}_meta.json"))
+        and (not args.tags or any(t in tag for t in args.tags.split(",")))]
     jobs = [(v, n, p, m, kind, tag, args.guard_q, args.spread_room)
             for v, n, p in instances(args.variants.split(","))
             for m, kind, tag in methods if (m, n) not in done]
@@ -547,6 +548,9 @@ def main():
     ap.add_argument("--set", default="test", choices=["test", "val"],
                     help="val: the seed 20-21 routes (mixed_instances.py --split val), "
                          "results in their own store, to choose models on")
+    ap.add_argument("--tags", default="",
+                    help="drive: only models whose tag contains one of these "
+                         "(comma list), e.g. to run just the model chosen on val")
     ap.set_defaults(spread_room=True)
     args = ap.parse_args()
     global ROUTE_SET

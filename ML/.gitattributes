@@ -1,0 +1,4 @@
+# LightGBM model files record each tree's size in bytes (tree_sizes=); a CRLF
+# checkout on Windows shifts every offset and the model no longer loads
+# ("Model format error, expect a tree here").  Never convert them.
+models/*.txt -text

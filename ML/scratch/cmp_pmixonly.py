@@ -62,7 +62,7 @@ print(f"{me.ROUTE_SET.upper()} routes, cost of mixing = pmix - uniform (pp), "
       f"certified oracles only")
 print(f"{'configuration':32s} {'seeds':>5s} {'n':>3s} {'uniform':>8s} {'pmix':>7s} "
       f"{'cost of mixing':>16s} {'vs ' + REF:>30s} {'fails':>5s}")
-cost = {}
+cost, mixed, unif = {}, {}, {}
 for name, labels in CONFIGS.items():
     u, ns = per_route(labels, "uniform")
     x, _ = per_route(labels, "pmix")
@@ -71,6 +71,7 @@ for name, labels in CONFIGS.items():
         print(f"{name:32s}  (not driven yet)")
         continue
     cost[name] = {b: x[b] - u[b] for b in bs}
+    mixed[name], unif[name] = x, u
     c = np.array(list(cost[name].values()))
     vs = ""
     if name != REF and REF in cost:
@@ -79,3 +80,16 @@ for name, labels in CONFIGS.items():
     nf = sum(fails.get(m, 0) for m in labels)
     print(f"{name:32s} {ns:5d} {len(bs):3d} {np.mean([u[b] for b in bs]):+8.2f} "
           f"{np.mean([x[b] for b in bs]):+7.2f} {c.mean():+8.2f} ± {se(c):.2f}   {vs:>30s} {nf:5d}")
+
+# a model trained without uniform routes makes "cost of mixing" meaningless
+# (its uniform gap is what changes), so compare each side directly
+print(f"\npaired vs '{REF}' (pp of gap to the oracle), same routes")
+print(f"{'configuration':32s} {'on mixed routes':>20s} {'on their uniform twins':>24s}")
+for name in mixed:
+    if name == REF:
+        continue
+    out = []
+    for side in (mixed, unif):
+        d = np.array([side[name][b] - side[REF][b] for b in side[name] if b in side[REF]])
+        out.append(f"{d.mean():+.2f} ± {se(d):.2f}")
+    print(f"{name:32s} {out[0]:>20s} {out[1]:>24s}")

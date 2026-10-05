@@ -36,6 +36,9 @@ CONFIGS = {   # name: (LA work, method labels = seeds)
                                                  "torch T, + 121 mixed routes (s2)"]),
     "torch, + DAgger x2": ("3,557 calls", ["torch T, + DAgger x2", "torch T, + DAgger x2 (s1)",
                                            "torch T, + DAgger x2 (s2)"]),
+    # chosen on the validation routes 2026-10-04 (mixed-only and x20 lost there)
+    "torch, + 121 mixed x5": ("8,246 dec.", ["torch T, + 121 mixed x5", "torch T, + 121 mixed x5 (s1)",
+                                             "torch T, + 121 mixed x5 (s2)"]),
     "trees, no mixed data": ("0", ["trees, all physics + power"]),
     "trees, + DAgger": ("1,781 calls", ["trees + power, + DAgger"]),
     "trees, + pilot (47 routes)": ("2,279 dec.", ["trees + power, + pilot"]),
