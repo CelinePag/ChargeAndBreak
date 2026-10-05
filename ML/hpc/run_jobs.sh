@@ -20,6 +20,7 @@
 #     bash ML/hpc/run_jobs.sh mix-la i/n     # one of n shares: LA on those training routes, then the 32 test routes
 #     bash ML/hpc/run_jobs.sh mix-oracle     # hindsight oracle on the 16 validation routes
 #     bash ML/hpc/run_jobs.sh mix-train      # after all of them: extract, train, validate, test once
+#     bash ML/hpc/run_jobs.sh hybrid i/n     # one of n shares: student + LA on close rest calls
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -414,11 +415,26 @@ mix-train)
   log "mix-train done"
   ;;
 
+hybrid)
+  # The chosen mixed-route student (pool + pmix + mix, 3 seeds) drives the 64
+  # mixed test routes and hands a decision to the LA when its best rest and
+  # best no-rest actions are within m minutes (m10/m30/m60), or at every stop
+  # of the last f hours of driving (f5).  Cheapest configuration first.
+  la_threads
+  SL=${2:-0/1}
+  for cfg in "--margin 10" "--margin 30" "--final 5" "--margin 60"; do
+    log "hybrid $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $cfg --slice "$SL" \
+        >> "$LOGS/hybrid_${SL/\//of}.log" 2>&1
+  done
+  log "hybrid $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n"
   exit 1
   ;;
 esac
