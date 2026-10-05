@@ -1,0 +1,58 @@
+
+pmix: 32 routes with an LA run; gap to the oracle (%), certified oracles only; change = pmix minus uniform, same route
+method                           uniform      pmix        change (pp)   n
+LA                                 +2.91     +2.42      -0.58 +/- 1.12  31
+Greedy                             +5.37    +11.54      +5.99 +/- 0.87  29
+trees, base only                   +3.07     +8.50      +5.43 +/- 0.87  32
+trees, all physics                 +4.28     +9.70      +5.43 +/- 0.88  32
+trees, all physics + power         +4.51    +10.67      +6.16 +/- 0.97  32
+torch split+list, base only        +2.74    +17.34     +14.60 +/- 2.64  32
+torch split+list, all physics      +4.20     +9.36      +5.16 +/- 1.74  32
+torch split+list, T inputs, all phys     +3.03     +6.75      +3.72 +/- 1.51  32
+ChargerNet, all physics            +3.62     +8.54      +4.92 +/- 1.93  32
+ChargerNet, g sees speed, all phys     +3.76     +8.50      +4.74 +/- 1.03  32
+trees + power, + pilot             +3.77     +7.67      +3.89 +/- 0.81  32
+trees + power, + pilot x5          +3.43     +7.01      +3.58 +/- 0.85  32
+torch T inputs, + pilot            +2.73     +5.04      +2.31 +/- 0.45  32
+ChargerNet, + pilot                +3.48     +6.33      +2.85 +/- 1.52  32
+ChargerNet, + pilot (s1)           +2.81     +5.13      +2.32 +/- 0.90  32
+ChargerNet, + pilot (s2)           +3.32     +7.10      +3.78 +/- 0.65  32
+torch T, + pilot (s1)              +4.49     +6.25      +1.76 +/- 2.27  32
+torch T, + pilot (s2)              +3.22     +5.90      +2.68 +/- 0.94  32
+torch T, + all mixed data          +2.19     +6.60      +4.42 +/- 1.68  32
+torch T, + all mixed data (s1)     +3.33     +5.98      +2.65 +/- 1.61  32
+torch T, + all mixed data (s2)     +2.15     +3.89      +1.74 +/- 0.61  32
+torch T, + DAgger                  +3.14     +4.64      +1.50 +/- 1.12  32
+torch T, + DAgger (s1)             +2.86     +5.13      +2.27 +/- 1.01  32
+torch T, + DAgger (s2)             +3.23     +3.93      +0.70 +/- 1.07  32
+trees + power, + all mixed data     +3.47     +7.98      +4.51 +/- 1.23  32
+trees + power, + DAgger            +5.00    +10.19      +5.18 +/- 1.35  32
+torch T, + 121 mixed routes        +2.09     +5.19      +3.10 +/- 1.41  32
+torch T, + 121 mixed routes (s1)     +4.60     +5.95      +1.35 +/- 1.72  32
+torch T, + 121 mixed routes (s2)     +2.36     +4.75      +2.39 +/- 1.04  32
+torch T, + DAgger x2               +2.52     +4.67      +2.15 +/- 0.73  32
+torch T, + DAgger x2 (s1)          +4.47     +4.56      +0.09 +/- 1.17  32
+torch T, + DAgger x2 (s2)          +2.70     +4.90      +2.20 +/- 0.89  32
+trees + power, + 121 mixed routes     +3.31     +6.92      +3.61 +/- 1.28  32
+torch T, mixed only                +8.02     +7.85      -0.17 +/- 1.74  32
+torch T, mixed only (s1)           +7.37     +6.58      -0.79 +/- 1.51  32
+torch T, mixed only (s2)           +5.76     +7.58      +1.82 +/- 1.34  32
+torch T, mixed only + DAgger x2     +7.41     +6.55      -0.86 +/- 1.48  32
+torch T, mixed only + DAgger x2 (s1)     +6.41     +5.68      -0.73 +/- 1.68  32
+torch T, mixed only + DAgger x2 (s2)     +4.83     +6.56      +1.73 +/- 1.53  32
+torch T, + 121 mixed x5            +2.23     +4.89      +2.66 +/- 1.23  32
+torch T, + 121 mixed x5 (s1)       +2.22     +5.77      +3.55 +/- 1.37  32
+torch T, + 121 mixed x5 (s2)       +2.43     +5.30      +2.87 +/- 1.33  32
+torch T, + 121 mixed x20           +3.18     +8.18      +5.00 +/- 2.02  32
+torch T, + 121 mixed x20 (s1)       +nan      +nan       +nan +/- nan   0
+torch T, + 121 mixed x20 (s2)       +nan      +nan       +nan +/- nan   0
+torch T, + pmix + mix routes       +3.57     +4.35      +0.78 +/- 1.65  32
+torch T, + pmix + mix routes (s1)     +2.45     +5.30      +2.85 +/- 1.12  32
+torch T, + pmix + mix routes (s2)     +3.62     +4.73      +1.12 +/- 1.69  32
+torch T, pmix + mix only           +5.48     +6.71      +1.24 +/- 1.35  32
+torch T, pmix + mix only (s1)      +4.99     +7.39      +2.41 +/- 1.31  32
+torch T, pmix + mix only (s2)      +6.46     +6.29      -0.17 +/- 1.57  32
+torch T, + pmix + mix x5           +3.03     +5.03      +2.00 +/- 1.57  32
+torch T, + pmix + mix x5 (s1)      +3.11     +4.51      +1.40 +/- 1.26  32
+torch T, + pmix + mix x5 (s2)      +2.31     +4.39      +2.08 +/- 1.10  32
+LA wall clock on pmix: 18.9 h for 32 routes

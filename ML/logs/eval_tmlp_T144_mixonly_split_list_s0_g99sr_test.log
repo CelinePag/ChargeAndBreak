@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_T144_mixonly_split_list_s0 on test: 125 instances
+  25/125  6s
+  50/125  10s
+  75/125  14s
+  100/125  17s
+  125/125  20s
+[eval] 125 routes in 20.1s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_T144_mixonly_split_list_s0 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               0.849 ms/decision (median 0.853)
+teacher latency       70617 ms/decision (83,167x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    +1.64 %
+   mean      +2.65 %
+   IQR     [+0.72, +2.81]
+   best/worst -22.82 % / +28.55 %
+   student faster on 16/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -1.05 %
+   mean      -0.36 %
+   IQR     [-2.40, +0.28]
+   best/worst -7.70 % / +25.80 %
+   student faster on 85/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +3.73 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 119   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +2.18 %   mean   +3.07 %
+
+rests   student   295  LA   289   mean +0.048/route   fewer on 2/125 routes
+charges student  1517  LA  1174   mean +2.744/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +8.68 %  worst +14.26 %
+   RlongCmediumTtight         n=  1  median  +4.51 %  worst  +4.51 %
+   RlongCmediumTmedium        n=  3  median  +4.02 %  worst  +4.32 %
+   RlongCfewTlarge            n=  4  median  +3.88 %  worst  +4.57 %
+   RmediumCfewTlarge          n=  4  median  +3.46 %  worst +18.36 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 31x, left none 0x, charge clamp moved 12x
+spread room: actions removed 103x, charges shortened 10x
+
+[saved] /mnt/beegfs/users/celinep/ChargeAndBreak/ML/results/eval_tmlp_T144_mixonly_split_list_s0_g99sr_test.json
