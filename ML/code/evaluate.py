@@ -125,6 +125,8 @@ def main():
     ap.add_argument("--nominal-features", action="store_true",
                     help="compute the input features at xi = 1, as in training, "
                          "whatever --guard-q the shield uses")
+    ap.add_argument("--mseq", action="store_true",
+                    help="charge-then-rest pays M_seq, as the LA does (policy_core.pay_mseq)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -144,6 +146,7 @@ def main():
     pol.shield = not args.no_shield
     if args.nominal_features:
         pol.feature_q = None
+    pol.pay_mseq = args.mseq
     rows = []
     t0 = time.time()
     for i, inst in enumerate(keep):

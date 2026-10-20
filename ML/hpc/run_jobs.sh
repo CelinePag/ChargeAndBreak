@@ -21,6 +21,7 @@
 #     bash ML/hpc/run_jobs.sh mix-oracle     # hindsight oracle on the 16 validation routes
 #     bash ML/hpc/run_jobs.sh mix-train      # after all of them: extract, train, validate, test once
 #     bash ML/hpc/run_jobs.sh hybrid i/n     # one of n shares: student + LA on close rest calls
+#     bash ML/hpc/run_jobs.sh gate-val i/n   # one of n shares: learned solver-call gate vs controls, validation
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -430,11 +431,34 @@ hybrid)
   log "hybrid $SL done"
   ;;
 
+gate-val)
+  # The learned solver-call gate (gate_train.py), closed loop on the 66
+  # base-case VALIDATION routes (seeds 20-21).  Per student, the gate at a 5 %
+  # and a 10 % call budget, against two controls at the same number of LA
+  # calls per route (calibrated with --dry, 2026-10-20): a random trigger and
+  # the old rest/no-rest margin trigger.  Students drive with nominal inputs
+  # and pay the charge-then-rest overhead (--nominal-features --mseq).  5 %
+  # configurations first; each writes results/hybrid_base_val_<cfg>.jsonl.
+  la_threads
+  SL=${2:-0/1}
+  B="--routes base --set val --mseq --nominal-features --slice $SL"
+  TREES="--models gbt:gbt_F95_base_s0"
+  TORCH="--models torch:tmlp_F95_split_list_s0"
+  for cfg in "$TREES --gate gbt --budget 5"   "$TREES --random 5"  "$TREES --margin 30" \
+             "$TORCH --gate torch --budget 5" "$TORCH --random 5"  "$TORCH --margin 15" \
+             "$TREES --gate gbt --budget 10"  "$TREES --random 10" "$TREES --margin 65" \
+             "$TORCH --gate torch --budget 10" "$TORCH --random 10" "$TORCH --margin 24"; do
+    log "gate-val $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $B $cfg >> "$LOGS/gate_val_${SL/\//of}.log" 2>&1
+  done
+  log "gate-val $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n"
   exit 1
   ;;
 esac

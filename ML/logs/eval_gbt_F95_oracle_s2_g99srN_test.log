@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_F95_oracle_s2 on test: 125 instances
+  25/125  21s
+  50/125  37s
+  75/125  51s
+  100/125  61s
+  125/125  70s
+[eval] 125 routes in 69.9s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_oracle_s2 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               4.386 ms/decision (median 4.210)
+teacher latency       70617 ms/decision (16,100x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.09 %
+   mean      +2.36 %
+   IQR     [-0.88, +1.53]
+   best/worst -25.25 % / +45.17 %
+   student faster on 64/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.47 %
+   mean      -0.86 %
+   IQR     [-3.63, -1.23]
+   best/worst -11.79 % / +38.98 %
+   student faster on 102/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.18 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 92   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.28 %   mean   +2.63 %
+
+rests   student   306  LA   289   mean +0.136/route   fewer on 3/125 routes
+charges student  1072  LA  1174   mean -0.816/route
+
+worst 5 families (median % vs LA)
+   RlongCfewTlarge            n=  4  median +10.01 %  worst +11.13 %
+   RlongCmediumTnone          n=  1  median  +9.93 %  worst  +9.93 %
+   RlongCmediumTlarge         n=  2  median  +9.05 %  worst +20.05 %
+   RmediumCfewTlarge          n=  4  median  +8.55 %  worst +17.34 %
+   RmediumCfewTtight          n=  4  median  +8.49 %  worst +27.07 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 14x, left none 0x, charge clamp moved 1x
+spread room: actions removed 30x, charges shortened 1x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_gbt_F95_oracle_s2_g99srN_test.json

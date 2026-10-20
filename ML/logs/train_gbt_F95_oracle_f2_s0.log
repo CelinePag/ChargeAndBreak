@@ -1,0 +1,37 @@
+[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[data] rows 540238  features 271
+  fit   rows  327831  instances  499  decisions  50157
+  stop  rows   42319  instances   66  decisions   6470
+  test  rows   78258  instances  125  decisions  11932
+
+[cost] trees=1159  val_huber=0.00351  34s
+[feas] trees=249  val_logloss=0.00471
+[tauc] trees=280  val_MAE=6.31 min (on 516 charge rows)
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go  dirty picks
+fit         1.42 min    97.6%      50157       4.96 min           10
+stop        1.51 min    97.5%       6470       4.89 min            9
+test        1.69 min    97.2%      11932       4.88 min           25
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/gbt_F95_oracle_f2_s0_{cost,feas,tauc}.txt  (77s)
+
+top 15 features by gain (cost head):
+   a_dwell_min                       79100
+   a_y                               28031
+   a_tauc_full                        7775
+   cu1_drive                          6372
+   a_dwell_vs_cu1_drive               4604
+   a_break_min                        3409
+   a_b15                              2012
+   soc_at_next_cs_frac                1634
+   a_resets_cd                         999
+   legs_to_forced_break                968
+   e_margin_next_cs_wc                 765
+   a_b45                               733
+   a_rest_min                          593
+   sd_slack_after                      445
+   a_r2                                440

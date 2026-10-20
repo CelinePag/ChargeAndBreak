@@ -93,7 +93,8 @@ def _drive(job):
     tag, axis, name, path, guard_q, spread_room = job
     from policy_core import load_policy, run_student
     if tag not in _POL:
-        _POL[tag] = load_policy("gbt", tag, guard_q=guard_q, spread_room=spread_room)
+        kind = "torch" if tag.startswith("tmlp_") else "nn" if tag.startswith("mlp_") else "gbt"
+        _POL[tag] = load_policy(kind, tag, guard_q=guard_q, spread_room=spread_room)
     fd, D_real, E_real, cv = load_instance_json(path)
     fd["_horizon_h"] = 24.0
     t0 = float(fd.get("T_START", 8.0))
@@ -131,6 +132,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="routes per (model, axis)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--report", action="store_true", help="report only")
+    ap.add_argument("--extra", default="",
+                    help="more models (any kind, e.g. PyTorch tmlp_* tags) to drive on "
+                         "every axis, or on --axes; 'tag@axis' for one axis only")
     args = ap.parse_args()
     store = store_path(args.guard_q, args.spread_room)
     if args.report:
@@ -139,7 +143,11 @@ def main():
 
     done = {(r["tag"], r["instance"]) for r in read_store(store)}
     jobs, missing = [], set()
-    for tag, axis in plan(args.seed):
+    pairs = plan(args.seed)
+    for spec in filter(None, args.extra.split(",")):
+        t, _, a = spec.partition("@")
+        pairs += [(t, a)] if a else [(t, ax) for ax in AXES]
+    for tag, axis in pairs:
         if args.models and tag not in args.models.split(","):
             continue
         if args.axes and axis not in args.axes.split(","):

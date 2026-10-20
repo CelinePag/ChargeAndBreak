@@ -1,0 +1,52 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s2 on stop: 66 instances
+  25/66  12s
+  50/66  20s
+[eval] 66 routes in 23.2s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s2 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               2.383 ms/decision (median 2.390)
+teacher latency       65947 ms/decision (27,673x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    +0.17 %
+   mean      +0.43 %
+   IQR     [-0.88, +1.09]
+   best/worst -14.09 % / +14.56 %
+   student faster on 31/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.36 %
+   mean      -2.97 %
+   IQR     [-3.61, -1.43]
+   best/worst -15.44 % / +0.02 %
+   student faster on 62/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +2.45 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 84   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   +0.44 %   mean   +0.91 %
+
+rests   student   162  LA   160   mean +0.030/route   fewer on 1/66 routes
+charges student   588  LA   655   mean -1.015/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  1  median  +9.84 %  worst  +9.84 %
+   RlongCmanyTtight           n=  1  median  +9.60 %  worst  +9.60 %
+   RmediumCfewTmedium         n=  2  median  +7.75 %  worst +14.56 %
+   RshortCmediumTtight        n=  2  median  +2.11 %  worst  +5.24 %
+   RlongCmediumTmedium        n=  1  median  +1.88 %  worst  +1.88 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 11x, left none 0x, charge clamp moved 8x
+spread room: actions removed 39x, charges shortened 8x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s2_g99srNm_stop.json

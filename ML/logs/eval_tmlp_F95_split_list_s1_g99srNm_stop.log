@@ -1,0 +1,52 @@
+[eval] kind=torch tag=tmlp_F95_split_list_s1 on stop: 66 instances
+  25/66  12s
+  50/66  20s
+[eval] 66 routes in 23.2s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_split_list_s1 on stop
+==========================================================================
+routes                66
+completed             66
+infeasible            0
+latency               2.377 ms/decision (median 2.392)
+teacher latency       65947 ms/decision (27,745x slower)
+
+vs LA  (paired on 66 routes both completed)
+   median    -0.26 %
+   mean      -0.24 %
+   IQR     [-0.83, +0.47]
+   best/worst -19.76 % / +15.27 %
+   student faster on 36/66 routes
+
+vs GREEDY  (paired on 63 routes both completed)
+   median    -2.53 %
+   mean      -3.42 %
+   IQR     [-3.59, -1.48]
+   best/worst -22.22 % / -0.03 %
+   student faster on 63/63 routes
+
+vs ORACLE (hindsight objective - T_START, 66 routes)
+   median    +2.06 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 365 customer visits
+   student 82   LA 49   GREEDY 105
+
+penalised objective vs LA (duration + 0.5*misses, 66 routes)
+   median   -0.12 %   mean   +0.21 %
+
+rests   student   160  LA   160   mean +0.000/route   fewer on 2/66 routes
+charges student   588  LA   655   mean -1.015/route
+
+worst 5 families (median % vs LA)
+   RlongCmanyTtight           n=  1  median  +9.07 %  worst  +9.07 %
+   RmediumCmanyTlarge         n=  2  median  +7.06 %  worst +15.27 %
+   RshortCmanyTlarge          n=  2  median  +1.78 %  worst  +2.30 %
+   RmediumCmediumTnone        n=  2  median  +1.48 %  worst  +2.06 %
+   RshortCmanyTtight          n=  2  median  +0.83 %  worst  +2.23 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 5x, left none 0x, charge clamp moved 3x
+spread room: actions removed 34x, charges shortened 2x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_split_list_s1_g99srNm_stop.json

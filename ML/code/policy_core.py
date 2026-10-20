@@ -146,6 +146,13 @@ class StudentPolicy:
         # reproduces every earlier result; None is nominal (xi = 1), which is
         # what the training rows used (extract.GUARD_Q).
         self.feature_q = "guard"
+        # Opt-in (evaluate.py / run_hybrid.py --mseq): charge-then-rest at a
+        # charger pays the bay-vacating overhead M_seq, as the LA's and the
+        # oracle's plans do (the MILP forces sigma >= y + rho - 1).  BEHDV
+        # charges M_seq only when the plan passes sigma = 1, and this mock plan
+        # never did, so students skipped ~5 min per charge+rest stop.  Off by
+        # default, so every result produced without it is unchanged.
+        self.pay_mseq = False
 
     # -- to be implemented per arm -------------------------------------------
     def _predict(self, rows):
@@ -269,8 +276,10 @@ class StudentPolicy:
         return out
 
 
-def durations(fd, stop, action, tauc):
-    """Execution durations, same parallel-charging model as greedy/the MILP."""
+def durations(fd, stop, action, tauc, pay_mseq=False):
+    """Execution durations, same parallel-charging model as greedy/the MILP.
+    `pay_mseq`: flag charge-then-rest as sequential (sigma = 1), so BEHDV
+    charges the M_seq overhead the MILP plans charge (StudentPolicy.pay_mseq)."""
     is_CS = stop in set(fd["K"])
     y = int(action.get("y", 0))
     brk = action.get("break_type")
@@ -288,7 +297,8 @@ def durations(fd, stop, action, tauc):
     return dict(taub=taub, tauc=tauc, taur=rmin, tauq=tauq,
                 b45=int(brk == "b45"), b15=int(brk == "b15"),
                 b30=int(brk == "b30"), rho1=int(rst == "r1"),
-                rho2=int(rst == "r2"), y=y)
+                rho2=int(rst == "r2"), y=y,
+                sigma=int(bool(pay_mseq) and is_CS and y == 1 and rst in ("r1", "r2")))
 
 
 def run_student(fd, D_real, E_real, policy: StudentPolicy, cv=0.15):
@@ -321,7 +331,8 @@ def run_student(fd, D_real, E_real, policy: StudentPolicy, cv=0.15):
         # all.  Every other policy returns three and gets the mock below.
         plan = out[3] if len(out) > 3 else None
         mock = plan or dict(feasible=True,
-                            sol=[dict(i=0, **durations(fd, stop, action, tauc))])
+                            sol=[dict(i=0, **durations(fd, stop, action, tauc,
+                                                          getattr(policy, "pay_mseq", False)))])
         veh.advance(action=action, D_next=float(D_real[stop]),
                     E_next=float(E_real[stop]), milp_sol=mock)
         if veh.is_halted:

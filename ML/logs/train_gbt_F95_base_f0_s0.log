@@ -1,0 +1,37 @@
+[fset] F: 95 features (77 state)
+[scope] all: training on short, medium, long routes
+[data] rows 411118  features 271
+  fit   rows  249064  instances  508  decisions  43946
+  stop  rows   31355  instances   66  decisions   5509
+  test  rows   61961  instances  125  decisions  10982
+
+[cost] trees=1200  val_huber=0.12858  33s
+[feas] trees=389  val_logloss=0.00995
+[tauc] trees=205  val_MAE=5.41 min (on 7948 charge rows)
+
+========================================================================
+OFFLINE POLICY METRICS (argmin over scored actions)
+========================================================================
+split   mean regret    top-1  decisions     always-go  dirty picks
+fit         0.51 min    93.5%      43921       3.25 min           30
+stop        0.76 min    93.6%       5507       3.10 min           17
+test        0.58 min    93.6%      10979       3.44 min           37
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models/gbt_F95_base_f0_s0_{cost,feas,tauc}.txt  (75s)
+
+top 15 features by gain (cost head):
+   a_rest_min                      1574048
+   a_dwell_min                      294251
+   hz_drive                         114584
+   a_resets_sd                       73671
+   legs_to_forced_rest               66278
+   a_r1                              57274
+   sd_slack                          45534
+   hz_stops                          31310
+   hz_n_rests                        28538
+   sd_slack_after                    24016
+   a_r2                              22743
+   cs_left                           21624
+   drive_left                        20662
+   ext_shift_used                    20507
+   a_cu1_slack_after                 16184

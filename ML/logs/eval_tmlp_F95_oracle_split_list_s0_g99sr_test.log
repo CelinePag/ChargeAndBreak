@@ -1,0 +1,55 @@
+[eval] kind=torch tag=tmlp_F95_oracle_split_list_s0 on test: 125 instances
+  25/125  13s
+  50/125  23s
+  75/125  31s
+  100/125  38s
+  125/125  43s
+[eval] 125 routes in 43.5s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  torch:tmlp_F95_oracle_split_list_s0 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               2.420 ms/decision (median 2.365)
+teacher latency       70617 ms/decision (29,184x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.23 %
+   mean      +3.08 %
+   IQR     [-1.06, +2.91]
+   best/worst -24.97 % / +40.20 %
+   student faster on 66/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.55 %
+   mean      +0.00 %
+   IQR     [-3.69, -0.98]
+   best/worst -11.65 % / +36.77 %
+   student faster on 94/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +1.80 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 111   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.00 %   mean   +3.53 %
+
+rests   student   313  LA   289   mean +0.192/route   fewer on 2/125 routes
+charges student  1072  LA  1174   mean -0.816/route
+
+worst 5 families (median % vs LA)
+   RmediumCfewTtight          n=  4  median +17.37 %  worst +23.30 %
+   RlongCmediumTnone          n=  1  median +10.78 %  worst +10.78 %
+   RlongCfewTlarge            n=  4  median  +8.96 %  worst +12.60 %
+   RshortCmanyTtight          n=  4  median  +8.88 %  worst +24.47 %
+   RmediumCfewTnone           n=  4  median  +8.82 %  worst +18.03 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 10x, left none 0x, charge clamp moved 26x
+spread room: actions removed 29x, charges shortened 3x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_tmlp_F95_oracle_split_list_s0_g99sr_test.json

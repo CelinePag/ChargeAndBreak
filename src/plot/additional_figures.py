@@ -3596,6 +3596,29 @@ def _la_ladder_panels(ladder, is_h, outname, xlabel, held):
     _save(fig, outname)
 
 
+# `additional_la_plane` breaks its cost axis when the far cost cluster starts
+# beyond this multiple of the bulk's maximum.  Below it, one linear axis still
+# leaves the bulk most of the panel and a break would only hide distance.
+_LA_BREAK_RATIO = 2.5
+
+
+def _axis_break(left, right, size=5.0):
+    """Join two side-by-side segments of one x-axis with // marks.
+
+    Drops the facing spines, the right segment's y ticks, and draws a slanted
+    stroke on both the top and bottom spines at the cut, in the spine colour.
+    """
+    left.spines["right"].set_visible(False)
+    right.spines["left"].set_visible(False)
+    right.tick_params(which="both", left=False, labelleft=False)
+    col = left.spines["bottom"].get_edgecolor()
+    lw = left.spines["bottom"].get_linewidth()
+    kw = dict(marker=[(-0.5, -1), (0.5, 1)], markersize=size, linestyle="none",
+              color=col, mec=col, mew=lw, clip_on=False, zorder=10)
+    left.plot([1, 1], [0, 1], transform=left.transAxes, **kw)
+    right.plot([0, 0], [0, 1], transform=right.transAxes, **kw)
+
+
 def section_la_plane():
     """8.3 - the cost/quality plane, one panel per LADDER, routes aggregated.
 
@@ -3642,9 +3665,14 @@ def section_la_plane():
         i = _la_num(row, "n_infeasible")
         return c, q, n, ((i / n) if (n and i is not None) else None)
 
-    pts = [got for _t, lad, is_h, _h, _p in LADDERS
-           for v in lad for lp, _l, _s, _m in _LA_TAIL_SERIES
-           for got in [cell(v, is_h, lp)] if got]
+    # (title, is_h, held, prefix, [(lptail, dash, marker, [(v, c, q, n, f)])])
+    panels = [(title, is_h, held, pfx,
+               [(lp, ls, mk, [(v,) + got for v in lad
+                              for got in [cell(v, is_h, lp)] if got])
+                for lp, _l, ls, mk in _LA_TAIL_SERIES])
+              for title, lad, is_h, held, pfx in LADDERS]
+    pts = [p[1:] for *_x, series in panels for *_s, seq in series
+           for p in seq]
     if not pts:
         print("  no cell carries both a cost and a gap - nothing drawn")
         return
@@ -3655,23 +3683,67 @@ def section_la_plane():
     # a hypothetical 100%.
     fmax = max([p[3] for p in pts if p[3]] or [1.0])
 
-    fig, axs = plt.subplots(1, 2, figsize=(6.9, 3.0), sharex=True, sharey=True)
+    # Broken cost axis.  One rung can cost several times what every other cell
+    # does (S25H48/MIP: ~810 s/stop against <= 225 s for all the rest), and a
+    # linear axis run out to it packs every other cell into the left quarter of
+    # both panels.  When the costs split into a bulk and a far cluster, the far
+    # cluster gets its own narrow segment on the SAME scale (same step, same
+    # units per inch), joined to the bulk by a // break, so distances inside
+    # each segment still read off the axis; only the jump across the break is
+    # elided.  The bulk segment is identical in both panels, which keeps the
+    # two ladders on one scale as the shared axis used to.
+    costs = sorted(p[0] for p in pts)
+    _g, lo_max, hi_min = max(((b - a, a, b) for a, b in zip(costs, costs[1:])),
+                             default=(0.0, xmax, None))
+    broken = hi_min is not None and hi_min > _LA_BREAK_RATIO * lo_max
+    main_hi = (lo_max if broken else xmax) * 1.20
+    _t = mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]).tick_values(
+        0, main_hi)
+    step = float(_t[1] - _t[0])
+
+    def tail_lim(series):
+        far = [c for *_s, seq in series for _v, c, *_r in seq
+               if broken and c >= hi_min]
+        return (min(far) - 0.5 * step, max(far) + 0.5 * step) if far else None
+
+    # One GridSpec column per segment, with empty spacer columns, all on the
+    # cost scale so a width ratio IS a span of seconds.
+    tails = [tail_lim(series) for *_x, series in panels]
+    cols, widths = [], []
+    for k, tl in enumerate(tails):
+        if k:
+            widths.append(0.08 * main_hi)         # gap between the panels
+            cols.append(None)
+        cols.append((k, "main"))
+        widths.append(main_hi)
+        if tl:
+            widths.append(0.035 * main_hi)        # gap at the break
+            cols.append(None)
+            cols.append((k, "tail"))
+            widths.append(tl[1] - tl[0])
+
+    fig = plt.figure(figsize=(6.9, 3.0))
+    gs = fig.add_gridspec(1, len(cols), width_ratios=widths, wspace=0.0,
+                          left=0.085, right=0.885, top=0.845, bottom=0.155)
+    seg = {}                                      # (panel, part) -> ax
+    for j, key in enumerate(cols):
+        if key:
+            seg[key] = fig.add_subplot(gs[0, j],
+                                       sharey=seg.get((0, "main")))
     thin_seen = {}
 
-    for ax, (title, ladder, is_h, held, pfx) in zip(axs, LADDERS):
-        drew = False
-        for lptail, lbl, ls, mk in _LA_TAIL_SERIES:
-            col = _la_solver_color(lptail)
-            seq = [(v,) + got for v in ladder
-                   for got in [cell(v, is_h, lptail)] if got]
+    def draw(ax, series, pfx, base_v):
+        for lptail, ls, mk, seq in series:
             if not seq:
                 continue
-            drew = True
+            col = _la_solver_color(lptail)
             # The path IS the finding: it runs along the ladder, so the reader
             # follows the rungs in order rather than matching labels to points.
+            # Drawn whole in every segment and clipped by it, so a step that
+            # crosses the break leaves one segment and enters the next on the
+            # same straight line.
             ax.plot([p[1] for p in seq], [p[2] for p in seq], ls, color=col,
                     lw=1.2, zorder=2)
-            base_v = _LA_BASE[1] if is_h else _LA_BASE[0]
             for v, c, q, n, f in seq:
                 # Marker FILL is the infeasibility rate, EDGE is the solver.
                 # The fill is not decoration: the gap median is taken over
@@ -3690,32 +3762,55 @@ def section_la_plane():
                 if v == base_v:      # the cell the sweep is quoted against
                     ax.plot(c, q, "o", ms=9.5, mfc="none", mec=col, lw=0.9,
                             zorder=3)
+                # Data-anchored, so a label whose point lies in the other
+                # segment is not drawn here.
                 ax.annotate(f"{pfx}{v:g}" + (f" (n={n:g})" if thin else ""),
                             (c, q), xytext=(4, 4),
                             textcoords="offset points", fontsize=5.6,
                             color=col)
-        if not drew:
-            ax.text(0.5, 0.5, "pending", ha="center", va="center",
-                    transform=ax.transAxes, fontsize=7.5, color=MUT,
-                    style="italic")
-        ax.set_title(title, loc="left", fontsize=8)
-        ax.annotate(held, xy=(1.0, 1.0), xycoords="axes fraction",
-                    xytext=(-2, 3), textcoords="offset points",
-                    ha="right", va="bottom", fontsize=5.8, color=MUT)
-        ax.set_xlim(0, xmax * 1.20)
-        ax.set_ylim(0, ymax * 1.18)
-        ax.xaxis.set_major_locator(
-            mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
-        ax.yaxis.set_major_locator(
-            mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
-        ax.xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
-        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
-        ax.grid(True, which="major", color=GRID, lw=0.6)
-        ax.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
-        ax.set_axisbelow(True)
-        ax.tick_params(labelsize=7)
-        ax.tick_params(which="minor", length=2)
-        ax.set_xlabel(_LBL_COST, fontsize=7.5)
+
+    for k, ((title, is_h, held, pfx, series), tl) in enumerate(
+            zip(panels, tails)):
+        main = seg[(k, "main")]
+        tail = seg.get((k, "tail"))
+        base_v = _LA_BASE[1] if is_h else _LA_BASE[0]
+        for ax, lim in ((main, (0, main_hi)), (tail, tl)):
+            if ax is None:
+                continue
+            draw(ax, series, pfx, base_v)
+            ax.set_xlim(*lim)
+            ax.set_ylim(0, ymax * 1.18)
+            ax.xaxis.set_major_locator(mticker.MultipleLocator(step))
+            ax.xaxis.set_minor_locator(mticker.MultipleLocator(step / 2))
+            ax.yaxis.set_major_locator(
+                mticker.MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+            ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+            ax.grid(True, which="major", color=GRID, lw=0.6)
+            ax.grid(True, which="minor", color=GRID, lw=0.35, alpha=0.6)
+            ax.set_axisbelow(True)
+            ax.tick_params(labelsize=7)
+            ax.tick_params(which="minor", length=2)
+            if k:
+                ax.tick_params(labelleft=False)
+        if not any(seq for *_s, seq in series):
+            main.text(0.5, 0.5, "pending", ha="center", va="center",
+                      transform=main.transAxes, fontsize=7.5, color=MUT,
+                      style="italic")
+        main.set_title(title, loc="left", fontsize=8)
+        (tail or main).annotate(held, xy=(1.0, 1.0), xycoords="axes fraction",
+                                xytext=(-2, 3), textcoords="offset points",
+                                ha="right", va="bottom", fontsize=5.8,
+                                color=MUT)
+        main.set_xlabel(_LBL_COST, fontsize=7.5)
+        if tail is not None:
+            _axis_break(main, tail)
+            # Centre the one label under the whole broken panel.
+            mp, tp = main.get_position(), tail.get_position()
+            main.xaxis.set_label_coords(
+                ((mp.x0 + tp.x1) / 2 - mp.x0) / mp.width, -0.105)
+        else:
+            main.xaxis.set_label_coords(0.5, -0.105)
+    axs = [seg[key] for key in cols if key]
     axs[0].set_ylabel(_LBL_GAP, fontsize=7.5)
 
     # Compact legend: ONE row, on the figure's top edge, sharing its line with

@@ -4,6 +4,7 @@
 #     sbatch --job-name=cab-pilot  ML/hpc/job.slurm pilot
 #     sbatch --job-name=cab-b1     ML/hpc/job.slurm b1
 #     sbatch --job-name=cab-dagger ML/hpc/job.slurm dagger
+#     for i in 0 1 2 3 4 5 6 7; do sbatch --job-name=cab-gate$i ML/hpc/job.slurm gate-val $i/8; done
 #
 # Add the partition / account lines your cluster requires, and change the
 # module name and environment path below to yours.
@@ -14,4 +15,4 @@
 
 module load gurobi 2>/dev/null || echo "no 'gurobi' module: make sure gurobi_cl is on PATH"
 source .venv/bin/activate 2>/dev/null || echo "no .venv in the repo root: activate your environment here"
-bash ML/hpc/run_jobs.sh "$1"
+bash ML/hpc/run_jobs.sh "$@"            # stage [+ share i/n]

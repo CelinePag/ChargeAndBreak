@@ -159,6 +159,8 @@ def main():
     from fsets import FSET_IDS, resolve
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", required=True)
+    ap.add_argument("--data", default=None,
+                    help="dataset file (default ML/data/dataset.npz), e.g. dataset_oracle.npz")
     ap.add_argument("--fset", default="F", choices=list(FSET_IDS))
     ap.add_argument("--scope", default="all", choices=["all", "SM"])
     ap.add_argument("--physics", default=None,
@@ -234,7 +236,7 @@ def main():
         want, _ = resolve(args.fset, sup, sup_ns, ARM)
         d = load_multi(tags, columns=set(want) | {"a_y"})
     else:
-        d = load()
+        d = load(args.data)
     if args.dagger:
         from dataset import add_dagger
         d = add_dagger(d, [t for t in args.dagger.split(",") if t])
@@ -257,10 +259,13 @@ def main():
     m_cost = clean & np.isfinite(regret)
     w = sample_weights(d, decision_margins(d), args.weight_power).astype(np.float32)
     w_cost = np.where(m_cost, w, 0.0).astype(np.float32)
-    m_tauc = (clean & is_y1).astype(np.float32)
+    tauc_rows = clean & is_y1
+    if "tauc_ok" in d:                # oracle data: a charge only on the oracle's action
+        tauc_rows = tauc_rows & (d["tauc_ok"] > 0)
+    m_tauc = tauc_rows.astype(np.float32)
     y_cost = np.where(m_cost, regret, 0.0).astype(np.float32)
     y_feas = clean.astype(np.float32)
-    y_tauc = np.where(clean & is_y1, d["tauc"], 0.0).astype(np.float32)
+    y_tauc = np.where(tauc_rows, d["tauc"], 0.0).astype(np.float32)
 
     T = {k: torch.from_numpy(np.ascontiguousarray(v)) for k, v in dict(
         X=Xs, w=w_cost, yc=y_cost, yf=y_feas, yt=y_tauc, mt=m_tauc).items()}

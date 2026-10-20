@@ -221,6 +221,8 @@ def main():
     ychg = d["tauc"]
     is_y1 = _is_y1_full
     c_tr, c_va = tr & is_y1 & clean, va & is_y1 & clean
+    if "tauc_ok" in d:                # oracle data: a charge only on the oracle's action
+        c_tr, c_va = c_tr & (d["tauc_ok"] > 0), c_va & (d["tauc_ok"] > 0)
     cds_tr = lgb.Dataset(X[c_tr], label=ychg[c_tr], feature_name=names,
                          free_raw_data=False)
     cds_va = lgb.Dataset(X[c_va], label=ychg[c_va], feature_name=names,
