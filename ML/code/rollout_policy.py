@@ -76,10 +76,11 @@ def clone(veh):
     return v
 
 
-def step(veh, fd, action, tauc, D, E):
-    """Execute one decision, exactly as policy_core.run_student does."""
+def step(veh, fd, action, tauc, D, E, pay_mseq=False):
+    """Execute one decision, exactly as policy_core.run_student does
+    (`pay_mseq`: the student's StudentPolicy.pay_mseq; off by default)."""
     mock = dict(feasible=True,
-                sol=[dict(i=0, **durations(fd, veh.stop, action, tauc))])
+                sol=[dict(i=0, **durations(fd, veh.stop, action, tauc, pay_mseq))])
     veh.advance(action=action, D_next=float(D), E_next=float(E), milp_sol=mock)
 
 
@@ -90,7 +91,7 @@ def finish(veh, fd, pre, base, cv, scen):
     while not veh.is_halted and veh.stop < N:
         s = veh.stop
         a, tc, _ = base.decide(fd, pre, s, veh, cv)
-        step(veh, fd, a, tc, scen["D"][s], scen["E"][s])
+        step(veh, fd, a, tc, scen["D"][s], scen["E"][s], getattr(base, "pay_mseq", False))
     if veh.is_halted:
         return FAIL_H
     return veh.t_arr + BETA * len(veh.tw_misses)

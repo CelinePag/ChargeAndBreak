@@ -81,10 +81,12 @@ class Gate:
 
     STUDENT = {"gbt": "gbt_F95_base_s0", "torch": "tmlp_F95_split_list_s0"}
 
-    def __init__(self, arm, budget, nominal=True, pay_mseq=False):
+    def __init__(self, arm, budget, nominal=True, pay_mseq=False, model=None):
         import lightgbm as lgb
-        self.meta = json.load(open(os.path.join(me.ML, "models", f"gate_{arm}_meta.json")))
-        self.booster = lgb.Booster(model_file=os.path.join(me.ML, "models", f"gate_{arm}.txt"))
+        model = model or f"gate_{arm}"
+        self.model = model
+        self.meta = json.load(open(os.path.join(me.ML, "models", f"{model}_meta.json")))
+        self.booster = lgb.Booster(model_file=os.path.join(me.ML, "models", f"{model}.txt"))
         self.thr = float(self.meta["thresholds"][f"{budget:g}"]) if budget is not None else None
         self.names = self.meta["features"]
         other = "torch" if arm == "gbt" else "gbt"
@@ -150,7 +152,7 @@ def ask_la(fd, stop, veh, cv, seed, workers, time_limit):
 
 
 def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_limit,
-          gate=None, rand_p=None):
+          gate=None, rand_p=None, check=None):
     """One route.  Returns the result row (and, dry, the per-stop margins).
 
     Triggers (any one fires the LA): the rest/no-rest margin (margin_h), the
@@ -165,6 +167,7 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
     cum = np.r_[0.0, np.cumsum([float(fd["D"].get(i, 0.0)) for i in range(N)])]
     curves, tbar = fd.get("TbarK"), fd["Tbar"]
     calls, la_s, fallback, margins, keys, t_arr = [], 0.0, 0, [], [], []
+    vetoed, check_s = [], 0.0
     while veh.stop < N:
         s = veh.stop
         if curves:
@@ -203,9 +206,25 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
                 if curves:
                     fd["Tbar"] = charger_curve(fd, s if s in pre.K else int(pre.next_cs[s]))
             else:
-                act, plan = got
-                key = action_key(act.get("y", 0), act.get("break_type"),
-                                 act.get("rest_type"))
+                la_act, la_plan = got
+                la_key = action_key(la_act.get("y", 0), la_act.get("break_type"),
+                                    la_act.get("rest_type"))
+                accept = True
+                if check is not None and la_key != key:
+                    # does the LA's action still win once the STUDENT drives on?
+                    from gate_rollout import call_value
+                    k_fut, z = check
+                    sol0 = (la_plan or {}).get("sol") or [{}]
+                    t1 = time.time()
+                    mean, se, _fl, _fs = call_value(
+                        fd, pre, veh, cv, pol, la_act, float(sol0[0].get("tauc", 0.0) or 0.0),
+                        act, tc, k_fut, zlib.crc32(f"{name}|{tag}|{s}|check".encode()))
+                    check_s += time.time() - t1
+                    accept = mean - z * se > 0
+                    if not accept:
+                        vetoed.append(s)
+                if accept:
+                    act, plan, key = la_act, la_plan, la_key
         keys.append(key)
         t_arr.append(veh.t_arr)
         sol = plan if plan is not None else dict(
@@ -224,7 +243,8 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
                 duration_h=(veh.t_arr - T0) if done else None,
                 tw=len(veh.tw_misses), rests=rests, violation=veh.halt_reason,
                 decisions=len(keys), n_calls=len(calls), la_s=round(la_s, 1),
-                call_stops=calls, fallback=fallback), margins
+                call_stops=calls, fallback=fallback, vetoed=vetoed,
+                check_s=round(check_s, 1)), margins
 
 
 def base_routes(split):
@@ -251,6 +271,12 @@ def main():
                     help="learned gate of this arm (gate_train.py); the student must be its arm's")
     ap.add_argument("--budget", type=float, default=None,
                     help="gate budget in %% of decisions (a threshold stored by gate_train.py)")
+    ap.add_argument("--gate-model", default=None,
+                    help="gate file name (default gate_<arm>; gate_<arm>_ro = rollout labels)")
+    ap.add_argument("--check", type=int, default=None,
+                    help="K futures: keep the LA's action only if it beats the student's own "
+                         "with the student driving on (gate_rollout.call_value); base routes")
+    ap.add_argument("--check-z", type=float, default=1.0)
     ap.add_argument("--random", type=float, default=None,
                     help="control: call the LA at random on this %% of decisions")
     ap.add_argument("--mseq", action="store_true",
@@ -271,9 +297,14 @@ def main():
     cfg = ((f"m{args.margin:g}" if args.margin is not None else "")
            + (f"f{args.final:g}" if args.final is not None else "")
            + (f"g{args.gate}{args.budget:g}" if args.gate and args.budget is not None else "")
+           + ("ro" if args.gate_model and args.gate_model.endswith("_ro") else "")
            + (f"r{args.random:g}" if args.random is not None else ""))
     if not cfg and not args.dry:
         ap.error("give --margin, --final, --gate with --budget, or --random (or --dry)")
+    if args.check is not None:
+        if args.routes != "base":
+            ap.error("--check rolls out without per-charger curves: base routes only")
+        cfg += f"c{args.check}z{args.check_z:g}"
     if cfg:
         cfg += ("_ms" if args.mseq else "") + ("_N" if args.nominal_features else "")
     tail = "" if args.set == "test" else f"_{args.set}"
@@ -297,7 +328,8 @@ def main():
 
     gate = None
     if args.gate:
-        gate = Gate(args.gate, args.budget, nominal=args.nominal_features)
+        gate = Gate(args.gate, args.budget, nominal=args.nominal_features, model=args.gate_model)
+    check = None if args.check is None else (args.check, args.check_z)
     pols, all_m = {}, []
     for k, (v, name, path, spec) in enumerate(jobs):
         kind, _, tag = spec.rpartition(":")
@@ -319,7 +351,7 @@ def main():
             fd["la_energy_cv"] = cv
         t0 = time.time()
         row, margins = drive(fd, D, E, cv, pol, name, tag, margin_h, args.final,
-                             args.dry, args.workers, args.time_limit, gate, rand_p)
+                             args.dry, args.workers, args.time_limit, gate, rand_p, check)
         row["variant"], row["config"] = v, cfg or "dry"
         all_m += [(v, name, tag, *x) for x in margins]
         if not args.dry:
@@ -329,6 +361,7 @@ def main():
               f"{'done' if row['completed'] else row['violation']} "
               f"{row['duration_h'] or 0:.1f} h, {row['rests']} rests, "
               f"{row['n_calls']} LA calls ({row['la_s']:.0f} s), "
+              f"{len(row['vetoed'])} vetoed ({row['check_s']:.0f} s), "
               f"{time.time()-t0:.0f} s", flush=True)
 
     if args.dry:

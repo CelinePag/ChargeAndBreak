@@ -22,6 +22,7 @@
 #     bash ML/hpc/run_jobs.sh mix-train      # after all of them: extract, train, validate, test once
 #     bash ML/hpc/run_jobs.sh hybrid i/n     # one of n shares: student + LA on close rest calls
 #     bash ML/hpc/run_jobs.sh gate-val i/n   # one of n shares: learned solver-call gate vs controls, validation
+#     bash ML/hpc/run_jobs.sh gate-val2 i/n  # round 2: gate on rollout labels + the rollout check (trees)
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -454,11 +455,38 @@ gate-val)
   log "gate-val $SL done"
   ;;
 
+gate-val2)
+  # Round 2 of the solver-call gate (2026-10-21), trees only (PyTorch alone is
+  # already at the LA on these routes).  gate-val showed hand-offs creating
+  # extra daily rests: the LA's action only pays if the LA keeps driving.
+  #   gate_gbt_ro  : gate trained on the value of a call WITH THE STUDENT
+  #                  DRIVING ON (gate_rollout.py, 32 shared futures)
+  #   --check 32   : at a call, keep the LA's action only if it beats the
+  #                  student's own over 32 shared futures, student driving on
+  # Calibrated with --dry: gate_gbt_ro 5/10/20 % = 4.6/10.4/20.7 calls/route;
+  # margin 65 min ~ 9 calls.  Writes results/hybrid_base_val_<cfg>.jsonl.
+  la_threads
+  SL=${2:-0/1}
+  B="--routes base --set val --mseq --nominal-features --slice $SL"
+  TREES="--models gbt:gbt_F95_base_s0"
+  RO="--gate gbt --gate-model gate_gbt_ro"
+  for cfg in "$TREES $RO --budget 5" \
+             "$TREES $RO --budget 10" \
+             "$TREES $RO --budget 10 --check 32" \
+             "$TREES --gate gbt --budget 10 --check 32" \
+             "$TREES --margin 65 --check 32" \
+             "$TREES $RO --budget 20 --check 32"; do
+    log "gate-val2 $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $B $cfg >> "$LOGS/gate_val2_${SL/\//of}.log" 2>&1
+  done
+  log "gate-val2 $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n"
   exit 1
   ;;
 esac

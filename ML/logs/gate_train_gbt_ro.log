@@ -1,0 +1,24 @@
+C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\code\gate_train.py:132: RuntimeWarning: Mean of empty slice
+  f"{lab[te].mean()*60:.2f} min")
+C:\Users\celinep\Documents\GitHub\ChargeAndBreak\.venv\Lib\site-packages\numpy\_core\_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+[label] rollout values (K = 32 futures, student driving on) on 60362 decisions; the call hurts on 2.6 %
+[gate] gbt: fit 54956 / validation 5406 / test 0 decisions; value of a call, mean 0.29 / 0.67 / nan min
+
+VALIDATION (seeds 20-21): share of the one-step loss recovered
+  trigger                                      2% calls   5% calls  10% calls  20% calls   mean
+  perfect (hindsight)                            88.3%    100.0%    100.0%    100.0%   97.1
+  student margin                                 12.7%     13.7%     18.0%     25.5%   17.5
+  rest/no-rest margin (current hybrid)            9.2%     12.3%     10.0%     16.6%   12.0
+  entropy                                        -0.6%      3.9%     12.4%     23.8%    9.9
+  trees and PyTorch disagree                      6.4%     29.7%     29.5%     36.8%   25.6
+  LA- and oracle-trained disagree                 0.8%      6.2%     34.5%     42.5%   21.0
+  random                                          0.5%      2.4%      5.4%      8.6%    4.2
+  learned: signals, regression                   27.6%     39.8%     48.6%     53.9%   42.5
+  learned: signals+state, regression             27.0%     38.9%     52.0%     55.0%   43.2
+  learned: signals+state, log target             24.3%     41.4%     53.0%     56.5%   43.8
+  learned: signals+state, classifier >1 min      15.3%     25.5%     43.6%     45.7%   32.5
+
+[chosen] signals+state, log target; thresholds per budget (score): 2% 0.422, 5% 0.144, 10% 0.0407, 20% 0.00928
+[importance] oracle_gap 16%, other_gap 13%, margin 10%, entropy 9%, rest_margin 8%, pick_feas 8%, min_feas_top2 7%, cs1_queue 7%, t_elapsed 6%, tok0_tfull 6%, hz_drive 6%, queue_here 5%
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\models\gate_gbt_ro.txt / _meta.json

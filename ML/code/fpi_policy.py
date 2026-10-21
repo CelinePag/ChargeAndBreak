@@ -142,7 +142,8 @@ def drive_fleet(base, fd, pre, cv, vehs, scens):
             v = vehs[i]
             s = v.stop
             tc = base._charge_hours(fd, s, v, act, row, flags, raw=raw.get(k))
-            step(v, fd, act, tc, scens[i]["D"][s], scens[i]["E"][s])
+            step(v, fd, act, tc, scens[i]["D"][s], scens[i]["E"][s],
+                 getattr(base, "pay_mseq", False))
         live = [i for i in live if not vehs[i].is_halted and vehs[i].stop < n_stops]
     return np.array([FAIL_H if v.is_halted else v.t_arr + BETA * len(v.tw_misses)
                      for v in vehs])

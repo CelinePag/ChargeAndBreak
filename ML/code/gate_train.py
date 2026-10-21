@@ -32,11 +32,13 @@ BUDGETS = (0.02, 0.05, 0.10, 0.20)
 
 
 def recovered(label, score, b, rng=None):
-    """Share (%) of the total label recovered by calling on the top-b share."""
+    """Share (%) of the total positive label recovered by calling on the top-b
+    share, NET of the calls whose label is negative (rollout labels: the LA's
+    action hurts once the student drives on)."""
     k = int(round(b * len(label)))
     if rng is not None:                       # random tie-break for 0/1 signals
         score = score + 1e-6 * rng.random(len(score))
-    return label[np.argsort(-score)[:k]].sum() / label.sum() * 100
+    return label[np.argsort(-score)[:k]].sum() / np.clip(label, 0, None).sum() * 100
 
 
 def curve(label, score, rng=None):
@@ -79,13 +81,15 @@ def fit(g, tr, va, block, target, seed=0):
     X, names = features(g, block)
     y = g["label"] * 60.0                                         # minutes
     if target == "log":
-        y = np.log1p(y)
+        y = np.sign(y) * np.log1p(np.abs(y))                      # signed: rollout labels can be < 0
     params = dict(learning_rate=0.03, num_leaves=31, min_child_samples=50,
                   feature_fraction=0.7, bagging_fraction=0.8, bagging_freq=5,
                   verbose=-1, seed=seed, num_threads=0)
     if target == "clf":
         params.update(objective="binary", metric="auc")
         y = (y > 1.0).astype(float)
+        if "label_se" in g:                   # rollout labels: helps by more than 2 se
+            y = ((g["label"] > 2 * g["label_se"]) & (g["label"] * 60 > 1.0)).astype(float)
     else:
         params.update(objective="huber", alpha=1.0, metric="huber")
     dtr = lgb.Dataset(X[tr], label=y[tr], feature_name=names, free_raw_data=False)
@@ -105,10 +109,21 @@ def table(rows, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", default="gbt", choices=["gbt", "torch"])
+    ap.add_argument("--label", default="onestep", choices=["onestep", "rollout"],
+                    help="onestep: the LA's own regret of the student's pick (gate_data.py); "
+                         "rollout: the value of the call with the student driving on (gate_rollout.py)")
     ap.add_argument("--test", action="store_true",
                     help="score the gate chosen on validation on the test decisions (once)")
     args = ap.parse_args()
     g = dict(np.load(os.path.join(DATA, f"gate_{args.arm}.npz"), allow_pickle=True))
+    if args.label == "rollout":
+        r = np.load(os.path.join(DATA, f"gate_{args.arm}_rollout.npz"), allow_pickle=True)
+        keep = np.asarray(r["row"])
+        for key in ("signals", "state", "seed", "instance_ix", "stop"):
+            g[key] = g[key][keep]
+        g["label"], g["label_se"] = np.asarray(r["value"]), np.asarray(r["se"])
+        print(f"[label] rollout values (K = {int(r['k'])} futures, student driving on) "
+              f"on {len(keep)} decisions; the call hurts on {np.mean(g['label'] < 0)*100:.1f} %")
     seed = g["seed"]
     tr, va, te = seed <= 19, (seed >= 20) & (seed <= 21), seed >= 22
     lab = g["label"]
@@ -117,7 +132,7 @@ def main():
           f"{lab[te].mean()*60:.2f} min")
     rng = np.random.default_rng(0)
 
-    tag = f"gate_{args.arm}"
+    tag = f"gate_{args.arm}" + ("_ro" if args.label == "rollout" else "")
     meta_path = os.path.join(MODELS, f"{tag}_meta.json")
     if not args.test:
         rows = [(k, curve(lab[va], v, rng)) for k, v in baselines(g, va, rng).items()]
@@ -128,7 +143,7 @@ def main():
             rows.append((f"learned: {name}", c))
             if best is None or np.mean(c) > best[1]:
                 best = (name, np.mean(c), b, X)
-        table(rows, "VALIDATION (seeds 20-21): share of the one-step loss recovered")
+        table(rows, "VALIDATION (seeds 20-21): share of the " + ("value of calling (student driving on)" if args.label == "rollout" else "one-step loss") + " recovered, net")
         name, _, b, X = best
         sva = b.predict(X[va], num_iteration=b.best_iteration)
         thr = {f"{int(x*100)}": float(np.sort(sva)[::-1][max(int(round(x * len(sva))) - 1, 0)])
