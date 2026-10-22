@@ -48,7 +48,7 @@ if _ROOT not in sys.path:
 
 import mixed_eval as me                                           # noqa: E402
 from features import Precomp, action_key, charger_curve, state_features  # noqa: E402
-from policy_core import durations, load_policy                    # noqa: E402
+from policy_core import charge_needed_to_reach, durations, load_policy  # noqa: E402
 from run_la_mixed import LA_CONFIG                                # noqa: E402
 from src.simulation.BEHDV import BEHDV                            # noqa: E402
 from src.simulation.Simulation import enumerate_actions           # noqa: E402
@@ -152,7 +152,7 @@ def ask_la(fd, stop, veh, cv, seed, workers, time_limit):
 
 
 def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_limit,
-          gate=None, rand_p=None, check=None):
+          gate=None, rand_p=None, check=None, shield_la=False):
     """One route.  Returns the result row (and, dry, the per-stop margins).
 
     Triggers (any one fires the LA): the rest/no-rest margin (margin_h), the
@@ -167,7 +167,7 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
     cum = np.r_[0.0, np.cumsum([float(fd["D"].get(i, 0.0)) for i in range(N)])]
     curves, tbar = fd.get("TbarK"), fd["Tbar"]
     calls, la_s, fallback, margins, keys, t_arr = [], 0.0, 0, [], [], []
-    vetoed, check_s = [], 0.0
+    vetoed, check_s, unsafe, raised = [], 0.0, [], []
     while veh.stop < N:
         s = veh.stop
         if curves:
@@ -210,7 +210,28 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
                 la_key = action_key(la_act.get("y", 0), la_act.get("break_type"),
                                     la_act.get("rest_type"))
                 accept = True
-                if check is not None and la_key != key:
+                if shield_la:
+                    # The LA's action passes the student's own safety rules or is
+                    # not taken: the key BEHDV will execute (the plan's flags,
+                    # which can differ from the selected action) must be in the
+                    # shielded legal set of this stop, and a charge is raised to
+                    # what reaches the next charger at the guard quantile.
+                    s0 = dict(((la_plan or {}).get("sol") or [{}])[0])
+                    flag = lambda f: int(round(float(s0.get(f, 0) or 0)))
+                    ex_key = action_key(
+                        flag("y"), "b45" if flag("b45") else "b15" if flag("b15") else
+                        "b30" if flag("b30") else None,
+                        "r1" if flag("rho1") else "r2" if flag("rho2") else None)
+                    if ex_key not in lkeys:
+                        accept = False
+                        unsafe.append(s)
+                    elif flag("y"):
+                        lo = charge_needed_to_reach(fd, veh.e_arr, flags)
+                        if float(s0.get("tauc", 0.0) or 0.0) < lo:
+                            s0["tauc"] = lo
+                            la_plan = dict(la_plan, sol=[s0] + list(la_plan["sol"][1:]))
+                            raised.append(s)
+                if accept and check is not None and la_key != key:
                     # does the LA's action still win once the STUDENT drives on?
                     from gate_rollout import call_value
                     k_fut, z = check
@@ -244,7 +265,7 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
                 tw=len(veh.tw_misses), rests=rests, violation=veh.halt_reason,
                 decisions=len(keys), n_calls=len(calls), la_s=round(la_s, 1),
                 call_stops=calls, fallback=fallback, vetoed=vetoed,
-                check_s=round(check_s, 1)), margins
+                check_s=round(check_s, 1), unsafe=unsafe, raised=raised), margins
 
 
 def base_routes(split):
@@ -277,6 +298,9 @@ def main():
                     help="K futures: keep the LA's action only if it beats the student's own "
                          "with the student driving on (gate_rollout.call_value); base routes")
     ap.add_argument("--check-z", type=float, default=1.0)
+    ap.add_argument("--shield-la", action="store_true",
+                    help="the LA's action must pass the student's safety rules (else the "
+                         "student's is kept); its charge is raised to the safe minimum")
     ap.add_argument("--random", type=float, default=None,
                     help="control: call the LA at random on this %% of decisions")
     ap.add_argument("--mseq", action="store_true",
@@ -305,6 +329,8 @@ def main():
         if args.routes != "base":
             ap.error("--check rolls out without per-charger curves: base routes only")
         cfg += f"c{args.check}z{args.check_z:g}"
+    if args.shield_la:
+        cfg += "L"
     if cfg:
         cfg += ("_ms" if args.mseq else "") + ("_N" if args.nominal_features else "")
     tail = "" if args.set == "test" else f"_{args.set}"
@@ -351,7 +377,8 @@ def main():
             fd["la_energy_cv"] = cv
         t0 = time.time()
         row, margins = drive(fd, D, E, cv, pol, name, tag, margin_h, args.final,
-                             args.dry, args.workers, args.time_limit, gate, rand_p, check)
+                             args.dry, args.workers, args.time_limit, gate, rand_p, check,
+                             args.shield_la)
         row["variant"], row["config"] = v, cfg or "dry"
         all_m += [(v, name, tag, *x) for x in margins]
         if not args.dry:
@@ -362,6 +389,7 @@ def main():
               f"{row['duration_h'] or 0:.1f} h, {row['rests']} rests, "
               f"{row['n_calls']} LA calls ({row['la_s']:.0f} s), "
               f"{len(row['vetoed'])} vetoed ({row['check_s']:.0f} s), "
+              f"{len(row['unsafe'])} unsafe, {len(row['raised'])} charges raised, "
               f"{time.time()-t0:.0f} s", flush=True)
 
     if args.dry:

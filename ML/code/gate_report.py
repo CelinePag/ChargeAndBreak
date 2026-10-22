@@ -71,6 +71,8 @@ def main():
                                      for i, r in alone.items()}}
         for f in sorted(glob.glob(os.path.join(RES, f"hybrid_base{tail}_*_ms_N.jsonl"))):
             cfg = os.path.basename(f)[len(f"hybrid_base{tail}_"):-len(".jsonl")]
+            if not tail and cfg.startswith("val_"):         # test: skip the validation files
+                continue
             rows = [json.loads(x) for x in open(f) if x.strip()]
             rows = {r["instance"]: r for r in rows if r["method"] == tag}
             if rows:

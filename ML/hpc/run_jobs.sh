@@ -23,6 +23,7 @@
 #     bash ML/hpc/run_jobs.sh hybrid i/n     # one of n shares: student + LA on close rest calls
 #     bash ML/hpc/run_jobs.sh gate-val i/n   # one of n shares: learned solver-call gate vs controls, validation
 #     bash ML/hpc/run_jobs.sh gate-val2 i/n  # round 2: gate on rollout labels + the rollout check (trees)
+#     bash ML/hpc/run_jobs.sh gate-test i/n  # the chosen hybrid + 2 controls on the 125 test routes, once
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -482,11 +483,32 @@ gate-val2)
   log "gate-val2 $SL done"
   ;;
 
+gate-test)
+  # The solver-call hybrid chosen on validation (2026-10-22), on the 125
+  # base-case TEST routes, ONCE.  Chosen: the one-step gate (gate_gbt) at 10 %
+  # + the rollout check (32 futures, z = 1) + the LA's action shielded
+  # (--shield-la, added after gate-val2's one broken run).  Controls at the
+  # same LA calls per route: the margin trigger with the same check and
+  # shield, and the chosen gate without the check.  Do not rerun configs or
+  # add new ones on these routes after looking at the result.
+  la_threads
+  SL=${2:-0/1}
+  B="--routes base --set test --mseq --nominal-features --shield-la --slice $SL"
+  TREES="--models gbt:gbt_F95_base_s0"
+  for cfg in "$TREES --gate gbt --budget 10 --check 32" \
+             "$TREES --margin 65 --check 32" \
+             "$TREES --gate gbt --budget 10"; do
+    log "gate-test $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $B $cfg >> "$LOGS/gate_test_${SL/\//of}.log" 2>&1
+  done
+  log "gate-test $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n"
   exit 1
   ;;
 esac
