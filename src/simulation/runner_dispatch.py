@@ -218,6 +218,14 @@ def run_algorithm(
     # greedy options
     safety_buffer: float             = 0.0,
     queue_threshold: Optional[float] = None,   # deprecated, ignored
+    # greedy only: run methods/greedy_corrected.py (same rules, executed under
+    # the MILP's charge/break semantics) as the variant "CORR".  Off by
+    # default, so every existing greedy command is unchanged.
+    greedy_corrected: bool           = False,
+    # rule set of the corrected greedy: "bay" (variant CORR2, default) lets
+    # the truck stay at the bay to complete a break; "milp" (variant CORR)
+    # applies the MILP's sequential rule.  Ignored unless greedy_corrected.
+    greedy_rules: str                = "bay",
     # 2SP options
     twosp_time_limit: int  = 7200,
     twosp_mip_gap: float   = 0.005,
@@ -311,6 +319,13 @@ def run_algorithm(
             f"or 'ORACLE'; got '{algorithm}'"
         )
 
+    # The corrected greedy is a configuration of greedy: it always carries its
+    # variant label, so it can never be mistaken for (or displace) a baseline
+    # greedy run in the reporting dedup.
+    if greedy_corrected and alg == "GREEDY" and not variant:
+        from src.methods.greedy_corrected import VARIANTS as _GC_VARIANTS
+        variant = _GC_VARIANTS[greedy_rules]
+
     # ── Load precomputed instance ──────────────────────────────────────────────
     from src.instance_gen.instance_io import load_instance_json
 
@@ -391,6 +406,23 @@ def run_algorithm(
             oracle_tee        = oracle_tee,
             supervised        = supervised,
             prune_quantile    = prune_quantile,
+        )
+
+    elif alg == "GREEDY" and greedy_corrected:
+        from src.methods.greedy_corrected import run_greedy_corrected
+        return run_greedy_corrected(
+            full_data       = full_data,
+            D_real          = D_real,
+            E_real          = E_real,
+            cv              = cv,
+            guard_quantile  = prune_quantile,
+            safety_buffer   = safety_buffer,
+            verbose         = verbose,
+            run_id          = run_id,
+            oracle_tee      = oracle_tee,
+            supervised      = supervised,
+            prune_quantile  = prune_quantile,
+            rules           = greedy_rules,
         )
 
     elif alg == "GREEDY":
@@ -1059,6 +1091,20 @@ if __name__ == "__main__":
 
     # Greedy
     parser.add_argument("--safety",       type=float, default=0.10)
+    parser.add_argument("--greedy_corrected", action="store_true",
+                        default=False,
+                        help="Greedy only: run the corrected greedy "
+                             "(methods/greedy_corrected.py — the greedy rules "
+                             "executed under the MILP's charge/break "
+                             "semantics), labelled with the variant of its "
+                             "rule set unless --variant is given.")
+    parser.add_argument("--greedy_rules", choices=["bay", "milp"],
+                        default="bay",
+                        help="Corrected greedy rule set: 'bay' (variant CORR2, "
+                             "default) may stay at the bay to complete a break "
+                             "and takes a break at every charging stop; 'milp' "
+                             "(variant CORR) applies the MILP's sequential "
+                             "rule.")
     parser.add_argument("--queue_thresh", type=float, default=None)
     parser.add_argument("--m_man",        type=float, default=None,
                         help="Override manoeuver time h stored in JSON "
@@ -1086,6 +1132,14 @@ if __name__ == "__main__":
     json_files = _expand_instances(args.json_file)
     algorithms = _expand_algorithms(args.algorithm)
 
+    if args.greedy_corrected:
+        if any(a != "GREEDY" for a in algorithms):
+            raise SystemExit("--greedy_corrected applies to greedy only; run "
+                             "the other algorithms in a separate command.")
+        if not args.variant:
+            from src.methods.greedy_corrected import VARIANTS as _GC_VARIANTS
+            args.variant = _GC_VARIANTS[args.greedy_rules]
+
     common_kwargs = dict(
         n_scenarios      = args.n_scenarios,
         horizon_hours    = args.horizon,
@@ -1106,6 +1160,8 @@ if __name__ == "__main__":
         robu_warmstart      = args.robu_warmstart,
         safety_buffer    = args.safety,
         queue_threshold  = args.queue_thresh,
+        greedy_corrected = args.greedy_corrected,
+        greedy_rules     = args.greedy_rules,
         oracle_time_limit = args.oracle_time_limit,
         oracle_mip_gap    = args.oracle_mip_gap,
         oracle_warmstart  = args.oracle_warmstart,

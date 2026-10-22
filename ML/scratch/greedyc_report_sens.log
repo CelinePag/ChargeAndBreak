@@ -1,0 +1,48 @@
+== Figures 9-11 with the corrected greedy ==
+== Sec 8.3 sensitivity ==
+  scope     : combos RlongCfew,RlongCmany,RmediumCfew,RmediumCmany,RshortCfew,RshortCmany
+              tw none,tight  seeds 1-25 (n=25)  routes short,medium,long
+  run_cache: parsing 4500 new/changed file(s) (18850 runs + 3805 oracles on disk)
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_sens_stats_greedyC.csv
+  Figure    : figures\sensitivity\additional_sens_effects_greedyC.png|pdf
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_sensitivity_greedyC.tex
+== Sec 8.3 grid: battery capacity x charger power ==
+  scope     : combos RmediumCfew,RmediumCmany,RshortCfew,RshortCmany
+              tw none,tight  seeds 1-25 (n=25)  routes short,medium
+  cells     : 32 filled of 32
+  Figure    : figures\sensitivity\additional_grid_battery_power_greedyC.png|pdf
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_grid_stats_greedyC.csv
+== Sec 8.4 diesel ==
+  scope     : combos RlongCfew,RlongCmany,RmediumCfew,RmediumCmany,RshortCfew,RshortCmany
+              tw none,tight  seeds 1-25 (n=25)
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_stats_greedyC.csv
+  LA coverage     long: 78/100 — partial average, reported with its n
+  LA coverage     medium: 50/100 — partial average, reported with its n
+  Figure    : figures\sensitivity\additional_diesel_gap_greedyC.png|pdf
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_diesel_greedyC.tex
+  Decomposition: closes to 0.050 s worst case
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_decomp_greedyC.csv
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_diesel_decomp_greedyC.tex
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_refuel_greedyC.csv
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_diesel_refuel_greedyC.tex
+  Figure    : figures\sensitivity\additional_diesel_tw_greedyC.png|pdf
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_tw_greedyC.csv
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_diesel_tw_greedyC.tex
+== Sec 8.4 x one-at-a-time axes ==
+  CS spacing is excluded: it re-generates the corridor, so the base diesel is not the same route
+  oracle :  2100 paired instance(s) over 7 level(s)   [Base=300  150=300  700=300  1000=300  300=300  700=300  900=300]
+  LA     :  1383 paired instance(s) over 7 level(s)   [Base=228  150=196  700=202  1000=168  300=188  700=200  900=201]
+  greedy :  1829 paired instance(s) over 7 level(s)   [Base=268  150=263  700=269  1000=259  300=250  700=256  900=264]
+  Figure    : figures\sensitivity\additional_diesel_oat_greedyC.png|pdf
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_oat_greedyC.csv
+  mean coupling, share of charging inside a mandatory break (%)
+  level               Oracle              LA          Greedy
+  Base             73.2 (300)       80.5 (228)       65.2 (268)
+  150 kW           72.5 (300)       43.3 (196)       35.4 (263)
+  700 kW           85.2 (300)       86.8 (202)       78.9 (269)
+  1000 kW          85.5 (300)       92.3 (168)        8.6 (259)
+  300 kWh          65.4 (300)       71.9 (188)       66.8 (250)
+  700 kWh          86.0 (300)       79.1 (200)       50.4 (256)
+  900 kWh          95.5 (300)       77.1 (201)       44.2 (264)
+  Stats CSV : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\data_output\additional_diesel_oat_coupling_greedyC.csv
+  LaTeX     : C:\Users\celinep\Documents\GitHub\ChargeAndBreak\tex\tables\additional_diesel_oat_coupling_greedyC.tex

@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Response to Referee — TRD Round 1</title>
+<style>
+:root{
+  --ink:#1b1f23; --muted:#5b6470; --rule:#d5d9de;
+  --ref-bg:#f2f3f5; --ref-bd:#9aa3ad;
+  --resp-bg:#edf3fb; --resp-bd:#2b6cb0;
+  --chg-bg:#ecf7f0; --chg-bd:#2f855a;
+  --note-bg:#fdf2e7; --note-bd:#c05621;
+  --warn:#9b2c2c;
+}
+@page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+*{ -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing:border-box; }
+html,body{ background:#fff; }
+body{ font-family: Cambria, Georgia, "Times New Roman", serif; font-size:9.9pt; line-height:1.38; color:var(--ink); margin:0 auto; max-width:180mm; padding:0 4mm; }
+h1,h2,h3,h4{ font-family: "Segoe UI", Calibri, Arial, sans-serif; color:#14324f; line-height:1.2; }
+h1{ font-size:17pt; margin:0 0 4px; }
+h2{ font-size:12.6pt; margin:18px 0 6px; padding-bottom:3px; border-bottom:1.5px solid #14324f; page-break-after:avoid; }
+h3{ font-size:10.6pt; margin:13px 0 5px; page-break-after:avoid; }
+h4{ font-size:9.8pt; margin:9px 0 3px; page-break-after:avoid; }
+p{ margin:4px 0 6px; }
+.sub{ color:var(--muted); font-size:9.2pt; margin-bottom:8px; }
+.blk{ margin:5px 0 7px; padding:5px 9px 5px 10px; border-left:3px solid; border-radius:0 3px 3px 0; }
+.blk p{ margin:3px 0; }
+.blk ul{ margin:3px 0 3px 16px; padding:0; } .blk li{ margin:1px 0; }
+.ref{ background:var(--ref-bg); border-color:var(--ref-bd); font-size:9.2pt; color:#2e3338; }
+.resp{ background:var(--resp-bg); border-color:var(--resp-bd); }
+.chg{ background:var(--chg-bg); border-color:var(--chg-bd); }
+.note{ background:var(--note-bg); border-color:var(--note-bd); font-size:9.3pt; }
+.lab{ font-family:"Segoe UI",Calibri,Arial,sans-serif; font-weight:700; font-size:8.3pt; letter-spacing:.3px; text-transform:uppercase; margin-right:5px; }
+.ref .lab{ color:#4a525b; } .resp .lab{ color:var(--resp-bd);} .chg .lab{ color:var(--chg-bd);} .note .lab{ color:var(--note-bd);}
+table{ border-collapse:collapse; width:100%; margin:5px 0 8px; font-size:8.6pt; page-break-inside:auto; }
+th,td{ border:1px solid var(--rule); padding:3px 5px; vertical-align:top; text-align:left; }
+th{ background:#e8ecf1; font-family:"Segoe UI",Calibri,Arial,sans-serif; font-weight:600; font-size:8.2pt; }
+td.n, th.n{ text-align:right; white-space:nowrap; }
+tr{ page-break-inside:avoid; }
+.legend{ display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 8px; }
+.legend div{ flex:1 1 40%; font-size:8.8pt; padding:4px 8px; border-left:3px solid; }
+.warn{ color:var(--warn); font-weight:600; }
+.small{ font-size:8.6pt; color:var(--muted); }
+.mono{ font-family:Consolas, "Courier New", monospace; font-size:8.4pt; }
+.toc{ columns:2; column-gap:18px; font-size:9pt; margin:4px 0 6px; }
+.toc div{ break-inside:avoid; margin:1px 0; }
+.pb{ page-break-before:always; }
+.eq{ font-family: Cambria, Georgia, serif; text-align:center; margin:5px 0; font-size:10pt; }
+.tag{ display:inline-block; font-family:"Segoe UI",Calibri,Arial,sans-serif; font-size:7.8pt; padding:0 5px; border-radius:3px; color:#fff; margin-left:3px; }
+.t-done{ background:#2f855a; } .t-part{ background:#b7791f; } .t-no{ background:#9b2c2c; } .t-text{ background:#2b6cb0; }
+</style>
+</head>
+<body>
+
+<h1>Response to the referee — Transportation Research Part D, round 1</h1>
+<div class="sub"><b>Manuscript:</b> “Scheduling of driver activities for long-distance electric truck operations under uncertainty” · VSI “Electric HDV” · referee report dated 21 October 2026<br>
+<b>Status of this document:</b> working version for the authors, 21 October 2026. Blue boxes are drafted for the referee; green boxes list the manuscript changes; orange boxes are internal and must be removed before anything is sent.</div>
+
+<div class="legend">
+  <div style="background:var(--ref-bg);border-color:var(--ref-bd)"><b>Referee</b> — the comment, condensed; numbering follows the report.</div>
+  <div style="background:var(--resp-bg);border-color:var(--resp-bd)"><b>Response</b> — text addressed to the referee.</div>
+  <div style="background:var(--chg-bg);border-color:var(--chg-bd)"><b>Change</b> — what we edit, and where.</div>
+  <div style="background:var(--note-bg);border-color:var(--note-bd)"><b>Internal note</b> — what the code and the stored results actually show; risks.</div>
+</div>
+
+<p><b>Ground rule of this revision.</b> The model, the instances and the runs stay as they are. Every new number below comes from <i>post-processing the stored results</i> (base-case runs, oracle caches, instance files and derived tables); no solver call and no simulation were repeated. The scripts are <span class="mono">review/TRD_R1/review_checks.py</span> and <span class="mono">review_checks2.py</span>; their outputs are in <span class="mono">review_checks.json</span> and <span class="mono">review_checks2.json</span>.</p>
+
+<div class="toc">
+<div>0. Summary for the authors</div>
+<div>&nbsp;&nbsp;0.1 Strategy · 0.2 Problems found in our own results · 0.3 Where “no new runs” is weakest</div>
+<div>1. General reply to the summary</div>
+<div>2. Fit to TRD and to the special issue</div>
+<div>3. Major issue 1 — regulatory modelling</div>
+<div>4. Major issue 2 — uncertainty model</div>
+<div>5. Major issue 3 — policy benchmark</div>
+<div>6. Major issue 4 — managerial results</div>
+<div>7. Technical, parameter and policy facts</div>
+<div>8. Formulation remarks (1–11)</div>
+<div>9. Literature and novelty</div>
+<div>10. Presentation and formatting</div>
+<div>Part II — disposition of the priority list A1–C3</div>
+<div>Part III — draft abstract, highlights, keywords</div>
+<div>Appendix — data sheet (all numbers and their source)</div>
+</div>
+
+<!-- ===================================================================== -->
+<h2>0. Summary for the authors</h2>
+
+<h3>0.1 Strategy</h3>
+<div class="blk note"><span class="lab">Internal</span>
+<p>The referee is mostly right on facts, and three of the four “artefact” concerns can be answered with numbers we already have. The plan:</p>
+<ul>
+<li><b>Correct every claim that overreaches</b>: “full weekly provisions” → daily provisions plus the weekly budgets; “expected-value plan” → nominal plan; “stranded” → reserve breach; “roughly four times”, “within 5%”, “40%” → defined numbers; the battery–power grid → a statement about the rule-of-thumb driver only.</li>
+<li><b>Answer with ex-post evidence from stored runs</b>: violation severity for all methods; gaps on the 694 instances where all four methods are feasible, with confidence intervals and paired tests; ex-post checks of the weekly driving limits, the 60 h week, the 6 h work rule and the 144 h weekly-rest deadline; a certified interval for LA’s long-route gap; budgeted robust optimisation (ROBU) results, which exist for the 300 short instances; a first-principles power bound that matches the oracle schedules.</li>
+<li><b>Disclose what the code does and the paper does not say</b>: the Greedy has a 95%-quantile guard and a 10% battery buffer; the LA has an energy guard and a tie-break; the consumption curve is a road-load model (Earl et al., 2018), not Gao et al. (2025).</li>
+<li><b>Decline, with a justification, the requests that need new runs</b> (correlated delays, idling at the bay, grid with LA/oracle, AFIR milestones, endogenous queues), and narrow the claims they would have supported.</li>
+<li><b>Re-balance towards TRD</b>: condense Sections 4–5, add a cost conversion and energy per route from existing outputs, add the design rule.</li>
+</ul></div>
+
+<h3>0.2 Problems found in our own results while checking the report</h3>
+<p class="small">These are not all raised by the referee, but a referee who receives the code (we promise to release it) can find them. All must be fixed or disclosed before resubmission.</p>
+<table>
+<tr><th style="width:3%">#</th><th style="width:44%">Problem</th><th>Evidence (stored results)</th><th style="width:24%">Action</th></tr>
+<tr><td>1</td><td><span class="warn">Table 9 Greedy infeasibility (8.9%) pools the sensitivity, grid and diesel runs.</span> The feasibility-table builder does not drop instance variants.</td><td>Pooled: 481/5,405 = 8.9%. Base case only: 40/900 = 4.4% [3.3, 6.0]. LA’s 1.2% in the paper is base-only, so the table mixes two populations.</td><td>Filter on route class in <span class="mono">build_feasibility_latex</span>; regenerate.</td></tr>
+<tr><td>2</td><td>Table 9 window-hit rates include the no-window class, where every customer counts as a hit.</td><td>Windowed instances only: LA 86.1%, 2SP 78.5%, Greedy 61.5%, RO 21.4% (paper: 91.2 / 83.2 / 64.9 / 39.1).</td><td>Report on windowed instances.</td></tr>
+<tr><td>3</td><td>Table 8 is from an older corpus state.</td><td>Current values: LA Short–Medium 3.6 (paper 3.3), Long–Few 4.4 (3.8), Long–Many 5.3 (5.2); RO Short–Few 22.7 (22.1), Short–Many 34.3 (36.2).</td><td>Regenerate all tables from one snapshot (Appendix A.3).</td></tr>
+<tr><td>4</td><td><span class="warn">LA has 840 base runs, not 900.</span> 60 runs ended without completion (crash or wall-time); 56 are long routes.</td><td>Missing: Long–Medium 32, Long–Many 22, Long–Few 2, Medium 3, Short 1. Feasible LA runs per cell drop to 68/100 (Long–Medium) and 78/100 (Long–Many).</td><td>Finish the 60 runs (same configuration), or state n per cell.</td></tr>
+<tr><td>5</td><td>LA base runs pool two configurations.</td><td>730 runs with the committed-charge energy guard (q = 0.5), 110 without (Short 15, Medium 55, Long 40).</td><td>Disclose; or rerun the 110 for homogeneity.</td></tr>
+<tr><td>6</td><td>Policy components that are not described in the paper.</td><td>Greedy (all 900 runs): one-step guard at the 95% quantile of ξ and a 10% SOC buffer above E<sup>min</sup>; queue-avoidance rule. LA: energy guard q = 0.5 (+3.4% energy on the legs to the next charger), 5-min tie-break towards charging (2.4% of decisions), infeasible-scenario score 10<sup>9</sup>.</td><td>Describe in §5.2–5.3 (see 5.3, 5.4).</td></tr>
+<tr><td>7</td><td>Consumption curve source.</td><td>The paper cites Gao et al. (2025). The code (changed 10 Aug 2026, before the instances were generated) uses the road-load equation with Earl et al. (2018) parameters: 40 t, C<sub>d</sub> 0.50 → 1.23 kWh/km at 80 km/h.</td><td>Rewrite the ECR paragraph (see 7.1).</td></tr>
+<tr><td>8</td><td>Travel-time CV.</td><td>0.15 is the calibration target; the realised CV of ξ is 0.125 (the code itself warns to report the realised value).</td><td>Report 0.125 (see 4.1).</td></tr>
+<tr><td>9</td><td>Oracle certification is worse than the paper says.</td><td>Long: 127/300 oracles above the 0.5% tolerance (paper: “about a third”), 90th percentile 8.3%, max 10.2% (paper: “max 7%”). Medium: 9/300 (max 7.4%). Short: 0/300.</td><td>Correct; add bound-based interval (5.6).</td></tr>
+<tr><td>10</td><td>Appendix B overclaims.</td><td>39/40 exact matches; on Test_4 our optimum (1410) is lower than the published value (1425), which comes from their LS15 heuristic, and our schedule passes their own checker. The validation enabled two benchmark-only options (idle waiting; Directive 2002/15/EC constraints) that are off in the experiments.</td><td>Correct Appendix B (see 3, “Validation scope”).</td></tr>
+<tr><td>11</td><td>Fig. 9: the LA bar at 30 km spacing rests on 16 pairs.</td><td>The figure dates from 27 Aug; 392 of the 30-km LA runs finished on 2 Oct. Regenerated with them: 209 pairs, −1.4% instead of −1.8% (see <span class="mono">additional_sens_effects_greedyC</span>).</td><td>Regenerate Fig. 9.</td></tr>
+<tr><td>12</td><td>Instance geometry differs from the description.</td><td>The stored instances (generator of 10 Aug) appear to assign each segment length to the following leg. Station gaps have mean 60 km, but 48% exceed 60 km (90th percentile 86 km, max 155 km where a customer cluster lies between two stations).</td><td>Describe the realised spacing; do not claim AFIR compliance (see 6.4).</td></tr>
+<tr><td>13</td><td>LA is not reproducible run-to-run.</td><td>Scenario draws are unseeded (seed = None in every stored run). An accidental duplicate batch gave median 0.35%, max 18% difference on identical realisations.</td><td>State it with the code release; read Fig. 8 differences below ~1% as noise.</td></tr>
+<tr><td>14</td><td>Greedy and MILP treat a short charge at a break differently.</td><td>Greedy runs the break in parallel and idles at the bay when the charge is shorter than the break; the MILP forbids this (Eq. 15). Stored Greedy runs also never pay M<sup>seq</sup> before a rest. Both are rare in the base case (≈0.003 idle stops per run; M<sup>seq</sup> bias ≈0.08% of duration) and both favour Greedy.</td><td>One sentence in §5.3.</td></tr>
+<tr><td>15</td><td>Two “(?)” citations.</td><td>§1 “very simplified HoS rules (?)” and §6.2 “designed by ?”.</td><td><b>You need to supply these references.</b></td></tr>
+</table>
+
+<h3>0.3 Where “no new runs” is weakest</h3>
+<div class="blk note"><span class="lab">Internal</span>
+<ul>
+<li><b>Correlated delays (A4).</b> The referee says correlation is “needed to support the present claims”. We can only condition the claims. The code already supports AR(1) draws (<span class="mono">settings.sample_multipliers(ar1_rho=…)</span>, instance meta key <span class="mono">ar1_rho</span>); the cheapest test is LA, Greedy and oracle on ~60 instances at ρ = 0.4.</li>
+<li><b>Directive 2002/15/EC.</b> Ex post, 5–10% of feasible LA runs exceed 6 h of consecutive work under our conservative work classification, and 5.4% of long LA runs exceed 60 h in the week. The in-model constraints exist (flag <span class="mono">wtd_rules</span>) and were used for the Appendix B validation; activating them for LA and the oracle would close the point.</li>
+<li><b>Manoeuvres recorded as driving (§8 item 2).</b> Policies plan shift driving to within 20–35 min of the limit, so moving even part of M<sup>stop</sup> into driving would bind; this cannot be bounded without re-optimising. We state it as a limitation.</li>
+<li><b>Battery × power grid (A3).</b> Only Greedy was run on the crossed cells. The oracle is cheap on short and medium routes; an oracle-only grid on a subsample would replace an argument with evidence.</li>
+</ul></div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">1. General reply to the summary and main concerns</h2>
+<div class="blk ref"><span class="lab">Referee §1</span> Major revision. Strengths: research gap, MILP with non-linear charging and validated rule core, common realisations against an oracle, decomposition of the penalty. Concerns: (1) regulatory model less complete than claimed; (2) thin uncertainty model, mechanical 98% infeasibility; (3) benchmark tilted toward LA; (4) managerial results partly artefacts; (5) partial fit with TRD and formatting defects.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We thank the referee for a detailed and constructive report. We agree with most of the factual observations and have revised the manuscript accordingly. The revision follows four lines.</p>
+<p>First, we have corrected every statement that claimed more than the model contains. The regulatory scope is now described as the daily provisions of Regulation (EC) No 561/2006 together with the budgets for reduced daily rests and extended driving days; the weekly and fortnightly driving limits, the weekly working time and break rules of Directive 2002/15/EC, and the weekly-rest deadline are verified ex post on every simulated schedule, and the results are reported.</p>
+<p>Second, all modelling assumptions that drive results are now stated and justified in the text: the definition of nominal travel time and the full parameterisation of the travel-time law, the consumption model and vehicle parameters, the charging curve, the rule that a charge counts as a break only when the driver does not move the truck, and the safety components of the Greedy and look-ahead policies.</p>
+<p>Third, we have added analyses on the existing simulation outputs that answer the statistical and benchmarking concerns: violation severity for every method, gaps on the set of runs feasible for all methods with confidence intervals and paired tests, a certified interval for the long-route gaps, results of a budgeted-uncertainty robust plan, and a first-principles bound on the charging power needed to synchronise charging with breaks.</p>
+<p>Fourth, we have narrowed the managerial conclusions where the evidence came from the Greedy policy alone, and re-balanced the paper towards the questions of the special issue (Section 2 below). Where a request would require a new experimental campaign (correlated delays, stochastic queues, AFIR milestone scenarios, network-level queuing), we explain why the present results remain valid within the stated scope and list the extension as future work.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2>2. Fit to TRD and to the special issue</h2>
+<div class="blk ref"><span class="lab">Referee §2</span> Topic fits the special issue, balance does not fit TRD: ~60% of the text is a methodological benchmark (closer to TS, TR-B/C/E, EJOR). Missing: a cost metric, an environmental metric, the grid dimension, a discussion of regulatory instruments (AFIR review, guidance on charging during breaks, parking shortage). Suggestion: make the policy and infrastructure analysis the core and condense the benchmarking.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree that the balance should shift. The revised manuscript is organised around three questions relevant to the special issue: how large the electrification penalty of EU long-haul operation is with en-route infrastructure of the AFIR 2030 type; which levers reduce it (point power, station spacing, battery capacity); and how much re-planning en route protects compliance with the driving-time rules under travel-time variability. The optimisation and simulation framework is kept as the engine but shortened: the restatement of Powell’s framework (Section 4.3) and the second description of the three driver profiles are removed, and the details of the robust and two-stage plans move to an appendix.</p>
+<p><b>Cost.</b> We add a conversion of the duration penalty into driver hours and cost per route. Relative to the diesel truck on the same corridor, the hindsight-optimal electric schedule needs 2.0, 4.7 and 9.4 additional driver hours on short, medium and long routes (after crediting the diesel truck’s refuelling stops). Because driving time is identical in each EV–diesel pair, this difference is entirely time spent at stops, and it converts to cost at the driver’s hourly cost; we report the conversion as a formula with the hourly cost and the public charging price as explicit inputs, with sourced values.</p>
+<p><b>Energy and emissions.</b> Energy use per route follows from the consumption model and the realised speeds: on average 1,285, 2,534 and 4,416 kWh on short, medium and long routes (1.25 kWh/km). An important property of the model is that energy use, and hence tank-to-wheel and well-to-wheel emissions, is identical across the scheduling policies, because all policies drive the same legs at the same realised speeds; the policies differ in when and where they charge, not in how much. Emission differences between charging strategies would therefore arise only through the time- and location-dependence of the grid mix, which the model does not represent. We state this explicitly and give well-to-wheel emissions per route under an EU grid-mix factor alongside the diesel equivalent.</p>
+<p><b>Grid.</b> A single-truck model cannot give hub-level peak power, which depends on simultaneous arrivals. We now state the per-point power implied by each scenario and discuss the grid-connection implication of favouring higher point power over denser stations, without claiming an investment ranking (see 6.4).</p>
+<p><b>Regulatory instruments.</b> We add a discussion of three instruments that would change the results: the treatment of charging during breaks and rests (the enforcement guidance reported in 2026, and the consequence of allowing the truck to remain at the bay), overnight charging at safe and secure parking areas under AFIR, and the shortage of truck parking.</p>
+</div>
+<div class="blk chg"><span class="lab">Change</span> Restructure the introduction around the three questions; shorten §4.3 and §5 introduction; move RO and 2SP formulations to an appendix; add a short subsection “Cost, energy and emissions per route” to §8; add a paragraph on regulatory instruments to §9.</div>
+<div class="blk note"><span class="lab">Internal</span> Hours: oracle EV−diesel, pooled Tight+None, after post-hoc diesel refuelling credit (<span class="mono">data_output/additional_diesel_decomp.csv</span>). Energy per route: sums of <span class="mono">E_real</span> over the 900 instances. Example only, to be replaced by a sourced driver cost: at €30–40 per hour the penalty is about €60–80, €140–190 and €280–370 per route. A public price exists in the search results (Milence standard tariff €0.399/kWh excl. VAT + €1.99 per session) but I did not read the page; verify before citing. The grid-mix factor and the diesel WTW factor still need sources.</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">3. Major issue 1 — Regulatory modelling</h2>
+<div class="blk ref"><span class="lab">Referee §3</span> The daily core of 561/2006 is modelled well, but “full weekly provisions” is incorrect. Missing: split daily rest (3 h + 9 h), weekly driving 56 h / 90 h, Directive 2002/15/EC weekly working time (60 h) and 6-hour work rule, night work, weekly rest within six 24-h periods. Two of these bind harder for EVs.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree that the claim of “full weekly provisions” was incorrect, and we have replaced it throughout. The model enforces the daily provisions of the Regulation (accumulated driving period and breaks, including the 15 + 30 min split; daily driving time including the two 10-hour extensions; daily rest including the three reductions, enforced through the 13 h / 15 h spread), together with the budgets for reduced rests and extended driving days. For each of the remaining rules we now state how it is treated, and we have checked every simulated schedule ex post against the rules that are not enforced in the model. The table below summarises the result.</p>
+</div>
+
+<table>
+<tr><th style="width:23%">Rule</th><th style="width:14%">Treatment</th><th>Ex-post evidence on the stored schedules / justification</th></tr>
+<tr><td>Split daily rest 3 h + 9 h</td><td>Not modelled</td><td>An optional flexibility; omitting it restricts the feasible set equally for the electric and the diesel truck, so reported durations are upper bounds for both. The benchmark model of Garaix et al. (2024) contains it; on its 40 instances our optimum equals theirs on 39 and is lower on the 40th, so the option never improved an optimum there.</td></tr>
+<tr><td>Weekly driving ≤ 56 h; ≤ 90 h over two weeks</td><td>Satisfied by construction</td><td>Instances are generated with nominal driving ≤ 56 h (at most 50.4 h of nominal driving). Over all simulated runs, realised driving never exceeds 51.3 h. The two-week limit then holds whenever the preceding week contains at most 38.7 h of driving; we state the assumption that the route starts after a weekly rest.</td></tr>
+<tr><td>Weekly working time ≤ 60 h (Directive)</td><td>Not in the model; checked ex post</td><td>Never exceeded on short and medium routes. On long routes it is exceeded in 5.4% of feasible LA runs (13/239), 4.2% of Greedy, 13% of RO and 35% of 2SP runs; for LA the mean excess is 2.4 h. The check classifies every minute of queuing, manoeuvring and non-credited charging as work, which is conservative.</td></tr>
+<tr><td>6 h of work without a break; 30/45 min of breaks</td><td>Implemented as an option; off in the experiments; checked ex post</td><td>The constraints are part of our MILP and were active in the Appendix B validation. Ex post, feasible LA schedules comply in 90.3%, 95.5% and 95.4% of runs (short, medium, long), Greedy 89.8–92.7%, RO 98.7–99.0%, 2SP 72.0–81.6%. Almost all breaches are of the 6 h type; for LA the 90th percentile of the longest work stretch is 5.6–5.9 h and the maximum 7.9 h.</td></tr>
+<tr><td>10 h of work per 24 h with night work</td><td>Not modelled</td><td>As in the “no-night” configuration of Garaix et al. (2024) used for validation. A limitation for both vehicles.</td></tr>
+<tr><td>Weekly rest within six 24-h periods (144 h)</td><td>Not in the model; checked ex post</td><td>Oracle schedules last at most 125.6 h and Greedy at most 139.8 h. One feasible LA run (of 239 long routes) exceeds 144 h (151.7 h), 8 of 225 for 2SP and 134 of 300 for RO. Those schedules would need an additional weekly rest of at least 24 h; their reported durations are therefore lower bounds, which strengthens rather than weakens the comparison.</td></tr>
+</table>
+
+<div class="blk resp"><span class="lab">Response (cont.)</span>
+<p>We agree with the referee that the two rules of the Directive bind harder for an electric truck, because queuing, manoeuvring and charging not covered by a break add working time without adding driving time. The ex-post results above quantify this, and the revised discussion states it as a limitation of the present study and an item for future work: enforcing the Directive’s rules in the planning model is possible with the constraints we already use for the validation, at an additional computational cost.</p>
+<p>We also note that the classification of non-credited charging as working time is conservative. Under Directive 2002/15/EC, periods of availability whose foreseeable duration is known in advance are not working time; a charging period during which the driver is not required to supervise the vehicle may fall under this definition, which would reduce the share of non-compliant schedules. We keep the conservative classification and mention the alternative.</p>
+</div>
+
+<h4>Internal inconsistency of the claim</h4>
+<div class="blk resp"><span class="lab">Response</span> Corrected: the introduction, Section 2.5, the conclusion and Appendix B now use the same wording, “the daily provisions of Regulation (EC) No 561/2006 and the budgets for reduced daily rests and extended driving days”, followed by the list of rules verified ex post.</div>
+
+<h4>Validation scope</h4>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The no-night configuration of Garaix et al. (2024) contains the daily provisions of the Regulation, the reduced-rest and extension budgets, and the break rules of Directive 2002/15/EC (no more than 6 h of work without a break; 30 or 45 min of cumulated breaks for shifts of 6–9 h or more than 9 h). It also allows the 3 h + 9 h split daily rest and idle waiting before a time window. To reproduce it, our MILP was run with the Directive constraints and an idle-waiting variable enabled; both are options of our model that are disabled in the main experiments. We obtain the published objective on 39 of the 40 instances. On the remaining instance our value is 15 minutes lower (1410 vs 1425); the published value for the no-night configuration comes from their 15-minute label-setting algorithm, and their own feasibility checker accepts our schedule. We have corrected Appendix B accordingly and describe which rules the validation exercises. As the referee notes, the match therefore does not show that the Directive’s 6-hour rule never binds; the ex-post results above show that it does bind for electric trucks in a minority of runs.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Source: memory note on R15-PGLT (39/40 exact; Test_4 mechanism verified 2026-08-05; table <span class="mono">solutions/pglt_comparison.csv</span>). The paper currently says “exactly on all instances” — this must change.</div>
+
+<h4>Initial state and calendar</h4>
+<div class="blk resp"><span class="lab">Response</span>
+<p>Every route starts at t<sub>0</sub> = 08:00 with a full battery (E<sup>0</sup> = 500 kWh, representing depot charging) and all counters at zero, which assumes that the driver starts right after a weekly rest; both values are now in Table 5. We agree that the extension budget refers to the fixed calendar week. Under the stated assumption that the route starts on a Monday morning, every oracle, Greedy and LA schedule ends within the same fixed week (the longest LA schedule ends 151.7 h after departure, i.e. before Sunday 24:00), so the per-route budgets coincide with the per-week budgets. We state the assumption explicitly and note that a departure later in the week would split the budgets across two weeks.</p>
+</div>
+
+<h4>Can charging legally count as a break?</h4>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We thank the referee for the reference. Our model follows exactly the interpretation reported there, and we now say so and cite the Regulation (Art. 4(d)) and the reported enforcement guidance. Charging is credited as a break only when (i) a break is declared at the same stop, (ii) the charge lasts at least the declared break, and (iii) the truck is not moved during the break. When the charge is shorter than the break, the truck is first moved off the charging bay (repositioning time M<sup>seq</sup>), the charge is counted as work, and the full break starts afterwards. Charging combined with a daily rest is always treated in this sequential way, so a charge is never credited as rest.</p>
+<p>The alternative identified by the referee, in which the driver stays at the bay after the charge ends until the break is complete, is legal but excluded by assumption. We justify the exclusion by the use of the charging point: a truck idling at a high-power bay blocks it for other users, which is inconsistent with the waiting times we assume at shared stations. We have quantified what the exclusion costs (details in 6.2): in the hindsight-optimal schedules, a charge combined with a break is never executed in sequential mode, at any charger power; the optimiser instead lengthens the charge to cover the break, or uses the 15 + 30 min split so that each part is covered. If charging during daily rests were also credited, the oracle routes would be at most 1.2% shorter at 350 kW and 0.2% shorter at 700 or 1,000 kW.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Oracle stop counts per run (base / 700 / 1,000 kW): sequential charge+break 0 / 0 / 0; split-break parts used with a charge 0.30 / 4.99 / 5.21; standalone breaks 0.00 / 0.04 / 0.15. Bound on crediting charge during rest: Σ(τ<sup>c</sup> + M<sup>seq</sup>) at charge+rest stops / route duration. I found no source for operator idle fees; do not cite one unless found.</div>
+
+<h4>Terminology</h4>
+<div class="blk resp"><span class="lab">Response</span> Corrected: “accumulated driving period” replaces “continuous driving”; “EU driving-time and rest-period rules” replaces “Hours-of-Service” except when referring to the US rules; the Regulation is cited as amended by Regulations (EU) 2020/1054 and 2024/1258.</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">4. Major issue 2 — The uncertainty model and the expected-value result</h2>
+
+<h3>4.1 The distribution is not defined</h3>
+<div class="blk ref"><span class="lab">Referee 4.1</span> Mean/median of Y, whether the CV applies to Y or ξ, and the meaning of the nominal time D<sub>i</sub> are not stated; plot per-leg and per-route distributions; say what real data they mimic.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We now specify the law completely. The multiplier is ξ<sub>i</sub> = min(ξ<sub>low</sub> + η<sub>i</sub>, ξ<sub>high</sub>) with ξ<sub>low</sub> = 80/90 ≈ 0.889 (speed limiter), ξ<sub>high</sub> = 80/50 = 1.6 (leg-average speed of 50 km/h) and η<sub>i</sub> lognormal with log-scale parameters μ = −2.68 and σ = 1.02, independent across legs. The parameters are calibrated so that E[ξ] = 1 exactly after the cap; the nominal time D<sub>i</sub> is therefore the <i>mean</i> travel time. The value 0.15 is the coefficient of variation used to set σ before the cap; the realised coefficient of variation of ξ is 0.125, which is the value we now report. The median of ξ is 0.957, so 68% of legs are faster than nominal and the remainder form a right tail (5th and 95th percentiles 0.90 and 1.25; 1.1% of legs at the cap). Of the two readings proposed by the referee, the second describes the shape correctly, with the mean fixed at the nominal value.</p>
+<p>The realised coefficient of variation lies within the range reported for day-to-day travel-time variability on motorways (about 0.08–0.17; Van Lint and Van Zuylen, 2005; Tu et al., 2007). We add a figure with the per-leg density and the distribution of a 4.5-hour driving period.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Values from <span class="mono">settings.lognormal_params</span> and 2·10<sup>6</sup> draws of <span class="mono">sample_multipliers</span>. The two references are the ones quoted in <span class="mono">settings.py</span>; check them before citing. The figure can be drawn from the law alone (no runs).</div>
+
+<h3>4.2 Independent multipliers on short legs average out</h3>
+<div class="blk ref"><span class="lab">Referee 4.2</span> With ~18 independent legs per 4.5-h period the period CV is ~3.5% (±9 min). Real congestion is correlated; the variance depends on the arbitrary node density; the ranking and the 1.2% may change under correlation.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The referee’s calculation is correct for our setting. Legs between consecutive candidate stops last 16 minutes on average, so a 4.5-hour driving period contains about 17 legs and its duration has a coefficient of variation of 3.0% (about ±8 min) under independence. With a first-order autoregressive dependence of ρ = 0.4 between consecutive legs it would be about 4.6%. We now report these figures and state that the leg is defined by the spacing of stopping opportunities (≤ 25 km), which is also the scale at which the driver can react; the per-leg law is calibrated at that scale.</p>
+<p>We agree that spatially and temporally correlated delays are the most important omission of the uncertainty model, and we no longer present it only as future work: the revised results section states that all reliability and gap figures are conditional on independent leg-level variability of the stated size. Two properties of the methods are independent of this assumption and are stated: the robust plan is feasible for every realisation in the support, whatever the dependence between legs, because the support is a product of per-leg intervals; and correlation increases the variance of driving periods and of energy between chargers, which affects most the plans that fix their structure before departure (the nominal plan and 2SP). We do not claim that the ranking or the 1.2% failure rate of LA would be unchanged under correlated delays; testing this requires a new set of realisations and is listed as the first extension.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> This is the weakest answer in the response (see 0.3). The AR(1) driver already exists in the code.</div>
+
+<h3>4.3 Energy uncertainty is tied mechanically to speed</h3>
+<div class="blk ref"><span class="lab">Referee 4.3</span> Energy depends only on leg-average speed; congested legs use less energy; payload, gradient, temperature, HVAC, wind and stop-and-go are absent. Pelletier et al. (2019) model energy uncertainty separately.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree and now state this as a deliberate scope choice. The study isolates the effect of travel-time variability on the synchronisation of charging with breaks; energy varies only through the realised speed, which couples the two risks in opposite directions (slow legs threaten the driving limits, fast legs threaten the state of charge). This coupling is why the robust plan protects time and energy with opposite corners of the support.</p>
+<p>Two of the factors listed by the referee are known before departure rather than random: the payload profile, which follows the delivery plan, and the route gradient. They would change the nominal consumption per leg rather than add within-route randomness. Our consumption curve is evaluated at 40 t gross mass throughout, which is the upper envelope for payload: unloading at customers can only reduce consumption. Temperature, auxiliary loads and wind are genuine sources of randomness that we do not model; we cite Pelletier et al. (2019) for a treatment of energy uncertainty and give the range of consumption at 80 km/h implied by the aerodynamic parameter (1.09–1.32 kWh/km for C<sub>d</sub> between 0.36 and 0.60) as an indication of sensitivity. Our base value, 1.23 kWh/km at 80 km/h, is above the 1.03 kWh/km average reported for the eActros 600 European tour at 40 t, so the assumed consumption is on the conservative side.</p>
+</div>
+
+<h3>4.4 The expected-value plan is biased in energy</h3>
+<div class="blk ref"><span class="lab">Referee 4.4</span> If E[ξ] = 1, by Jensen expected speed exceeds nominal and expected energy exceeds energy at nominal speed; the plan underestimates expected energy, which can explain the SOC violations.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The referee is right. With our law, the expected leg energy exceeds the energy at nominal speed by 1.4%, and the energy of a leg exceeds its nominal value with probability 0.68 (because 68% of legs are faster than nominal). The plan is built with mean travel times, not mean energies; we have renamed it the <i>nominal plan</i> and state the bias explicitly.</p>
+<p>The bias explains part, not all, of the energy failures. Over a stretch between two charges of 250–400 kWh, 1.4% amounts to 3.5–5.6 kWh, whereas the median energy shortfall of the nominal plan is 8.7 kWh. The remainder comes from the variance: a plan that charges exactly enough to reach the next station with the reserve intact fails with probability close to one half at each such station even when its energy estimate is unbiased, and a route contains many such stations. The result is therefore what the referee calls mechanical, and we now present it as such (see 4.5).</p>
+<p>We note that the look-ahead policy does not use energy at mean travel time for its committed charge: the charge decided at a stop covers the legs to the next station at the median of consumption, 3.4% above the nominal energy, which more than offsets the Jensen bias. This rule is now described in Section 5.2.</p>
+</div>
+
+<h3>4.5 “Stranded” overstates what happens</h3>
+<div class="blk ref"><span class="lab">Referee 4.5</span> Infeasibility means SOC below the 20% reserve, not an empty battery; most shortfalls are small; any tight optimum fails with probability near one. Report material violations and a reserve/time-buffer frontier; qualify the abstract.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree and have replaced “stranded” by “reserve breach” throughout: a run is counted as failed when the state of charge falls below the 100 kWh reserve. We now report violation severity for every method (table below), with a threshold for a material violation of more than 5 kWh into the reserve or more than 15 minutes beyond a driving or spread limit, as suggested. We also relate the driving-time violations to the categories of Commission Regulation (EU) 2016/403: all violations of LA and 2SP lie below the thresholds of the “serious” category (a serious infringement starts at 5 h of uninterrupted driving and at 10 h of daily driving where 9 h applies).</p>
+</div>
+<table>
+<tr><th>Method (runs)</th><th class="n">Failed</th><th>Reserve breaches: depth</th><th>Driving-time and spread breaches</th><th class="n">Material</th></tr>
+<tr><td>Nominal plan, raw</td><td class="n">98%</td><td>median 8.7 kWh; 72% &gt; 5 kWh; 6% &gt; 20 kWh</td><td>median 4.8 min; 11% &gt; 15 min</td><td class="n">≈ 2/3 of runs</td></tr>
+<tr><td>Nominal plan, safeguarded</td><td class="n">20%</td><td>median 1.9 kWh; 9% &gt; 5 kWh</td><td>median 10 min</td><td class="n">small</td></tr>
+<tr><td>2SP (897)</td><td class="n">13.7%</td><td>121 runs; median 1.8 kWh, 90th pct 4.8 kWh; 10 runs &gt; 5 kWh</td><td>2 runs, &lt; 1 min</td><td class="n">1.1%</td></tr>
+<tr><td>Greedy (900)</td><td class="n">4.4%</td><td>none</td><td>11 daily-driving (median 1.9 min), 6 pre-rest spread (1.3 min), 23 terminal spread (median 32 min)</td><td class="n">2.1%</td></tr>
+<tr><td>LA (840)</td><td class="n">1.2%</td><td>3 runs, all &lt; 1.5 kWh</td><td>3 runs, ≤ 4.2 min; 4 runs stopped because no candidate action was feasible in the sampled scenarios</td><td class="n">0%</td></tr>
+<tr><td>RO (900)</td><td class="n">0%</td><td>—</td><td>—</td><td class="n">0%</td></tr>
+</table>
+<div class="blk resp"><span class="lab">Response (cont.)</span>
+<p>A full buffer-versus-duration frontier would require re-running the nominal plan for a range of buffers, which we have not done. The results contain four points of that trade-off, which we now present together: the nominal plan (98% failed, 0.2% above the hindsight benchmark on the runs that finish), the safeguarded nominal plan (20%, 5.4%), the Greedy rule with its 95%-quantile guard and 10% battery buffer (4.4%, about 7%), and the look-ahead (1.2%, 3.5%). The abstract sentence now reads: “A schedule optimised for nominal travel times breaches a constraint in almost every run, mostly by small margins inside the battery reserve, so plans need explicit buffers or re-planning.”</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Nominal-plan severity uses all stored DET runs (1,220 raw and 651 safeguarded files, including repeated batches), so the figures are distributions, not the deduplicated 600 of Table 10. Base-case figures are deduplicated. The 2016/403 Annex I thresholds were read on legislation.gov.uk (UK-retained copy): SI from 5 h uninterrupted driving; SI from 10 h daily driving (9 h limit) or 11 h (10 h limit); daily rest SI below 10 h of a required 11 h. Some Greedy terminal-spread overruns (q90 = 97 min) would reach the SI band — the sentence in the response only covers LA and 2SP.</div>
+
+<h3>4.6 The most important uncertainty is held fixed</h3>
+<div class="blk ref"><span class="lab">Referee 4.6</span> Queue times are drawn once and known before departure, yet queuing and manoeuvring are 40% of the penalty; charger availability is the uncertainty most specific to e-trucks (Keskin et al., 2021).</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree that stochastic, time-dependent queues are the natural next source of uncertainty, and we now say so in the introduction as well as in the conclusion. In the present model the queue time Q<sub>i</sub> is the expected waiting time at station i, known to all methods; it can be read as the access delay at a hub with reservation or with predictable occupancy. Because every method faces the same expected waits, the queue component of the penalty is unbiased to first order for policies that do not react to queues. The reliability results are, however, optimistic with respect to queue variability, since no policy is surprised by a long wait; we state this. We also correct the share attributed to queuing and manoeuvring (see 6.6): it is 29% of the penalty in the hindsight-optimal schedules and 38% under LA, rather than 40% in general.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">5. Major issue 3 — The policy benchmark</h2>
+
+<h3>5.1 The robust plan is a straw man</h3>
+<div class="blk ref"><span class="lab">Referee 5.1</span> Box RO sets every leg to the slowest time and, for energy, every leg to the fastest speed; no physical realisation; use budgeted uncertainty (Bertsimas and Sim). RO commits durations, arrives early and misses windows; a plan that waits would hit nearly every window.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The box plan represents the driver who wants a complete schedule that is guaranteed for every realisation in the support. Time constraints are increasing in travel time and energy constraints are increasing in speed, so applying the slow corner to the former and the fast corner to the latter is the exact constraint-wise robust counterpart of the support; the referee is right that no single realisation attains both corners, which is why the plan is conservative by design.</p>
+<p>We did implement the budgeted alternative and should have reported it. In the budgeted robust plan, at most Γ legs deviate to the slow corner and at most Γ to the fast corner, with Γ = ⌈1 + z<sub>0.99</sub>√N⌉ (16–20 legs on short routes), solved by column-and-constraint generation and executed like the box plan. We ran it on the 300 short instances; on longer routes the cutting-plane loop does not converge within the time budget. On the 292 short instances where it, the box plan and LA are all feasible, its gap to the hindsight benchmark is 20.6%, against 27.9% for the box plan and 3.0% for LA; it fails in 1% of runs and hits 57.5% of windows. A budgeted set therefore removes about a quarter of the loss of the box plan; most of the remaining loss comes from the absence of recourse, since both plans fix all activities and durations before departure. We add these results to Section 7.</p>
+<p>On time windows, the stored results do not support the early-arrival explanation. Over windowed instances, the robust plan misses 3,139 windows late and 26 early, with a median lateness of 9.1 h. Its worst-case schedule contains more daily rests than the nominal schedule around which the windows are centred, so it reaches customers late even though the realised legs are faster than planned. Holding departures to the planned times would make it later still.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> ROBU: <span class="mono">src/methods/RObudget.py</span>; 300 short runs in <span class="mono">solutions/basecase</span>; outcomes 293 feasible, 3 infeasible, 4 unsolved (C&amp;CG not converged); ε = 0.01. Only short-route runs are stored; the non-convergence on medium routes comes from earlier, deleted runs (memory notes) — check you are comfortable stating it.</div>
+
+<h3>5.2 2SP mixes a method with a solver failure</h3>
+<div class="blk ref"><span class="lab">Referee 5.2</span> On long routes 56% of 2SP solves stop at the time limit with a 12.1% gap; the repair is invoked on nearly every run; durations are re-optimised with nominal times. Compare at equal compute, use decomposition, or present 2SP as a heuristic.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree and now present 2SP as a heuristic policy derived from a sample-average two-stage model. The facts are stronger than stated in the report: the first-stage solve reaches the 2-hour limit on 0% of short, 65% of medium and 100% of long routes (the 56% in Table 9 was the average over all routes), with a mean final gap of 12.1% on the time-limited solves; the add-only repair is invoked in 94%, 99% and 100% of runs (1.4, 2.8 and 5.2 repairs per run). Re-optimising the durations at each stop with the realised state and expected future travel times is the standard way of executing a fixed first stage as a policy, but the executed policy is not the model that was solved, and we say so.</p>
+<p>A fair reading is therefore by route class. On short routes, where every first-stage solve is optimal, 2SP and LA are statistically indistinguishable (paired difference +0.07 percentage points, p = 0.53, n = 278). On medium routes, where both methods use about two hours of computation per route (median 2.0 h for 2SP, 1.9 h for LA), LA is better on average (−1.8 points) but not in median (p = 0.24). On long routes LA is better by 6.4 points (p &lt; 10<sup>−18</sup>), but it also uses more computation (3.9 h against 2.0 h), so this comparison is not at equal budget. Decomposition methods such as progressive hedging could improve the first stage and are mentioned as an extension.</p>
+</div>
+
+<h3>5.3 The greedy rule has no safety margin</h3>
+<div class="blk ref"><span class="lab">Referee 5.3</span> Greedy stops only when forced and charges to 100%; drivers keep buffers and charge to ~80%. Use a Greedy with a 10% energy buffer and a 15-min driving-time buffer; “representative of current practice” needs a source.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>Our description was incomplete, and we apologise for that. The Greedy rule evaluated in the paper already contains the two buffers the referee proposes. Its one-step checks evaluate the next leg at the 95% quantile of the travel-time multiplier for the driving and spread limits (ξ = 1.25, i.e. 25% above the nominal leg time, about 4 min on an average leg) and at the 5% quantile for energy, and it keeps a buffer of 10% of the usable capacity (40 kWh) above the reserve. It also skips a discretionary charge at stations whose expected waiting time exceeds 80% of the longest expected wait on the route. All these elements are now described in Section 5.3 and Algorithm 1.</p>
+<p>The rule charges to 100% when it stops. We keep this choice because the rule represents a driver without planning tools who cannot predict where the next suitable station will be; charging to 80% is common guidance for speed and battery health, but it would make an unplanned driver stop more often. We replace “representative of current practice” by “a rule-of-thumb baseline for a driver without planning tools”.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> All 900 stored Greedy runs: <span class="mono">guard_quantile = 0.95, safety_buffer = 0.1, prune_quantile = 0.95</span>. The buffer is applied to the next leg only (per-leg quantile), not a fixed 15-minute driving buffer. Also mention the inconsistency in 0.2 #14 (Greedy may idle at the bay when the charge is shorter than the break).</div>
+
+<h3>5.4 The look-ahead has no terminal value</h3>
+<div class="blk ref"><span class="lab">Referee 5.4</span> Scoring by mean arrival at the horizon end favours reaching h with less energy or exhausted counters (end-of-horizon bias); add terminal cost or constraints. Durations come from a nominal MILP. The tie-break toward charging is a hidden safety heuristic; report its effect.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The look-ahead has no explicit terminal value, and we now say so. Three features limit the end-of-horizon bias, and we describe them. First, the horizon is not a fixed number of stops: starting from the current counters, the rule advances along the route for 24 hours of nominal time, deducting a 45-minute break after each 4.5 hours of driving and an 11-hour rest after each 9 hours, and extends the window past any customer at its end. The window therefore always contains the next daily rest, which resets the driving counters; the state at the horizon end is a post-rest state. Second, the state of charge at the horizon end must respect the reserve in every scenario. Third, doubling the horizon to 48 hours, which contains two daily cycles, reduces the gap by only 0.2 points (Fig. 8), which indicates that the truncation costs little.</p>
+<p>The score of an action is now written as an equation. For a candidate action a at stop i and scenarios k = 1,…,S,</p>
+<div class="eq">f(a) = (1/S) Σ<sub>k</sub> φ<sub>k</sub>(a),  with φ<sub>k</sub>(a) = t<sup>a,(k)</sup><sub>h</sub> + Σ<sub>j∈C∩[i,h]</sub> β<sub>j</sub> δ<sup>(k)</sup><sub>j</sub> if the look-ahead MILP is feasible, and φ<sub>k</sub>(a) = P = 10<sup>9</sup> h otherwise.</div>
+<p>Because P dominates any arrival time, the rule first minimises the number of scenarios in which the action leads to an infeasible horizon problem and then the mean penalised arrival time. This sample-based feasibility criterion, rather than a terminal value, is what makes the policy reliable.</p>
+<p>Two further rules were not described in the paper and are now stated with their size. The committed charge at a stop is sized so that the legs up to the next charging station are covered at the median of consumption, 3.4% above the nominal energy (see 4.4). When a charging action scores within 5 minutes of the best non-charging action with the same break or rest, the charging action is chosen; this tie-break fires at 2.4% of decisions.</p>
+<p>Of the 10 failed LA runs, 4 are runs in which no candidate action was feasible in the sampled scenarios and the simulation stopped; 3 are reserve breaches below 1.5 kWh and 3 are driving-time overruns of at most 4.2 minutes. We agree that the nominal re-solve of the durations leaves these small overruns unprotected.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Tie-break frequency counted on 400 LA logs (1,128 of 47,368 decisions). The energy guard was applied in 730 of the 840 base runs (0.2 #5); either disclose (“in 87% of runs”) or rerun the 110. We cannot report the separate effect of the tie-break without runs; the response reports frequency only.</div>
+
+<h3>5.5 Gaps are computed on feasible runs only</h3>
+<div class="blk ref"><span class="lab">Referee 5.5</span> Methods with many failures are evaluated on an easier subset; report gaps on the intersection of runs feasible for all methods, or charge a recourse cost.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We now report gaps on the 694 instances where all four methods complete a feasible run, next to the gaps over each method’s feasible runs (Appendix A.3). The ranking is unchanged. On the common set, the mean gap of LA is 3.50% (95% confidence interval 3.19–3.81%). The paired differences, tested with the Wilcoxon signed-rank test, are: LA minus Greedy −4.0 points (LA better on 96% of instances, p &lt; 10<sup>−90</sup>); LA minus 2SP −2.2 points overall (p &lt; 10<sup>−8</sup>), of which +0.1 on short routes (not significant), −1.8 on medium routes (not significant in median, p = 0.24) and −6.4 on long routes; LA minus RO −28.2 points. The cell means move by less than 1.5 points for 2SP and by less than 0.3 points for LA.</p>
+</div>
+
+<h3>5.6 The oracle is not optimal where it matters most</h3>
+<div class="blk ref"><span class="lab">Referee 5.6</span> About a third of long-route oracle solves stall (gaps up to 7%); long-route gaps are distances to an incumbent; Figure 8’s axis label is inaccurate.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We correct the figures: 127 of the 300 long-route oracle solves (42%) end above the 0.5% tolerance, with a 90th percentile of 8.3% and a maximum of 10.2%; on medium routes 9 of 300 do (maximum 7.4%); all short-route solves are certified. Our analysis of the solver logs shows that the remaining gap is on the dual bound rather than on the incumbent: in repeated solves with a 12-hour limit the incumbent did not change, while the bound stayed at the same level. The stall has a structural cause: the optimal schedules of these instances need one more daily rest than the driving time alone implies, because charging, breaks and queues must be packed into the 13 h / 15 h spread, and the linear relaxation cannot prove that rest.</p>
+<p>We now report, for each route class, an interval for the gap of LA: its gap to the oracle incumbent (a lower bound on the true gap when the incumbent is not optimal) and its gap to the oracle’s proven bound (an upper bound). The intervals are 2.97–3.51% (short), 3.32–4.00% (medium) and 4.52–8.40% (long). The axis of Figure 8 now reads “Gap to best hindsight solution (%)”, and the caption gives the certification status.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> The 12-hour statement rests on the oracle bound-trace study (memory notes “oracle bound traces” and “dual gap structural”: the 900 s incumbent equals the 12 h one to 4 decimals on the instance examined). Check that this was done on more than one instance before writing “in repeated solves”; if only one, say “on the instances we re-solved with a 12-hour limit”.</div>
+
+<h3>5.7 Statistics are missing</h3>
+<div class="blk ref"><span class="lab">Referee 5.7</span> Number of realisations per instance unclear; confidence intervals and paired tests needed; Figure 8 rests on 32 instances per configuration.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>Each instance has exactly one travel-time realisation, drawn once and stored with the instance; all methods and the oracle use the same realisation (common random numbers, verified on every stored run). Each Route × Customers × Window cell therefore contains 25 independent instance–realisation pairs, and each row of Table 8 100. The caption of Table 8 is corrected. We now give Wilson intervals for every failure rate (LA 1.2% [0.6, 2.2]; Greedy 4.4% [3.3, 6.0]; 2SP 13.7% [11.6, 16.1]; RO 0% [0, 0.4]), confidence intervals for mean gaps, and paired Wilcoxon tests (5.2, 5.5). For Figure 8 we give the number of instances per configuration and state that the look-ahead samples its internal scenarios without a fixed seed, so that repeated runs on the same realisation differ (median 0.35%); differences between configurations below about one point should not be interpreted.</p>
+</div>
+
+<h3>5.8 Time windows favour the nominal plan</h3>
+<div class="blk ref"><span class="lab">Referee 5.8</span> Windows are centred on the nominal optimum, so they favour policies that track it; the fixed 30-min penalty gives no incentive to limit lateness; report lateness.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The construction reflects a practice in which delivery slots are booked from the planned schedule before departure; we now state this interpretation, and that exogenous windows are an alternative. The construction does not favour the look-ahead specifically: LA re-optimises at every stop and does not follow the nominal plan, yet it has the highest window hit rate (86.1% of windowed customers), followed by 2SP (78.5%), Greedy (61.5%) and RO (21.4%). These rates are now computed over windowed instances only; the values in the submitted Table 9 included the no-window class.</p>
+<p>We agree that the fixed penalty does not discourage large deviations once a window is missed, and we now report the size of the misses. LA’s late misses have a median of 43 minutes; its early misses are larger (median 6.9 hours) and correspond to reordering a daily rest relative to a customer, which saves more than the 30-minute penalty. Greedy shows the same pattern (median lateness 42 minutes, early misses 5.6 hours). We state this as a limitation of the penalty and give the duration-only gaps (penalties excluded), which do not depend on the window construction.</p>
+</div>
+
+<h3>5.9 Minor points</h3>
+<div class="blk ref"><span class="lab">Referee 5.9</span> RO as a CFA is debatable. LA decision times (43–91 s) should be compared with the time between candidate stops (~19 min), not between charging stations.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>In Powell’s taxonomy a cost function approximation is a deterministic optimisation model whose parameters are modified to produce robust decisions, for instance by inflating travel times; these parameters are usually tuned. The robust plan is such a model with the travel-time buffer set at the support bound rather than tuned; we now describe it as an untuned CFA and note that the safeguarded nominal plan and the budgeted plan are other settings of the same idea.</p>
+<p>We correct the timing comparison. Candidate stops are 16 minutes apart on average. The mean LA decision takes 43, 82 and 92 s on short, medium and long routes; the longest decision in a run has a median of 3–6 minutes and in the worst runs reaches 29 minutes. Because the state on arrival differs from the state at departure only by the realised time and energy of one leg, the decision can be prepared during the leg; we state this, and that the slowest decisions would require more computing power or a time limit per decision.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">6. Major issue 4 — Managerial results</h2>
+
+<h3>6.1 A first-principles check supports the power result</h3>
+<div class="blk ref"><span class="lab">Referee 6.1</span> At 80 km/h a driving period covers 360 km; replacing its energy within 45 minutes needs 480–670 kW for 1.0–1.4 kWh/km. Report kWh/km, mass and T<sub>2</sub>; add the bound to Section 8.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We thank the referee for this check and have added it to Section 8 as a design rule, with our parameters. The truck is a 40-t tractor–semitrailer consuming 1.23 kWh/km at 80 km/h. A 4.5-hour driving period therefore needs 443 kWh, more than the 400 kWh usable between the reserve and full charge: the base truck cannot drive a full period on one charge even when starting full, and refilling one period within a 45-minute break requires about 590 kW at the battery, before taper. At 350 kW a 45-minute break delivers 262 kWh, leaving about 181 kWh, or 31 minutes of charging at full power, that cannot be hidden in the break. The hindsight-optimal schedules confirm this order of magnitude: they contain on average 29, 37 and 46 minutes of charging outside breaks per driving period on short, medium and long routes. The threshold of about 590 kW lies between the 350 kW and 700 kW cases, which explains why the penalty falls below 5% at 700 kW. The charging time from 80% to 100% (T<sub>2</sub> − T<sub>1</sub>) is 30 minutes for the base truck.</p>
+</div>
+
+<h3>6.2 The megawatt result is partly an artefact of the parallel-mode rule</h3>
+<div class="blk ref"><span class="lab">Referee 6.2</span> More power cannot lengthen a stop, yet Greedy is worse at 1,000 kW than at 700 kW (Fig. 10, Fig. 11). Cause: Eq. (15) forces sequential mode when the charge is shorter than the break. “Diminishing returns above 700 kW” is partly produced by the model; rerun allowing the truck to stay at the bay.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The non-monotonic behaviour is real but specific to the Greedy rule, and its cause is the rule itself rather than Eq. (15). When Greedy must charge, it inserts the break into the charging stop only if a charge to full lasts at least 45 minutes. At 1,000 kW the charge is shorter, so the break is taken at a later, separate stop, with its own access manoeuvre, and the daily schedule shifts. The share of Greedy’s charging time that falls inside breaks drops from 79% at 700 kW to 17% at 1,000 kW.</p>
+<p>The schedules produced by optimisation behave monotonically. The hindsight-optimal route duration falls by 4.2% at 700 kW and 4.9% at 1,000 kW relative to 350 kW; instance by instance, the 1,000 kW schedule is never more than 1% longer than the 700 kW one (mean −0.8%). LA falls by 4.1% and 5.2%. Against the diesel truck, the penalty is 4.3% (oracle) and 4.7% (LA) at 700 kW, and 3.5% and 3.5% at 1,000 kW.</p>
+<p>Eq. (15) does not force sequential operation on the optimised schedules: across all hindsight-optimal schedules, at 350, 700 and 1,000 kW, no charging stop combined with a break is operated in sequential mode. At high power the optimiser lengthens the charge to the length of the break part, or uses the 15 + 30 minute split, so that each part of the break is covered by a charge (about five split parts per route at 700 and 1,000 kW), and only 0.04–0.15 breaks per route are taken at a stop without charging. Allowing the truck to remain at the bay could therefore remove at most these few separate breaks, and the small remaining gain from 700 to 1,000 kW is mainly physical: once the charge needed fits inside the break, more power cannot shorten the stop. We have revised Sections 8.1 and 9 to state that the diminishing returns hold for optimised schedules under the rule that the truck leaves the bay when charging ends, and that the Greedy curve reflects its rule.</p>
+</div>
+<div class="blk chg"><span class="lab">Change</span> Fig. 11: show oracle and LA; mark the Greedy column at 1,000 kW as a rule artefact (or drop Greedy from Fig. 11). Text in §8.1, §8.3, §9: state the mechanism above.</div>
+
+<h3>6.3 The battery–power grid uses Greedy</h3>
+<div class="blk ref"><span class="lab">Referee 6.3</span> The justification “Greedy within about two points of LA in every cell of Table 8” is contradicted (2.1–3.5 points); Greedy overstates the 300 kWh penalty by half; re-check “not substitutes” with LA or the oracle. 300 kWh at 700–1,000 kW implies 2.3–3.3C; cap power by vehicle acceptance.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The referee is right on both points, and we have removed the justification. The one-at-a-time results show that Greedy departs from the optimised schedules exactly at the corners of the grid: at 300 kWh the route lengthens by 15.0% under Greedy, 10.1% under LA and 6.3% for the hindsight optimum; at 1,000 kW by +0.3%, −5.2% and −4.9%. Figure 10 therefore describes the response of a driver following a rule of thumb, not the response of the system, and it is now presented as such.</p>
+<p>We support the non-substitutability statement with the first-principles argument of 6.1 rather than with the grid. Battery capacity bounds the energy available within a driving period, and charger power bounds the energy that can be added during a break. With 300 kWh (240 kWh usable), a driving period that needs 443 kWh requires at least one additional charging stop per period whatever the charger power; each such stop carries the access manoeuvre and the expected wait (about 20 minutes together) that no charging speed removes. With 150 kW, a 45-minute break adds 112 kWh, so about two hours of charging per period remain outside the break whatever the battery size. The one-at-a-time optimised results are consistent with both statements. We have softened the claim to this mechanism.</p>
+<p>We agree on the charging rate. Our curve limits the 80–100% segment to the pack’s acceptance (0.4C, i.e. 200 kW for 500 kWh), but the 0–80% segment runs at the rated power of the point. At 1,000 kW this means 2C for the base pack and 3.3C for 300 kWh, above the about 1.4–1.6C accepted by current MCS-ready trucks. We flag the cells above 2C as optimistic for the vehicle and state that charging power should be the minimum of point and vehicle acceptance.</p>
+</div>
+
+<h3>6.4 The density-versus-power comparison</h3>
+<div class="blk ref"><span class="lab">Referee 6.4</span> “Roughly four times” undefined; 150 kW below AFIR’s minimum; no costs, so “where investment should go” is unsupported; exogenous queues; single truck cannot support network investment claims; 60 km is a maximum in AFIR; “secondary road network” is not AFIR’s term.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We now define the comparison: doubling point power from 350 to 700 kW shortens hindsight-optimal routes by 4.2% (LA 4.1%), while halving station spacing from 60 to 30 km shortens them by 1.1% (LA 1.4%), a ratio of about 3–4. The 150 kW case is kept as a pre-AFIR reference and labelled as below the AFIR minimum per point.</p>
+<p>We agree that, without costs and with exogenous queues, the results do not rank investments. The revised text says that, for a truck facing given expected waiting times, point power reduces route duration more than station density, and it no longer states where investment should go. We add that, in a shared network, denser stations and faster turnover both reduce queues, which a single-truck model cannot capture (Zähringer et al., 2024), and that higher point power has a higher grid-connection cost per site.</p>
+<p>On spacing, we have corrected both the terminology (“comprehensive network”) and the description of our instances: stations are placed with a mean gap of 60 km, but 48% of gaps exceed 60 km (90th percentile 86 km, maximum 155 km where a cluster of customers lies between two stations). The base corridor is therefore sparser than the AFIR maximum for the core network. Since halving the mean spacing changes the hindsight-optimal duration by 1.1%, we expect a corridor meeting the AFIR maximum to give a penalty lower than ours by at most about one point. The 100 km case corresponds to the AFIR comprehensive network.</p>
+</div>
+
+<h3>6.5 The diesel comparison is biased by the time windows</h3>
+<div class="blk ref"><span class="lab">Referee 6.5</span> Windows centred on the EV schedule force the faster diesel truck to wait or pay penalties, under-estimating the penalty; state whether Fig. 11 includes penalties; regenerate windows per vehicle or use the None class; diesel refuelling ignored.</div>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree and now take the headline from the class without windows. Without windows, the hindsight-optimal electric schedule is 8.9%, 9.8% and 10.2% longer than the diesel schedule on short, medium and long routes (LA 10.6%, 7.9% and 11.2%; Greedy 11.5%, 13.3% and 14.1%). With tight windows the penalty is lower (6.6–9.4% for the oracle), because the diesel truck misses 0.3–3.3 windows per route that are centred on the electric schedule; the bias the referee describes is therefore 0.8–2.3 points, and the statement “about 10%” rests on the class without windows. Figure 11 compares route durations without window penalties; the caption now says so.</p>
+<p>Diesel refuelling is credited after the fact: no refuelling stop on short routes, one on medium and two on long routes, each with the access time of a stop. With this credit the penalty (both window classes pooled, oracle) is 7.8%, 8.9% and 9.8%; we also report it under alternative tank sizes and consumption. We agree that the sensitivity variants inherit the base-case windows and now give their results for the class without windows as well.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> Sources: <span class="mono">additional_diesel_tw.csv</span> (by window class), <span class="mono">additional_diesel_refuel.csv</span>. Re-reporting Figs. 9–11 on the None class is a filter on stored runs (halves n per bar), not a rerun.</div>
+
+<h3>6.6 The “40% queuing and manoeuvring” share is largely an input</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree. The share follows from the assumed 10-minute mean queue and 10-minute manoeuvre per stop multiplied by the number of charging stops and of additional stops. We have corrected the figure: queuing, manoeuvring and repositioning account for 29% of the penalty in the hindsight-optimal schedules, 38% under LA and 25% under Greedy. Because the component is linear in the two inputs for a given schedule, halving both would halve it (re-optimisation could only reduce it further); we state this first-order sensitivity and have removed the figure from the abstract.</p>
+</div>
+
+<h3>6.7 The scenario is narrower than AFIR 2030</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We agree. The abstract now states that the results concern en-route charging only and are an upper bound on the penalty when overnight charging at parking areas is available. A 9–11-hour rest at 100 kW can deliver more than the battery capacity, so overnight charging would let the truck start each day full; it would remove part of the charging that now falls outside breaks, but not the queuing and access time at daytime stops. We did not simulate this scenario and list it as the first infrastructure extension.</p>
+</div>
+
+<h3>6.8 Comparison with the literature</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<p>We now compare with Cheng and Lin (2024) on four counts: break rules (one 30-minute break per 8 hours in the US against 45 minutes per 4.5 hours in the EU), charger power, vehicle parameters, and the objective (operating cost against duration). We cite Zähringer et al. (2022, 2024), whose results for 700 kW and above agree with our under-5% penalty, and the manufacturer report on daily distances with 750 kW MCS.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">7. Technical, parameter and policy-fact issues</h2>
+
+<h3>7.1 Vehicle and energy</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<p>The description of the consumption curve was not accurate, and we have rewritten it. The curve is the road-load equation divided by speed, ECR(v) = A/v + B + Cv² (kWh/km), with physical parameters for a 40-t tractor–semitrailer following Earl et al. (2018): rolling resistance coefficient 0.0055, frontal area 10 m², air density 1.2 kg/m³, drivetrain efficiency 0.85, drag coefficient 0.50 and an auxiliary load of 3.2 kW. It gives 0.96, 1.23 and 1.35 kWh/km at 50, 80 and 90 km/h, and 1.25 kWh/km on average over the realised legs. This lies within the 1.1–1.4 kWh/km measured for loaded 40-t battery-electric tractors and above the eActros 600 tour average. Mass is fixed at 40 t (see 4.3); temperature is not modelled.</p>
+<p>The battery has a total capacity of 500 kWh with a 20% reserve (100 kWh), i.e. 400 kWh usable. The reserve is conservative; we now discuss it as a parameter. Table 5 now gives E<sup>0</sup> = 500 kWh (full at departure), t<sub>0</sub> = 08:00, a minimum charging time of 15 minutes, and the curve: rated power up to 80% (T<sub>1</sub> = 1.14 h from empty at 350 kW) and the pack’s acceptance, 0.4C (200 kW), from 80 to 100% (T<sub>2</sub> = 1.64 h). From 20% to 80% a charge takes 51 minutes at 350 kW and 18 minutes at 1,000 kW. We agree that a two-segment curve with a fixed knee is coarse at megawatt power (see 6.3). “Constructors” is replaced by “manufacturers”.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> <span class="mono">settings.py</span> (ECR block, charging_curve, TAIL_C_RATE); <span class="mono">instances.make_data</span> (E0 = Ecap, T_START = 8.0); <span class="mono">MILP.chg_act2</span> (τ<sup>c</sup> ≥ 0.25 y). Earl et al. (2018) is a T&amp;E/Commercial Vehicle Workshop paper — decide whether Gao et al. (2025) is still cited at all.</div>
+
+<h3>7.2 AFIR is described imprecisely</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<p>Corrected along the lines of the referee’s table: 60 km is a maximum distance on the core network by 2030; AFIR mandates pool output and a minimum per-point power, not “charger power higher than 350 kW”; the term is “comprehensive network”; the derogation for low-traffic core sections is mentioned. Our 100 km case is the closest proxy to the comprehensive network and to the 2027 milestone (120 km), and we say so; we did not simulate the 2025 and 2027 milestones.</p>
+</div>
+
+<h3>7.3 CO<sub>2</sub> standards</h3>
+<div class="blk resp"><span class="lab">Response</span> Corrected: the targets are fleet-wide averages for new heavy-duty vehicles of each manufacturer; the 2035 target (65%) is added; the reference period is qualified; the December 2025 proposal is mentioned; the emission share is cited to the Commission page.</div>
+
+<h3>7.4 Other operational assumptions</h3>
+<div class="blk resp"><span class="lab">Response</span>
+<ul>
+<li>Queue times: 10 and 8 minutes are the mean and standard deviation of the lognormal (log-scale parameters 2.06 and 0.70), drawn once per station and instance.</li>
+<li>Manoeuvring: the 10-minute access time applies to the diesel truck too whenever it pulls off for a break or rest, at former charging stations and rest areas alike. Only the electric truck’s queuing, its additional charge-only stops and the repositioning off the bay are electrification costs; this is how the decomposition is built.</li>
+<li>Rest areas are assumed always available; we now state this as an optimistic assumption for both vehicles and refer to Panteia et al. (2025) and Vital and Ioannou (2021).</li>
+<li>We now state that a charging station offers parking where the break or rest can be taken after the bay is vacated; the repositioning time covers the move.</li>
+</ul></div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">8. Mathematical formulation: equation-level remarks</h2>
+<table>
+<tr><th style="width:4%">#</th><th style="width:30%">Remark</th><th>Response and change</th></tr>
+<tr><td>1</td><td>Eqs (12) and (15) conflict with §3.4</td><td>The referee is right: after a charge that covers the break, Eq. (12) lets the break continue at the bay. We have rewritten §3.4 to describe the model: a break is credited in parallel only if the charge lasts at least the declared break, and the break may then be extended in place. In the stored LA schedules this extension occurs in 9% of long-route runs and amounts to 1.3 minutes per run on average; it does not occur on short and medium routes. The constraint proposed by the referee would remove it; we mention it, but keep the model unchanged.</td></tr>
+<tr><td>2</td><td>Manoeuvres are driving, not work</td><td>M<sup>stop</sup> is a lumped access time: leaving the motorway, positioning, plugging, payment and re-entry. Only the vehicle movement is driving on a tachograph; we book the whole time as work, which is conservative for working time and optimistic for the driving limits. We now state this as a limitation and give an upper bound: manoeuvres add 20–40 minutes per shift (median), while LA leaves a median shift-driving slack of 23 minutes on long and 33 minutes on medium routes. If all manoeuvre time were counted as driving without re-optimisation, the shift limit would be exceeded in 64% of LA’s long-route shifts and the 4.5-hour limit in 20% of its long runs, by at most 20 minutes. A model that splits M<sup>stop</sup> into a driving and a working part is a direct extension. We agree that repositioning interrupts a break; in sequential mode the break starts after the repositioning.</td></tr>
+<tr><td>3</td><td>κ<sub>i</sub> not defined</td><td>Added: κ<sub>i</sub> = x<sup>b45</sup><sub>i</sub> + x<sup>b30</sup><sub>i</sub> + ρ<sub>i</sub>, with κ<sub>i</sub> ≤ 1 implied by (6).</td></tr>
+<tr><td>4</td><td>Missing domains</td><td>Added: v<sub>i</sub>, z<sub>i</sub>, q<sub>i</sub> ∈ {0,1}.</td></tr>
+<tr><td>5</td><td>Big-M values</td><td>Given: M = 1,000 h in (A.31)–(A.32); M<sup>k</sup> = 4.5, 10, 15 and 15 h for the four resettable resources; in (5), the late side uses an instance-specific bound on route duration (worst-case driving plus all service, queue and access times plus one 11-hour rest per stop) and the early side uses M<sub>i</sub> = W<sup>a</sup><sub>i</sub> − lb<sub>i</sub>. We note that our analysis of the long-route bound attributes the stall to the packing of rests rather than to these constants: adding valid inequalities did not move the root bound.</td></tr>
+<tr><td>6</td><td>Shift working time never bounded</td><td>The resource is kept because it feeds the Directive 2002/15/EC constraints (used in the validation) and the ex-post checks of Section 3. Its role is now explained; its window is [0, ∞) in the main experiments.</td></tr>
+<tr><td>7</td><td>The 24-h rule described loosely</td><td>Corrected: the 13 h / 15 h bound applies to the spread between the end of one daily rest and the start of the next.</td></tr>
+<tr><td>8</td><td>Budget wording</td><td>Corrected: ρ̄ = 3 between two weekly rests; ε̄ = 2 per fixed calendar week (see the calendar assumption in Section 3).</td></tr>
+<tr><td>9</td><td>LA scoring and horizon rule</td><td>Written as equations and pseudocode (see 5.4), including the penalty constant 10<sup>9</sup> h.</td></tr>
+<tr><td>10</td><td>Bars lost in typesetting</td><td>Fixed (ξ̲, ξ̄ and the resource bounds in Eq. 2).</td></tr>
+<tr><td>11</td><td>Customers cannot be used for charging</td><td>An assumption of the study: shippers and receivers are not assumed to offer charging to visiting trucks. We now discuss destination charging during long stops at customers as an extension; like overnight charging, it would reduce the penalty.</td></tr>
+</table>
+<div class="blk note"><span class="lab">Internal</span> Item 1: counted on stored LA schedules (parallel, τ<sup>c</sup> ≥ b, τ<sup>b</sup> &gt; 1 min). Item 2: <span class="mono">review_checks2.json → manoeuvre_vs_slack</span>; it is an upper bound because all 10 minutes are treated as driving. Item 5: H for a short instance is ~518 h (loose), so do not claim the big-Ms are tight.</div>
+
+<!-- ===================================================================== -->
+<h2>9. Literature positioning and novelty</h2>
+<div class="blk resp"><span class="lab">Response</span>
+<p><b>9.1</b> We have narrowed both novelty statements and adopt the formulation proposed by the referee: “to our knowledge, this is the first study combining the EU daily driving-time and rest rules, non-linear partial charging and stochastic travel times on multi-day long-haul routes, and comparing offline and online policies against a hindsight benchmark.” We add Kok et al. (2010, 2012), Kullman, Goodson and Mendoza (2021), Zähringer et al. (2022, 2024), El Habti et al. (2025) and El Habti, Braekers and D’Haen (2026), and the 2025 review in Transportation Research Part A. Kok et al. (2010) is cited in Section 3 for the effect of the working-time rules.</p>
+<p><b>9.2</b> We agree that the methods are standard and that the contribution lies in the application and the rule set; the introduction now says so and cites Bai et al. (2023) and Kullman et al. (2021) for rollout policies in this setting.</p>
+<p><b>9.3</b> Table 1: we split the rules column into breaks, daily rests, weekly rules and Directive 2002/15/EC, add columns for policy type and source of uncertainty, add the works above, and check the route-length labels of Keskin et al. (2021) and Schiffer et al. (2017) and whether a peer-reviewed version of the latter exists.</p>
+<p><b>9.4</b> See 6.8.</p>
+<p><b>9.5</b> The statement on the leading decarbonisation pathway is supported with independent agency and peer-reviewed sources in addition to our earlier work; the emission share is cited to the Commission.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2>10. Presentation, internal consistency and formatting</h2>
+<div class="blk resp"><span class="lab">Response</span>
+<p><b>10.1</b> The abstract is reduced to 150 words; highlights, the declaration of competing interest, the data and code availability statement (repository with code, instances and realisations) and the generative-AI declaration are added; the article type “VSI: Electric HDV” is selected; keywords avoid “TDSP”.</p>
+<p><b>10.2</b> The two unresolved citations, the “Section ??” reference, the duplicated Pelletier et al. entry, the reference-manager residue and the citation of Regulation (EU) 2024/1610 are fixed.</p>
+<p><b>10.3</b> All listed inconsistencies are corrected: the abstract now says “3.5% on average (at most 5.3% in a class)”; the statement that LA is best overall is qualified (2SP is equivalent on short routes); the scope is described identically everywhere; the claim that Greedy stays within two points of LA is removed; “roughly four times” is replaced by the defined ratio; Table 8 states one realisation per instance; decision times are given per candidate stop throughout; the window hit rate is defined for all methods (feasible runs on windowed instances); Figure 3’s description includes the charge with break at km 540; Figure 8’s axis is relabelled.</p>
+<p><b>10.4</b> The duplicate description of the driver profiles and the restatement of Powell’s framework are removed.</p>
+<p><b>10.5</b> The manuscript has been language-edited, including every example listed.</p>
+</div>
+<div class="blk note"><span class="lab">Internal</span> “At most 5.3%” is the current Long–Many LA cell (regenerated corpus). Generative-AI declaration: you decide what to declare; the declaration should be accurate about any AI assistance used in writing or analysis.</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">Part II — Disposition of the priority list</h2>
+<table>
+<tr><th style="width:6%">Item</th><th style="width:15%">Status</th><th>What we do instead / why</th></tr>
+<tr><td>A1</td><td><span class="tag t-part">Partly</span></td><td>Claims restricted to the daily provisions plus budgets; ex-post checks of 56/90 h, 60 h, the 6 h work rule and the 144 h weekly-rest deadline on every run (Section 3). Rules not added to the model.</td></tr>
+<tr><td>A2</td><td><span class="tag t-text">Argued</span></td><td>No rerun. Oracle never operates a charge-with-break stop sequentially at any power; split breaks absorb the effect; non-monotonicity traced to the Greedy rule; bound on crediting charge during rests (≤ 1.2%). Claim narrowed (6.2).</td></tr>
+<tr><td>A3</td><td><span class="tag t-part">Partly</span></td><td>No rerun. Fig. 10 relabelled as the rule-of-thumb driver; non-substitutability supported by the first-principles bound and one-at-a-time oracle/LA results; cells above 2C flagged (6.3).</td></tr>
+<tr><td>A4</td><td><span class="tag t-part">Partly</span></td><td>Law fully specified (parameters, mean, median, realised CV, per-period CV, correlation effect computed analytically). Correlated delays and stochastic queues not run; claims conditioned on the assumption (4.1, 4.2, 4.6).</td></tr>
+<tr><td>A5</td><td><span class="tag t-part">Partly</span></td><td>Renamed nominal plan; Jensen bias quantified (1.4%); severity table for all methods with 2016/403 bands; four observed points of the buffer trade-off instead of a frontier (4.4, 4.5).</td></tr>
+<tr><td>A6</td><td><span class="tag t-part">Partly</span></td><td>Budgeted RO reported for short routes; early-arrival explanation refuted with data; Greedy buffers disclosed (they already match the request); 2SP labelled a heuristic with solve status and compute; LA safeguards disclosed; no terminal value, justified (5.1–5.4).</td></tr>
+<tr><td>A7</td><td><span class="tag t-done">Done</span></td><td>One realisation per instance stated; Wilson intervals; paired Wilcoxon tests; common-feasible gaps; oracle certification and bound-based interval (5.5–5.7).</td></tr>
+<tr><td>A8</td><td><span class="tag t-part">Partly</span></td><td>Windows kept (booked-slot interpretation); lateness distribution reported; diesel headline on the no-window class; sensitivity results also given for that class (5.8, 6.5).</td></tr>
+<tr><td>A9</td><td><span class="tag t-done">Done</span></td><td>All inputs reported (7.1, 7.4, 8.5); code, instances and realisations released; unseeded LA scenarios disclosed.</td></tr>
+<tr><td>A10</td><td><span class="tag t-done">Done</span></td><td>Section 10.</td></tr>
+<tr><td>B1</td><td><span class="tag t-part">Partly</span></td><td>Driver hours and energy per route from existing outputs; cost and WTW emissions as formulas with sourced inputs; no hub-level grid model (Section 2).</td></tr>
+<tr><td>B2</td><td><span class="tag t-no">Not done</span></td><td>No new scenarios; 100 km case discussed as proxy for the comprehensive network and 2027 milestone; overnight charging discussed as upper-bound statement (6.7, 7.2).</td></tr>
+<tr><td>B3</td><td><span class="tag t-no">Not done</span></td><td>Outside a single-truck model; investment-ranking language removed (6.4).</td></tr>
+<tr><td>B4</td><td><span class="tag t-part">Partly</span></td><td>First-order scaling of the queue/manoeuvre share; reserve, payload and temperature discussed with the consumption range (4.3, 6.6).</td></tr>
+<tr><td>B5</td><td><span class="tag t-done">Done</span></td><td>Design rule with our parameters, checked against the oracle schedules (6.1).</td></tr>
+<tr><td>B6</td><td><span class="tag t-done">Done</span></td><td>Section 9.</td></tr>
+<tr><td>C1</td><td><span class="tag t-text">Discussed</span></td><td>Eco-driving and destination charging as extensions.</td></tr>
+<tr><td>C2</td><td><span class="tag t-text">Option</span></td><td>A real-corridor case study exists in our results (see note) and could be added without new runs.</td></tr>
+<tr><td>C3</td><td><span class="tag t-done">Done</span></td><td>Sections 4–5 condensed; RO and 2SP details to an appendix.</td></tr>
+</table>
+<div class="blk note"><span class="lab">Internal — C2</span> Stored: one real tour (Norway → Netherlands/Germany, 3,339 km, 7 customers, 43 charging stations from OpenStreetMap plus curated hubs, two ferry crossings), five synthetic realisations, no windows; oracle certified within 0.5% on all five; mean gaps Greedy 2.8%, RO 20.9%, LA 2.5%, 2SP 8.7% (<span class="mono">tex/tables/usecase.tex</span>). Caveats: travel times are synthetic, n = 5, and the LA there uses a different energy guard (q = 0.82). The station set reflects the August 2026 network, not the trip week.</div>
+
+<h3>Suggested reframing</h3>
+<div class="blk resp"><span class="lab">Response</span> We adopt the reframing in substance. The paper now leads with the size of the electrification penalty under en-route infrastructure of the AFIR 2030 type, the levers that reduce it, and the value of re-planning for compliance and punctuality, with the optimisation as the engine. We do not add AFIR milestone or overnight-charging scenarios in this revision; these are stated as the main extensions.</div>
+
+<h3>Claims the current evidence supports</h3>
+<div class="blk resp"><span class="lab">Response</span> We adopt the three sentences proposed by the referee, with our corrected numbers: (1) the nominal plan breaches a constraint in almost every run, mostly by small margins inside the reserve; (2) the look-ahead stays on average 3.5% above the hindsight benchmark (at most 5.3% in a class; between 4.5% and 8.4% on long routes once the oracle’s certification is accounted for) and fails in about 1% of runs; (3) at 350 kW per point, a 500 kWh truck takes about 10% longer than diesel with en-route infrastructure only, and less than 5% at 700 kW. The density-versus-power and battery-versus-power statements are reduced to the mechanisms described in 6.3 and 6.4.</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">Part III — Draft abstract, highlights and keywords</h2>
+<h3>Abstract (148 words)</h3>
+<div class="blk chg"><span class="lab">Draft</span>
+<p>Battery-electric trucks can match diesel trip times only if charging fits into the breaks and rests that EU drivers must take. We schedule driving, breaks, daily rests and partial charging for a battery-electric truck on a multi-day route with customer time windows, under Regulation (EC) No 561/2006, a non-linear charging curve and stochastic travel times. Four planning policies are evaluated in a discrete-event simulator on 900 instances against a hindsight benchmark. A schedule optimised for nominal travel times breaches a constraint in almost every run, mostly by small margins inside the battery reserve. A rolling-horizon look-ahead that re-plans at every stop stays on average 3.5% above the hindsight benchmark and fails in about 1% of runs. With 350 kW charge points along the corridor and no overnight charging, the electric truck needs about 10% more time than a diesel truck; with 700 kW or more, less than 5%.</p>
+</div>
+<h3>Highlights (≤ 85 characters each)</h3>
+<div class="blk chg"><span class="lab">Draft</span>
+<ul>
+<li>EU driving-time rules, partial charging and travel-time uncertainty are combined</li>
+<li>Schedules fixed before departure miss windows or breach limits under delays</li>
+<li>Re-planning at every stop stays 3.5% above a hindsight benchmark on average</li>
+<li>At 350 kW an e-truck needs about 10% more time than diesel; under 5% at 700 kW</li>
+<li>Refilling a 4.5-hour driving period during a 45-minute break needs ~590 kW</li>
+</ul></div>
+<h3>Keywords</h3>
+<div class="blk chg"><span class="lab">Draft</span> Battery-electric trucks; EU driving time and rest periods; Charging infrastructure; Megawatt charging; Travel-time uncertainty; Rolling-horizon look-ahead</div>
+
+<!-- ===================================================================== -->
+<h2 class="pb">Appendix — Data sheet</h2>
+<p class="small">All values are computed from stored results with <span class="mono">review/TRD_R1/review_checks.py</span> and <span class="mono">review_checks2.py</span>, or read from <span class="mono">data_output/*.csv</span>. Base case: 900 instances, latest run per instance and method, unsupervised, standard configuration.</p>
+
+<h3>A.1 Model inputs (for Table 5)</h3>
+<table>
+<tr><th>Item</th><th>Value</th><th>Source in code</th></tr>
+<tr><td>Vehicle</td><td>40 t tractor–semitrailer; C<sub>rr</sub> 0.0055; A<sub>f</sub> 10 m²; C<sub>d</sub> 0.50; η 0.85; P<sub>aux</sub> 3.2 kW</td><td>settings.py (ECR block)</td></tr>
+<tr><td>Consumption</td><td>0.96 / 1.23 / 1.35 kWh/km at 50 / 80 / 90 km/h; 1.246 kWh/km realised mean</td><td>settings.ecr; instance E_real</td></tr>
+<tr><td>Battery</td><td>500 kWh total; reserve 100 kWh; usable 400 kWh; E<sup>0</sup> = 500 kWh</td><td>instances.make_data</td></tr>
+<tr><td>Charging curve (350 kW)</td><td>350 kW to 80%; 200 kW (0.4C) to 100%; T<sub>1</sub> = 1.14 h, T<sub>2</sub> = 1.64 h; 20→80% 51 min; 20→100% 81 min; minimum charge 15 min</td><td>settings.charging_curve; MILP.chg_act2</td></tr>
+<tr><td>Other powers (500 kWh)</td><td>700 kW: 20→80% 26 min, 20→100% 56 min · 1,000 kW: 18 / 48 min · 150 kW: 120 / 160 min</td><td>settings.charging_curve</td></tr>
+<tr><td>Departure</td><td>t<sub>0</sub> = 08:00; all counters zero; budgets 3 reduced rests, 2 extensions</td><td>settings.T_START</td></tr>
+<tr><td>Travel time</td><td>ξ = min(0.889 + η, 1.6); η ~ LN(−2.68, 1.02); E[ξ] = 1; median 0.957; sd 0.125; P(ξ &lt; 1) = 0.68; q05/q95 = 0.90/1.25; 1.1% at cap; one realisation per instance</td><td>settings.lognormal_params</td></tr>
+<tr><td>Legs</td><td>mean nominal leg 16 min (15.7 / 15.8 / 16.0 short/medium/long); ~17 legs per 4.5 h; period CV 3.0% (iid), 4.6% (AR(1), ρ = 0.4)</td><td>instances; analytic</td></tr>
+<tr><td>Energy bias</td><td>E[energy]/energy at nominal speed = 1.014; P(leg energy &gt; nominal) = 0.68; LA guard q = 0.5 → +3.4%</td><td>Monte Carlo on the law</td></tr>
+<tr><td>Queue</td><td>lognormal, mean 10 min, sd 8 min (log-scale 2.06, 0.70), drawn once per station</td><td>instances.make_data</td></tr>
+<tr><td>Stations</td><td>mean gap 60 km; 48% &gt; 60 km; 90th pct 86 km; max 155 km</td><td>instance files</td></tr>
+<tr><td>Big-M</td><td>1,000 h (A.31–32); M<sup>k</sup> 4.5 / 10 / 15 / 15 h; TW late side: per-instance duration bound; early side W<sup>a</sup> − lb</td><td>MILP.py; instances.compute_horizon_bigM</td></tr>
+<tr><td>Design rule</td><td>Energy per 4.5-h period 443 kWh; power to refill in 45 min 590 kW; unmasked charging at 350 kW ≈ 31 min per period (oracle: 29 / 37 / 46 min)</td><td>analytic; additional_diesel_decomp.csv</td></tr>
+</table>
+
+<h3>A.2 Feasibility (base case)</h3>
+<table>
+<tr><th>Method</th><th class="n">Runs</th><th class="n">Failed</th><th class="n">95% CI</th><th class="n">Short</th><th class="n">Medium</th><th class="n">Long</th><th>Failure types</th></tr>
+<tr><td>Greedy</td><td class="n">900</td><td class="n">4.4%</td><td class="n">3.3–6.0</td><td class="n">1.7</td><td class="n">8.0</td><td class="n">3.7</td><td>terminal spread 24, daily driving 11, pre-rest spread 6</td></tr>
+<tr><td>RO</td><td class="n">900</td><td class="n">0.0%</td><td class="n">0–0.4</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>—</td></tr>
+<tr><td>2SP</td><td class="n">897</td><td class="n">13.7%</td><td class="n">11.6–16.1</td><td class="n">5.4</td><td class="n">11.0</td><td class="n">24.7</td><td>reserve 121, accumulated driving 2</td></tr>
+<tr><td>LA</td><td class="n">840</td><td class="n">1.2%</td><td class="n">0.6–2.2</td><td class="n">0.0</td><td class="n">1.7</td><td class="n">2.0</td><td>no feasible action 4, reserve 3, daily driving 2, accumulated driving 1</td></tr>
+<tr><td>ROBU (short)</td><td class="n">300</td><td class="n">1.0%</td><td class="n"></td><td class="n">1.0</td><td class="n">—</td><td class="n">—</td><td>4 further runs unsolved</td></tr>
+</table>
+
+<h3>A.3 Gap to oracle (%) — each method’s feasible runs / common-feasible set</h3>
+<table>
+<tr><th>Route</th><th>Cust.</th><th class="n">RO</th><th class="n">2SP</th><th class="n">Greedy</th><th class="n">LA</th><th class="n">n LA feasible</th><th class="n">n common</th></tr>
+<tr><td>Short</td><td>Few</td><td class="n">22.7 / 23.1</td><td class="n">2.3 / 2.3</td><td class="n">6.7 / 6.7</td><td class="n">2.5 / 2.5</td><td class="n">100</td><td class="n">96</td></tr>
+<tr><td></td><td>Medium</td><td class="n">27.7 / 27.4</td><td class="n">3.2 / 3.2</td><td class="n">8.0 / 8.1</td><td class="n">3.6 / 3.7</td><td class="n">99</td><td class="n">93</td></tr>
+<tr><td></td><td>Many</td><td class="n">34.3 / 34.1</td><td class="n">3.4 / 3.5</td><td class="n">8.9 / 9.1</td><td class="n">2.8 / 2.9</td><td class="n">100</td><td class="n">89</td></tr>
+<tr><td>Medium</td><td>Few</td><td class="n">34.9 / 35.0</td><td class="n">5.1 / 4.7</td><td class="n">6.5 / 6.7</td><td class="n">3.5 / 3.5</td><td class="n">98</td><td class="n">81</td></tr>
+<tr><td></td><td>Medium</td><td class="n">33.5 / 33.1</td><td class="n">4.5 / 4.1</td><td class="n">6.8 / 6.8</td><td class="n">2.4 / 2.2</td><td class="n">96</td><td class="n">86</td></tr>
+<tr><td></td><td>Many</td><td class="n">33.9 / 31.9</td><td class="n">6.9 / 6.4</td><td class="n">9.4 / 9.6</td><td class="n">4.0 / 4.2</td><td class="n">98</td><td class="n">76</td></tr>
+<tr><td>Long</td><td>Few</td><td class="n">35.7 / 35.7</td><td class="n">10.0 / 10.3</td><td class="n">6.1 / 6.0</td><td class="n">4.4 / 4.6</td><td class="n">93</td><td class="n">72</td></tr>
+<tr><td></td><td>Medium</td><td class="n">35.5 / 35.2</td><td class="n">10.4 / 9.9</td><td class="n">6.3 / 6.6</td><td class="n">3.7 / 3.8</td><td class="n">68</td><td class="n">53</td></tr>
+<tr><td></td><td>Many</td><td class="n">35.4 / 34.9</td><td class="n">14.6 / 13.2</td><td class="n">7.8 / 7.4</td><td class="n">5.3 / 5.4</td><td class="n">78</td><td class="n">48</td></tr>
+</table>
+<p class="small">Penalties included. LA over all feasible runs: 3.54% [3.26, 3.82]; on the common set 3.50% [3.19, 3.81]. LA interval incumbent→bound: short 2.97–3.51, medium 3.32–4.00, long 4.52–8.40%.</p>
+
+<h3>A.4 Paired comparisons on the common set (LA minus other, percentage points)</h3>
+<table>
+<tr><th>Route</th><th class="n">n</th><th class="n">vs Greedy</th><th class="n">vs 2SP</th><th class="n">p (2SP)</th><th class="n">vs RO</th></tr>
+<tr><td>Short</td><td class="n">278</td><td class="n">−4.9</td><td class="n">+0.07</td><td class="n">0.53</td><td class="n">−25.0</td></tr>
+<tr><td>Medium</td><td class="n">243</td><td class="n">−4.4</td><td class="n">−1.76 (median −0.01)</td><td class="n">0.24</td><td class="n">−30.1</td></tr>
+<tr><td>Long</td><td class="n">173</td><td class="n">−1.9</td><td class="n">−6.35</td><td class="n">3·10<sup>−19</sup></td><td class="n">−30.7</td></tr>
+<tr><td>All</td><td class="n">694</td><td class="n">−4.0 (LA better on 96%)</td><td class="n">−2.17</td><td class="n">6·10<sup>−9</sup></td><td class="n">−28.2</td></tr>
+</table>
+
+<h3>A.5 Ex-post rule checks (feasible runs)</h3>
+<table>
+<tr><th>Method</th><th class="n">Directive compliant S / M / L</th><th class="n">Max work stretch, 90th pct (L)</th><th class="n">Week &gt; 60 h (L)</th><th class="n">Elapsed &gt; 144 h (L)</th><th class="n">Max realised driving</th></tr>
+<tr><td>Greedy</td><td class="n">89.8 / 90.6 / 92.7%</td><td class="n">6.1 h</td><td class="n">4.2% (mean +1.6 h)</td><td class="n">0 / 300</td><td class="n">51.3 h</td></tr>
+<tr><td>RO</td><td class="n">98.7 / 99.0 / 98.7%</td><td class="n">5.2 h</td><td class="n">13.0% (+2.5 h)</td><td class="n">134 / 300</td><td class="n">51.3 h</td></tr>
+<tr><td>2SP</td><td class="n">75.3 / 81.6 / 72.0%</td><td class="n">7.3 h</td><td class="n">35.1% (+3.9 h)</td><td class="n">8 / 225</td><td class="n">51.3 h</td></tr>
+<tr><td>LA</td><td class="n">90.3 / 95.5 / 95.4%</td><td class="n">5.8 h</td><td class="n">5.4% (+2.4 h)</td><td class="n">1 / 239</td><td class="n">51.0 h</td></tr>
+<tr><td>Oracle</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">0 / 300 (max 125.6 h)</td><td class="n">—</td></tr>
+</table>
+
+<h3>A.6 Charger power and battery: one-at-a-time changes in route duration vs base (%)</h3>
+<table>
+<tr><th>Variant</th><th class="n">Oracle</th><th class="n">LA (n)</th><th class="n">Greedy (n)</th><th class="n">Penalty vs diesel: oracle / LA / Greedy</th></tr>
+<tr><td>Base 350 kW, 500 kWh, 60 km</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">8.8 / 9.4 / 12.6</td></tr>
+<tr><td>150 kW</td><td class="n">+18.6</td><td class="n">+16.8 (199)</td><td class="n">+19.7 (264)</td><td class="n">29.0 / 28.1 / 35.4</td></tr>
+<tr><td>700 kW</td><td class="n">−4.2</td><td class="n">−4.1 (211)</td><td class="n">−3.2 (272)</td><td class="n">4.3 / 4.7 / 8.7</td></tr>
+<tr><td>1,000 kW</td><td class="n">−4.9</td><td class="n">−5.2 (164)</td><td class="n">+0.3 (255)</td><td class="n">3.5 / 3.5 / 13.3</td></tr>
+<tr><td>300 kWh</td><td class="n">+6.3</td><td class="n">+10.1 (191)</td><td class="n">+15.0 (252)</td><td class="n">15.7 / 19.7 / 30.2</td></tr>
+<tr><td>700 kWh</td><td class="n">−2.4</td><td class="n">−2.5 (209)</td><td class="n">−0.6 (251)</td><td class="n">6.2 / 6.1 / 12.3</td></tr>
+<tr><td>900 kWh</td><td class="n">−3.8</td><td class="n">−4.3 (207)</td><td class="n">−2.4 (263)</td><td class="n">4.6 / 4.6 / 9.7</td></tr>
+<tr><td>30 km spacing</td><td class="n">−1.1</td><td class="n">−1.4 (207)*</td><td class="n">−1.2 (274)</td><td class="n"></td></tr>
+<tr><td>100 km spacing</td><td class="n">+1.5</td><td class="n">+2.6 (178)</td><td class="n">+2.4 (261)</td><td class="n"></td></tr>
+</table>
+<p class="small">Oracle n = 300 per variant. Charging time inside breaks (oracle / Greedy): 700 kW 85% / 79%; 1,000 kW 86% / 17%. * Recomputed with all valid pairs; the current Fig. 9 predates most 30-km LA runs and uses 16 pairs (−1.8%). Penalty vs diesel pools Tight and None windows; no-window class alone: oracle 8.9 / 9.8 / 10.2% (short / medium / long).</p>
+
+<h3>A.7 Solver status</h3>
+<table>
+<tr><th>Method</th><th class="n">Time-limited S / M / L</th><th class="n">Runs with repair S / M / L</th><th class="n">Median compute per route S / M / L</th></tr>
+<tr><td>RO</td><td class="n">0 / 14.7 / 97.7%</td><td class="n">—</td><td class="n"></td></tr>
+<tr><td>2SP</td><td class="n">0 / 64.5 / 100%</td><td class="n">93.6 / 99.0 / 100%</td><td class="n">0.06 / 2.0 / 2.0 h</td></tr>
+<tr><td>LA</td><td class="n">—</td><td class="n">—</td><td class="n">0.56 / 1.9 / 3.9 h</td></tr>
+<tr><td>Oracle above 0.5%</td><td class="n">0 / 9 / 127 of 300</td><td class="n">—</td><td class="n">max gap 0.5 / 7.4 / 10.2%</td></tr>
+</table>
+<p class="small">LA decision time: mean 43 / 82 / 92 s; longest decision per run, median 168 / 227 / 331 s, worst 433 / 1,755 / 1,381 s. Tie-break fires at 2.4% of decisions.</p>
+
+</body>
+</html>
+

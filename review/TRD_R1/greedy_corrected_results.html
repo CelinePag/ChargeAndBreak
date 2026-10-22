@@ -1,0 +1,87 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Corrected greedy results</title><style>
+@page { size: A4; margin: 15mm 14mm 16mm 14mm; }
+*{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body{ font-family: Cambria, Georgia, serif; font-size:9.8pt; line-height:1.36; color:#1b1f23; background:#fff; max-width:182mm; margin:0 auto; }
+h1,h2,h3,h4{ font-family:"Segoe UI",Calibri,Arial,sans-serif; color:#14324f; }
+h1{ font-size:16pt; margin:0 0 4px; } h2{ font-size:12pt; border-bottom:1.5px solid #14324f; padding-bottom:2px; margin:16px 0 6px; page-break-after:avoid; }
+h4{ font-size:9.6pt; margin:8px 0 3px; }
+table{ border-collapse:collapse; width:100%; font-size:8.6pt; margin:4px 0 8px; }
+th,td{ border:1px solid #d5d9de; padding:3px 5px; text-align:left; }
+th{ background:#e8ecf1; font-family:"Segoe UI",Calibri,Arial,sans-serif; font-weight:600; }
+td.n{ text-align:right; white-space:nowrap; } th.n{ text-align:right; white-space:normal; }
+.box{ background:#edf3fb; border-left:3px solid #2b6cb0; padding:5px 9px; margin:6px 0; }
+.note{ background:#fdf2e7; border-left:3px solid #c05621; padding:5px 9px; margin:6px 0; font-size:9.2pt; }
+.pb{ page-break-before:always; } .small{ font-size:8.5pt; color:#5b6470; }
+figure{ margin:6px 0 10px; page-break-inside:avoid; } figcaption{ font-size:8.6pt; color:#3a4048; }
+</style></head><body>
+<h1>Corrected Greedy — new results for the paper’s tables and figures</h1><div class=small>Generated from stored runs by <code>src/output_analysis/greedy_corrected_report.py</code> and <code>review/TRD_R1/greedy_corrected_summary.py</code>. The submitted Greedy runs, tables and figures are unchanged; every new file carries the suffix <code>_greedyC</code>.</div>
+<h2>What the correction changes</h2><div class=box>
+<p>The corrected Greedy (<code>src/methods/greedy_corrected.py</code>, runs labelled <code>GREEDY_CORR</code>)
+keeps every decision rule of the submitted Greedy — stop only when forced, charge to full when stopping,
+95%-quantile one-step guard, 10% battery buffer, queue avoidance — but executes each stop exactly as the MILP does:</p>
+<ul>
+<li><b>C1</b> A charge before a daily rest is sequential (Eq. 14): the 5-min repositioning is paid and the charge is working time.</li>
+<li><b>C2</b> A charge is credited as break only if it lasts at least the break (Eq. 15); otherwise the full break follows the charge, with the repositioning. The truck no longer idles at the bay.</li>
+<li><b>C3</b> No charge shorter than the 15-min minimum (Eq. 9).</li>
+<li><b>D1</b> At a mandatory break, a charge is added only if it is free (covers the break) or forced by the energy state.</li>
+<li><b>D2</b> The spread rules use the exact dwell the simulator executes (incl. repositioning and access time).</li>
+</ul></div>
+<h2>Baseline vs corrected Greedy, base case (900 instances)</h2><table><tr><th>Route</th><th class=n>Infeasible old / new (%)</th><th class=n>Gap old / new (%)</th><th class=n>TW hit, windowed old / new (%)</th><th class=n>Directive ok old / new (%)</th><th class=n>Δ duration, paired (%)</th><th class=n>Sequential stops per run, new (rest / break)</th></tr>
+<tr><td>Short</td><td class=n>1.7 / 1.7</td><td class=n>7.82 / 7.88</td><td class=n>70.7 / 70.6</td><td class=n>89.8 / 89.8</td><td class=n>+0.05 (n=295)</td><td class=n>0.16 / 0.00</td></tr>
+<tr><td>Medium</td><td class=n>8.0 / 8.0</td><td class=n>7.51 / 7.57</td><td class=n>54.8 / 55.1</td><td class=n>90.6 / 90.9</td><td class=n>+0.06 (n=276)</td><td class=n>0.44 / 0.00</td></tr>
+<tr><td>Long</td><td class=n>3.7 / 3.7</td><td class=n>6.74 / 6.99</td><td class=n>58.5 / 58.2</td><td class=n>92.7 / 92.7</td><td class=n>+0.23 (n=289)</td><td class=n>0.96 / 0.00</td></tr>
+<tr><td>All</td><td class=n>4.4 / 4.4</td><td class=n>7.36 / 7.48</td><td class=n>61.5 / 61.4</td><td class=n>91.0 / 91.2</td><td class=n>+0.11 (n=860)</td><td class=n>0.52 / 0.00</td></tr>
+</table>
+<h2>Table 8 — gap to oracle (%), window penalties included</h2><table><tr><th>Route</th><th>Cust.</th><th class=n>RO</th><th class=n>2SP</th><th class=n>Greedy (submitted)</th><th class=n>Greedy (corrected)</th><th class=n>LA</th><th class=n>Δ Greedy</th></tr>
+<tr><td>Short</td><td>Few</td><td class=n>22.7</td><td class=n>2.3</td><td class=n>6.7</td><td class=n>6.8</td><td class=n>2.5</td><td class=n>+0.10</td></tr>
+<tr><td></td><td>Medium</td><td class=n>27.7</td><td class=n>3.2</td><td class=n>8.0</td><td class=n>8.0</td><td class=n>3.6</td><td class=n>+0.03</td></tr>
+<tr><td></td><td>Many</td><td class=n>34.3</td><td class=n>3.4</td><td class=n>8.9</td><td class=n>8.9</td><td class=n>2.8</td><td class=n>+0.04</td></tr>
+<tr><td>Medium</td><td>Few</td><td class=n>34.9</td><td class=n>5.1</td><td class=n>6.5</td><td class=n>6.6</td><td class=n>3.5</td><td class=n>+0.09</td></tr>
+<tr><td></td><td>Medium</td><td class=n>33.5</td><td class=n>4.5</td><td class=n>6.8</td><td class=n>6.8</td><td class=n>2.4</td><td class=n>+0.07</td></tr>
+<tr><td></td><td>Many</td><td class=n>33.9</td><td class=n>6.9</td><td class=n>9.4</td><td class=n>9.4</td><td class=n>4.0</td><td class=n>-0.00</td></tr>
+<tr><td>Long</td><td>Few</td><td class=n>35.7</td><td class=n>10.0</td><td class=n>6.1</td><td class=n>6.3</td><td class=n>4.4</td><td class=n>+0.23</td></tr>
+<tr><td></td><td>Medium</td><td class=n>35.5</td><td class=n>10.4</td><td class=n>6.3</td><td class=n>6.5</td><td class=n>3.7</td><td class=n>+0.19</td></tr>
+<tr><td></td><td>Many</td><td class=n>35.4</td><td class=n>14.6</td><td class=n>7.8</td><td class=n>8.1</td><td class=n>5.3</td><td class=n>+0.31</td></tr>
+</table><div class=small>Means over each method’s feasible runs, time-window classes pooled. All non-Greedy columns are identical to the current Table 8.</div>
+<h2>Table 9 — feasibility (base case only)</h2><table><tr><th>Method</th><th>Infeasible (%)</th><th>95% CI</th><th>HoS</th><th>Reserve</th><th>TW hit (%)</th><th>TW hit, windowed (%)</th><th>Not opt. (%)</th><th>Opt. gap (%)</th></tr>
+<tr><td>Greedy (corrected)</td><td>4.4</td><td>3.3, 6.0</td><td>4.4</td><td>0.0</td><td>72.7</td><td>61.4</td><td>--</td><td>--</td></tr>
+<tr><td>Greedy (submitted)</td><td>4.4</td><td>3.3, 6.0</td><td>4.4</td><td>0.0</td><td>72.1</td><td>61.5</td><td>--</td><td>--</td></tr>
+<tr><td>RO</td><td>0.0</td><td>0.0, 0.4</td><td>0.0</td><td>0.0</td><td>40.2</td><td>21.4</td><td>37.4</td><td>4.2</td></tr>
+<tr><td>LA</td><td>1.2</td><td>0.6, 2.2</td><td>0.4</td><td>0.4</td><td>91.1</td><td>86.1</td><td>--</td><td>--</td></tr>
+<tr><td>2SP</td><td>13.7</td><td>11.6, 16.1</td><td>0.2</td><td>13.5</td><td>83.4</td><td>78.5</td><td>54.8</td><td>12.1</td></tr>
+</table><div class=small>Base-case runs only; the submitted Table 9 pooled the sensitivity-axis runs into its Greedy row (8.9%).</div>
+<h2 class=pb>Figure 6 — corrected Greedy</h2><figure><img src="file:///C:/Users/celinep/Documents/GitHub/ChargeAndBreak/figures/basecase/paper_gap_box_pooledtw_greedyC.png" style="width:100%"><figcaption>Gap to oracle by route class and customer count, time-window classes pooled; Greedy = corrected Greedy.</figcaption></figure>
+<h2>Figure 9 — one-at-a-time sensitivity</h2><table><tr><th>Axis level</th><th class=n>Oracle</th><th class=n>LA</th><th class=n>Greedy submitted (n)</th><th class=n>Greedy corrected (n)</th></tr>
+<tr><td>CS spacing 30 km</td><td class=n>-1.10</td><td class=n>-1.37</td><td class=n>-1.15 (274)</td><td class=n>-1.09 (273)</td></tr>
+<tr><td>CS spacing 100 km</td><td class=n>+1.46</td><td class=n>+2.64</td><td class=n>+2.36 (261)</td><td class=n>+2.29 (261)</td></tr>
+<tr><td>Charger power 150 kW</td><td class=n>+18.57</td><td class=n>+16.80</td><td class=n>+19.69 (264)</td><td class=n>+19.61 (264)</td></tr>
+<tr><td>Charger power 700 kW</td><td class=n>-4.16</td><td class=n>-4.08</td><td class=n>-3.21 (272)</td><td class=n>-3.12 (272)</td></tr>
+<tr><td>Charger power 1000 kW</td><td class=n>-4.89</td><td class=n>-5.17</td><td class=n>+0.34 (255)</td><td class=n>+1.11 (259)</td></tr>
+<tr><td>Battery 300 kWh</td><td class=n>+6.32</td><td class=n>+10.05</td><td class=n>+14.98 (252)</td><td class=n>+15.02 (251)</td></tr>
+<tr><td>Battery 700 kWh</td><td class=n>-2.36</td><td class=n>-2.48</td><td class=n>-0.62 (251)</td><td class=n>-0.71 (257)</td></tr>
+<tr><td>Battery 900 kWh</td><td class=n>-3.82</td><td class=n>-4.30</td><td class=n>-2.40 (263)</td><td class=n>-2.46 (264)</td></tr>
+</table><figure><img src="file:///C:/Users/celinep/Documents/GitHub/ChargeAndBreak/figures/sensitivity/additional_sens_effects_greedyC.png" style="width:100%"><figcaption>Paired change in mean route duration vs the base case; Greedy bars = corrected Greedy. Oracle unchanged. LA unchanged except the 30-km bar, which now uses the 30-km LA runs completed on 2 Oct 2026 (n = 209; the existing figure, made on 27 Aug, had 16 pairs).</figcaption></figure>
+<h2 class=pb>Figure 10 — battery × power grid</h2><h4>Short routes — change in Greedy route duration vs base (%), submitted → corrected</h4>
+<table><tr><th>Battery \ power</th><th class=n>150 kW</th><th class=n>350 kW</th><th class=n>700 kW</th><th class=n>1000 kW</th></tr>
+<tr><td>900 kWh</td><td class=n>+14.8 → <b>+14.7</b></td><td class=n>-2.7 → <b>-2.8</b></td><td class=n>-5.8 → <b>-5.7</b></td><td class=n>-6.7 → <b>-6.6</b></td></tr>
+<tr><td>700 kWh</td><td class=n>+15.8 → <b>+15.7</b></td><td class=n>-0.9 → <b>-1.0</b></td><td class=n>-3.9 → <b>-3.9</b></td><td class=n>-4.7 → <b>-4.7</b></td></tr>
+<tr><td>500 kWh</td><td class=n>+14.9 → <b>+14.8</b></td><td class=n>+0.0 → <b>+0.0</b></td><td class=n>-2.6 → <b>-2.5</b></td><td class=n>+0.5 → <b>+1.2</b></td></tr>
+<tr><td>300 kWh</td><td class=n>+28.1 → <b>+28.3</b></td><td class=n>+13.6 → <b>+13.7</b></td><td class=n>+13.3 → <b>+15.4</b></td><td class=n>+11.9 → <b>+13.3</b></td></tr>
+</table>
+<h4>Medium routes — change in Greedy route duration vs base (%), submitted → corrected</h4>
+<table><tr><th>Battery \ power</th><th class=n>150 kW</th><th class=n>350 kW</th><th class=n>700 kW</th><th class=n>1000 kW</th></tr>
+<tr><td>900 kWh</td><td class=n>+20.6 → <b>+20.4</b></td><td class=n>-2.3 → <b>-2.3</b></td><td class=n>-6.3 → <b>-6.0</b></td><td class=n>-7.2 → <b>-7.2</b></td></tr>
+<tr><td>700 kWh</td><td class=n>+21.9 → <b>+22.0</b></td><td class=n>-0.6 → <b>-0.7</b></td><td class=n>-4.2 → <b>-4.3</b></td><td class=n>-5.2 → <b>-5.2</b></td></tr>
+<tr><td>500 kWh</td><td class=n>+20.4 → <b>+20.4</b></td><td class=n>+0.0 → <b>+0.0</b></td><td class=n>-3.3 → <b>-3.0</b></td><td class=n>+0.4 → <b>+1.6</b></td></tr>
+<tr><td>300 kWh</td><td class=n>+33.3 → <b>+33.5</b></td><td class=n>+14.3 → <b>+14.4</b></td><td class=n>+14.9 → <b>+17.5</b></td><td class=n>+13.1 → <b>+14.6</b></td></tr>
+</table><figure><img src="file:///C:/Users/celinep/Documents/GitHub/ChargeAndBreak/figures/sensitivity/additional_grid_battery_power_greedyC.png" style="width:88%"><figcaption>Corrected Greedy route duration against the base case.</figcaption></figure>
+<h2 class=pb>Figure 11 — electrification penalty vs diesel (%)</h2><table><tr><th>Level</th><th class=n>Oracle</th><th class=n>LA</th><th class=n>Greedy submitted (n)</th><th class=n>Greedy corrected (n)</th></tr>
+<tr><td>Base</td><td class=n>8.8</td><td class=n>9.4</td><td class=n>12.6 (267)</td><td class=n><b>12.7</b> (268)</td></tr>
+<tr><td>150 kW</td><td class=n>29.0</td><td class=n>28.1</td><td class=n>35.4 (263)</td><td class=n><b>35.5</b> (263)</td></tr>
+<tr><td>700 kW</td><td class=n>4.3</td><td class=n>4.7</td><td class=n>8.7 (269)</td><td class=n><b>8.9</b> (269)</td></tr>
+<tr><td>1000 kW</td><td class=n>3.5</td><td class=n>3.5</td><td class=n>13.3 (253)</td><td class=n><b>14.4</b> (259)</td></tr>
+<tr><td>300 kWh</td><td class=n>15.7</td><td class=n>19.7</td><td class=n>30.2 (250)</td><td class=n><b>30.4</b> (250)</td></tr>
+<tr><td>700 kWh</td><td class=n>6.2</td><td class=n>6.1</td><td class=n>12.3 (248)</td><td class=n><b>12.5</b> (256)</td></tr>
+<tr><td>900 kWh</td><td class=n>4.6</td><td class=n>4.6</td><td class=n>9.7 (262)</td><td class=n><b>9.9</b> (264)</td></tr>
+</table><figure><img src="file:///C:/Users/celinep/Documents/GitHub/ChargeAndBreak/figures/sensitivity/additional_diesel_oat_greedyC.png" style="width:100%"><figcaption>Each EV method against its diesel counterpart; Greedy = corrected Greedy on both legs.</figcaption></figure>
+</body></html>
