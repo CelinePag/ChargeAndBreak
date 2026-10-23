@@ -49,10 +49,12 @@ TAU = 0.25
 ARMS = {"gbt": ("gbt_F95_base_f{k}_s0", "gbt_F95_base_s0"),
         "torch": ("tmlp_F95_split_list_f{k}_s0", "tmlp_F95_split_list_s0")}
 ORACLE = ("gbt_F95_oracle_f{k}_s0", "gbt_F95_oracle_s0")
-# --setting mixed (2026-10-23): the mixed-route student and its trees twin,
-# on the LA's mixed training routes; no oracle there, so no oracle signal
+# --setting mixed (2026-10-23): the mixed-route student and, as "the other
+# model", the same recipe with seed 1 (a trees twin on the 1.4 M-row pool took
+# hours per model on the cluster); on the LA's mixed training routes; no
+# oracle there, so no oracle signal
 MIXED_ARMS = {"torch": ("tmlp_T144_physmix_split_list_f{k}_s0", "tmlp_T144_physmix_split_list_s0"),
-              "gbt": ("gbt_P102_physmix_f{k}_s0", "gbt_P102_physmix_s0")}
+              "torch_s1": ("tmlp_T144_physmix_split_list_f{k}_s1", "tmlp_T144_physmix_split_list_s1")}
 
 
 def fold_of(seed):
@@ -115,9 +117,10 @@ SIGNALS = ["margin", "rest_margin", "entropy", "pick_feas", "min_feas_top2", "n_
            "oracle_dis", "oracle_gap"]
 
 
-def build(d, arm, P):
-    """Gate table for student `arm`; P[name] = (cost, feas) per row."""
-    other = "torch" if arm == "gbt" else "gbt"
+def build(d, arm, P, other=None):
+    """Gate table for student `arm`; P[name] = (cost, feas) per row; `other`
+    is the model whose disagreement is a signal (default: the other arm)."""
+    other = other or ("torch" if arm == "gbt" else "gbt")
     cost, feas = P[arm]
     vocab = [str(x) for x in d["action_vocab"]]
     a_rest = np.array([v.endswith(("_r1", "_r2")) for v in vocab])[d["action_ix"]]
@@ -173,14 +176,14 @@ def main():
         from dataset import load_multi
         d = load_multi(["pmix", "mix"])
         P = {arm: predictions(d, pair) for arm, pair in MIXED_ARMS.items()}
-        builds, prefix = ["torch"], "gate_mixed_"
+        builds, prefix, other = ["torch"], "gate_mixed_", "torch_s1"
     else:
         d = load()
         P = {arm: predictions(d, pair) for arm, pair in ARMS.items()}
         P["oracle"] = predictions(d, ORACLE)
-        builds, prefix = list(ARMS), "gate_"
+        builds, prefix, other = list(ARMS), "gate_", None
     for arm in builds:
-        g = build(d, arm, P)
+        g = build(d, arm, P, other)
         out = os.path.join(DATA, f"{prefix}{arm}.npz")
         np.savez_compressed(out, **g)
         sp = np.where(g["seed"] <= 19, "fit", np.where(g["seed"] <= 21, "stop", "test"))

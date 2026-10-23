@@ -54,7 +54,8 @@ def baselines(g, m, rng):
         "student margin": -col("margin"),
         "rest/no-rest margin (current hybrid)": -col("rest_margin"),
         "entropy": col("entropy"),
-        "trees and PyTorch disagree": col("other_arm") - 1e-3 * col("margin"),
+        "other model disagrees":  # base: trees vs PyTorch; mixed: seed 1
+            col("other_arm") - 1e-3 * col("margin"),
         **({"LA- and oracle-trained disagree": col("oracle_dis") - 1e-3 * col("margin")}
            if "oracle_dis" in n else {}),
         "random": rng.random(m.sum()),
@@ -158,8 +159,9 @@ def main():
         b.save_model(os.path.join(MODELS, f"{tag}.txt"), num_iteration=b.best_iteration)
         block, target = CONFIGS[name]
         with open(meta_path, "w") as fh:
-            extra = (dict(student="tmlp_T144_physmix_split_list_s0", other="gbt_P102_physmix_s0",
-                          oracle=None) if args.setting == "mixed" else {})
+            extra = (dict(student="tmlp_T144_physmix_split_list_s0",
+                          other="tmlp_T144_physmix_split_list_s1", oracle=None)
+                     if args.setting == "mixed" else {})
             json.dump(dict(tag=tag, arm=args.arm, config=name, block=block, target=target, **extra,
                            features=features(g, block)[1], thresholds=thr,
                            trees=b.best_iteration), fh, indent=1)

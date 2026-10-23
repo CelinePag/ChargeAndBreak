@@ -24,7 +24,7 @@
 #     bash ML/hpc/run_jobs.sh gate-val i/n   # one of n shares: learned solver-call gate vs controls, validation
 #     bash ML/hpc/run_jobs.sh gate-val2 i/n  # round 2: gate on rollout labels + the rollout check (trees)
 #     bash ML/hpc/run_jobs.sh gate-test i/n  # the chosen hybrid + 2 controls on the 125 test routes, once
-#     bash ML/hpc/run_jobs.sh mixed-train    # fold models + trees twin for the mixed-route gate
+#     bash ML/hpc/run_jobs.sh mixed-train 0|1  # fold models (seed 0 / seed 1) for the mixed-route gate
 #     bash ML/hpc/run_jobs.sh mixed-val-a i/n  # margin trigger +/- check on the 32 mixed validation routes
 #
 # The stages are independent and can run at the same time.  On a plain
@@ -507,32 +507,26 @@ gate-test)
   ;;
 
 mixed-train)
-  # Models for the solver-call gate on mixed-charger routes (2026-10-23), with
-  # the recipe of the mixed student (mix-train): out-of-fold copies of
-  # tmlp_T144_physmix_split_list_s0 (folds by route seed: 1-4, 5-8, 9-12,
-  # 13-16, 17-19 held out in turn) and its trees twin gbt_P102_physmix on the
-  # same data (full model + the same folds).  One process; about 2 GB of RAM
-  # per model, so not on the laptop.
+  # Models for the solver-call gate on mixed-charger routes (2026-10-23):
+  # out-of-fold copies of the mixed student, recipe of mix-train, folds by
+  # route seed (1-4, 5-8, 9-12, 13-16, 17-19 held out in turn).  Seed 0 is
+  # the student, seed 1 "the other model" whose disagreement is a gate signal
+  # (it replaced a trees twin that took hours per model on 1.4 M rows).
+  #     bash ML/hpc/run_jobs.sh mixed-train 0    # and, at the same time, ... 1
   T=$(( NCPU < 16 ? NCPU : 16 ))
   TC="--fset T --threads $T --lambda-list 1 --tau 0.25 --arch split"
   FOLDS=("5-19" "1-4,9-19" "1-8,13-19" "1-12,17-19" "1-16")
+  SEED=${2:-0}
   fitm() {
     local tag=$1; shift
     if [ -f "ML/models/${tag}_meta.json" ]; then log "mixed-train: $tag exists, skipped"; return; fi
     log "mixed-train: training $tag"
     "$@" > "$LOGS/train_${tag}.log" 2>&1
   }
-  fitm gbt_P102_physmix_s0 python -u ML/code/gbt_train.py --fset P \
-      --physics "$PHYS,pmix,mix" --tag gbt_P102_physmix_s0 --seed 0
   for k in 0 1 2 3 4; do
-    fitm tmlp_T144_physmix_split_list_f${k}_s0 python -u ML/code/torch_train.py \
-        --tag tmlp_T144_physmix_split_list_f${k}_s0 --physics "$PHYS,pmix,mix" --seed 0 \
-        --fit-seeds "${FOLDS[$k]}" $TC
-    fitm gbt_P102_physmix_f${k}_s0 python -u ML/code/gbt_train.py --fset P \
-        --physics "$PHYS,pmix,mix" --tag gbt_P102_physmix_f${k}_s0 --seed 0 \
-        --fit-seeds "${FOLDS[$k]}"
+    fitm tmlp_T144_physmix_split_list_f${k}_s$SEED python -u ML/code/torch_train.py         --tag tmlp_T144_physmix_split_list_f${k}_s$SEED --physics "$PHYS,pmix,mix"         --seed $SEED --fit-seeds "${FOLDS[$k]}" $TC
   done
-  log "mixed-train done"
+  log "mixed-train $SEED done"
   ;;
 
 mixed-val-a)
