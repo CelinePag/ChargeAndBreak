@@ -151,7 +151,7 @@ def main():
             rows.append((f"learned: {name}", c))
             if best is None or np.mean(c) > best[1]:
                 best = (name, np.mean(c), b, X)
-        table(rows, "VALIDATION (seeds 20-21): share of the " + ("value of calling (student driving on)" if args.label == "rollout" else "one-step loss") + " recovered, net")
+        table(rows, ("SELECTION FOLD (seeds 17-19)" if args.setting == "mixed" else "VALIDATION (seeds 20-21)") + ": share of the " + ("value of calling (student driving on)" if args.label == "rollout" else "one-step loss") + " recovered, net")
         name, _, b, X = best
         sva = b.predict(X[va], num_iteration=b.best_iteration)
         thr = {f"{int(x*100)}": float(np.sort(sva)[::-1][max(int(round(x * len(sva))) - 1, 0)])

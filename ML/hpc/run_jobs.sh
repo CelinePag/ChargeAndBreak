@@ -26,6 +26,7 @@
 #     bash ML/hpc/run_jobs.sh gate-test i/n  # the chosen hybrid + 2 controls on the 125 test routes, once
 #     bash ML/hpc/run_jobs.sh mixed-train 0|1  # fold models (seed 0 / seed 1) for the mixed-route gate
 #     bash ML/hpc/run_jobs.sh mixed-val-a i/n  # margin trigger +/- check on the 32 mixed validation routes
+#     bash ML/hpc/run_jobs.sh mixed-val-b i/n  # the mixed gate + check vs margin + check, mixed validation
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -547,11 +548,30 @@ mixed-val-a)
   log "mixed-val-a $SL done"
   ;;
 
+mixed-val-b)
+  # The learned gate for the mixed student (gate_mixed_torch: fitted on mixed
+  # training seeds 1-16, chosen on 17-19; "other model" = seed 1), closed loop
+  # on the 32 mixed VALIDATION routes (2026-10-23), with the rollout check and
+  # the LA action shielded.  Calibrated with --dry: budget 5 % = 6.6 calls per
+  # route (matched by mixed-val-a's margin 20 + check, 7.4), 10 % = 10.3
+  # (matched here by margin 30 + check, ~9.6).
+  la_threads
+  SL=${2:-0/1}
+  B="--routes mixed --variants pmix,mix --set val --mseq --nominal-features --shield-la --check 32 --slice $SL"
+  M="--models torch:tmlp_T144_physmix_split_list_s0"
+  G="--gate torch --gate-model gate_mixed_torch"
+  for cfg in "$M $G --budget 5" "$M $G --budget 10" "$M --margin 30"; do
+    log "mixed-val-b $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $B $cfg >> "$LOGS/mixed_val_b_${SL/\//of}.log" 2>&1
+  done
+  log "mixed-val-b $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
   exit 1
   ;;
 esac

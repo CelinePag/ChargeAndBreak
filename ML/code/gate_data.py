@@ -102,7 +102,8 @@ def predictions(d, pair):
         rows = np.flatnonzero(folds == k)
         cost[rows], feas[rows] = predict(d, fold_fmt.format(k=k), rows)
     rows = np.flatnonzero(np.array([f is None for f in folds]))
-    cost[rows], feas[rows] = predict(d, full, rows)
+    if len(rows):                     # mixed training data has no stop/test seeds
+        cost[rows], feas[rows] = predict(d, full, rows)
     return cost, feas
 
 
