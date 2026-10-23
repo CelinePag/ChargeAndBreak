@@ -54,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import lightgbm as lgb                                              # noqa: E402
 
-from features import action_key                                     # noqa: E402
+from features import action_key, charger_curve                      # noqa: E402
 from policy_core import MODELS, _norm                               # noqa: E402
 from rollout_policy import BETA, FAIL_H, step                       # noqa: E402
 
@@ -127,8 +127,22 @@ def drive_fleet(base, fd, pre, cv, vehs, scens):
     or FAIL_H if it broke a rule."""
     n_stops = int(fd["N"])
     live = [i for i, v in enumerate(vehs) if not v.is_halted and v.stop < n_stops]
+    # A route whose chargers differ (fd["TbarK"]): the policy and the simulator
+    # read fd["Tbar"], so it is set to the curve of the stop's charger (or the
+    # next one) before every feature row, charge clamp and step, exactly as
+    # policy_core.run_student does.  Uniform routes: untouched.
+    curves, tbar = fd.get("TbarK"), fd["Tbar"]
+
+    def at(s):
+        if curves:
+            fd["Tbar"] = charger_curve(fd, s if s in pre.K else int(pre.next_cs[s]))
+
+    def rows_at(i):
+        at(vehs[i].stop)
+        return base._rows(fd, pre, vehs[i].stop, vehs[i], cv)
+
     while live:
-        built = [base._rows(fd, pre, vehs[i].stop, vehs[i], cv) for i in live]
+        built = [rows_at(i) for i in live]
         cost, feas = base._predict(np.vstack([b[1] for b in built]))
         picks, o = [], 0
         for i, (legal, rows, flags) in zip(live, built):
@@ -141,10 +155,12 @@ def drive_fleet(base, fd, pre, cv, vehs, scens):
         for k, (i, act, row, flags) in enumerate(picks):
             v = vehs[i]
             s = v.stop
+            at(s)
             tc = base._charge_hours(fd, s, v, act, row, flags, raw=raw.get(k))
             step(v, fd, act, tc, scens[i]["D"][s], scens[i]["E"][s],
                  getattr(base, "pay_mseq", False))
         live = [i for i in live if not vehs[i].is_halted and vehs[i].stop < n_stops]
+    fd["Tbar"] = tbar
     return np.array([FAIL_H if v.is_halted else v.t_arr + BETA * len(v.tw_misses)
                      for v in vehs])
 

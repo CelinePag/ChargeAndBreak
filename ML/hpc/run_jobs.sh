@@ -24,6 +24,8 @@
 #     bash ML/hpc/run_jobs.sh gate-val i/n   # one of n shares: learned solver-call gate vs controls, validation
 #     bash ML/hpc/run_jobs.sh gate-val2 i/n  # round 2: gate on rollout labels + the rollout check (trees)
 #     bash ML/hpc/run_jobs.sh gate-test i/n  # the chosen hybrid + 2 controls on the 125 test routes, once
+#     bash ML/hpc/run_jobs.sh mixed-train    # fold models + trees twin for the mixed-route gate
+#     bash ML/hpc/run_jobs.sh mixed-val-a i/n  # margin trigger +/- check on the 32 mixed validation routes
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -504,11 +506,58 @@ gate-test)
   log "gate-test $SL done"
   ;;
 
+mixed-train)
+  # Models for the solver-call gate on mixed-charger routes (2026-10-23), with
+  # the recipe of the mixed student (mix-train): out-of-fold copies of
+  # tmlp_T144_physmix_split_list_s0 (folds by route seed: 1-4, 5-8, 9-12,
+  # 13-16, 17-19 held out in turn) and its trees twin gbt_P102_physmix on the
+  # same data (full model + the same folds).  One process; about 2 GB of RAM
+  # per model, so not on the laptop.
+  T=$(( NCPU < 16 ? NCPU : 16 ))
+  TC="--fset T --threads $T --lambda-list 1 --tau 0.25 --arch split"
+  FOLDS=("5-19" "1-4,9-19" "1-8,13-19" "1-12,17-19" "1-16")
+  fitm() {
+    local tag=$1; shift
+    if [ -f "ML/models/${tag}_meta.json" ]; then log "mixed-train: $tag exists, skipped"; return; fi
+    log "mixed-train: training $tag"
+    "$@" > "$LOGS/train_${tag}.log" 2>&1
+  }
+  fitm gbt_P102_physmix_s0 python -u ML/code/gbt_train.py --fset P \
+      --physics "$PHYS,pmix,mix" --tag gbt_P102_physmix_s0 --seed 0
+  for k in 0 1 2 3 4; do
+    fitm tmlp_T144_physmix_split_list_f${k}_s0 python -u ML/code/torch_train.py \
+        --tag tmlp_T144_physmix_split_list_f${k}_s0 --physics "$PHYS,pmix,mix" --seed 0 \
+        --fit-seeds "${FOLDS[$k]}" $TC
+    fitm gbt_P102_physmix_f${k}_s0 python -u ML/code/gbt_train.py --fset P \
+        --physics "$PHYS,pmix,mix" --tag gbt_P102_physmix_f${k}_s0 --seed 0 \
+        --fit-seeds "${FOLDS[$k]}"
+  done
+  log "mixed-train done"
+  ;;
+
+mixed-val-a)
+  # First closed loop on the 32 mixed-charger VALIDATION routes (2026-10-23),
+  # no gate needed: the mixed student (tmlp_T144_physmix_split_list_s0) with
+  # the rest/no-rest margin trigger at 20 min (~10 % of decisions, --dry),
+  # with and without the rollout check, LA action shielded.  The student alone
+  # is results/hybrid_val_alone_ms_N.jsonl (laptop).  The LA has no runs on
+  # these routes: compare with the student alone and the oracle.
+  la_threads
+  SL=${2:-0/1}
+  B="--routes mixed --variants pmix,mix --set val --mseq --nominal-features --shield-la --slice $SL"
+  M="--models torch:tmlp_T144_physmix_split_list_s0"
+  for cfg in "$M --margin 20 --check 32" "$M --margin 20"; do
+    log "mixed-val-a $SL: $cfg (CB_GRB_THREADS=$CB_GRB_THREADS)"
+    python -u ML/code/run_hybrid.py $B $cfg >> "$LOGS/mixed_val_a_${SL/\//of}.log" 2>&1
+  done
+  log "mixed-val-a $SL done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
-  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n"
+  echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n"
   exit 1
   ;;
 esac

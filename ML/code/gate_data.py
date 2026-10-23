@@ -49,6 +49,10 @@ TAU = 0.25
 ARMS = {"gbt": ("gbt_F95_base_f{k}_s0", "gbt_F95_base_s0"),
         "torch": ("tmlp_F95_split_list_f{k}_s0", "tmlp_F95_split_list_s0")}
 ORACLE = ("gbt_F95_oracle_f{k}_s0", "gbt_F95_oracle_s0")
+# --setting mixed (2026-10-23): the mixed-route student and its trees twin,
+# on the LA's mixed training routes; no oracle there, so no oracle signal
+MIXED_ARMS = {"torch": ("tmlp_T144_physmix_split_list_f{k}_s0", "tmlp_T144_physmix_split_list_s0"),
+              "gbt": ("gbt_P102_physmix_f{k}_s0", "gbt_P102_physmix_s0")}
 
 
 def fold_of(seed):
@@ -143,27 +147,41 @@ def build(d, arm, P):
         ent = float(-(pz * np.log(pz + 1e-12)).sum())
         top2 = cand[np.argsort(cost[cand])[:2]]
         po, _ = pick(*P[other], ix)
-        pr, _ = pick(*P["oracle"], ix)
-        sig.append([margin, rm, ent, feas[p], feas[top2].min(), len(cand), len(ix),
-                    a_rest[p], a_brk[p], a_chg[p], float(po != p), cost[po] - cost[p],
-                    float(pr != p), cost[pr] - cost[p]])
+        pr = pick(*P["oracle"], ix)[0] if "oracle" in P else p
+        row = [margin, rm, ent, feas[p], feas[top2].min(), len(cand), len(ix),
+               a_rest[p], a_brk[p], a_chg[p], float(po != p), cost[po] - cost[p]]
+        if "oracle" in P:
+            row += [float(pr != p), cost[pr] - cost[p]]
+        sig.append(row)
         st.append(d["X"][p, :ns])
         meta.append((int(d["instance_ix"][p]), int(d["stop"][p]), int(d["seed"][p])))
     meta = np.array(meta)
+    names = SIGNALS if "oracle" in P else SIGNALS[:-2]
     return dict(label=np.array(lab), signals=np.array(sig, dtype=np.float32),
-                signal_names=np.array(SIGNALS), state=np.array(st, dtype=np.float32),
+                signal_names=np.array(names), state=np.array(st, dtype=np.float32),
                 state_names=np.array([str(x) for x in d["feature_names"][:ns]]),
                 instance_ix=meta[:, 0], stop=meta[:, 1], seed=meta[:, 2],
                 instances=d["instances"])
 
 
 def main():
-    d = load()
-    P = {arm: predictions(d, pair) for arm, pair in ARMS.items()}
-    P["oracle"] = predictions(d, ORACLE)
-    for arm in ARMS:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--setting", default="base", choices=["base", "mixed"])
+    args = ap.parse_args()
+    if args.setting == "mixed":
+        from dataset import load_multi
+        d = load_multi(["pmix", "mix"])
+        P = {arm: predictions(d, pair) for arm, pair in MIXED_ARMS.items()}
+        builds, prefix = ["torch"], "gate_mixed_"
+    else:
+        d = load()
+        P = {arm: predictions(d, pair) for arm, pair in ARMS.items()}
+        P["oracle"] = predictions(d, ORACLE)
+        builds, prefix = list(ARMS), "gate_"
+    for arm in builds:
         g = build(d, arm, P)
-        out = os.path.join(DATA, f"gate_{arm}.npz")
+        out = os.path.join(DATA, f"{prefix}{arm}.npz")
         np.savez_compressed(out, **g)
         sp = np.where(g["seed"] <= 19, "fit", np.where(g["seed"] <= 21, "stop", "test"))
         print(f"[gate] {arm}: {len(g['label'])} decisions -> {out}")

@@ -55,7 +55,8 @@ def baselines(g, m, rng):
         "rest/no-rest margin (current hybrid)": -col("rest_margin"),
         "entropy": col("entropy"),
         "trees and PyTorch disagree": col("other_arm") - 1e-3 * col("margin"),
-        "LA- and oracle-trained disagree": col("oracle_dis") - 1e-3 * col("margin"),
+        **({"LA- and oracle-trained disagree": col("oracle_dis") - 1e-3 * col("margin")}
+           if "oracle_dis" in n else {}),
         "random": rng.random(m.sum()),
     }
 
@@ -109,13 +110,17 @@ def table(rows, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", default="gbt", choices=["gbt", "torch"])
+    ap.add_argument("--setting", default="base", choices=["base", "mixed"],
+                    help="mixed: the mixed-route student's gate (gate_data.py --setting mixed); "
+                         "fitted on seeds 1-16, chosen on 17-19")
     ap.add_argument("--label", default="onestep", choices=["onestep", "rollout"],
                     help="onestep: the LA's own regret of the student's pick (gate_data.py); "
                          "rollout: the value of the call with the student driving on (gate_rollout.py)")
     ap.add_argument("--test", action="store_true",
                     help="score the gate chosen on validation on the test decisions (once)")
     args = ap.parse_args()
-    g = dict(np.load(os.path.join(DATA, f"gate_{args.arm}.npz"), allow_pickle=True))
+    prefix = "gate_mixed_" if args.setting == "mixed" else "gate_"
+    g = dict(np.load(os.path.join(DATA, f"{prefix}{args.arm}.npz"), allow_pickle=True))
     if args.label == "rollout":
         r = np.load(os.path.join(DATA, f"gate_{args.arm}_rollout.npz"), allow_pickle=True)
         keep = np.asarray(r["row"])
@@ -126,13 +131,15 @@ def main():
               f"on {len(keep)} decisions; the call hurts on {np.mean(g['label'] < 0)*100:.1f} %")
     seed = g["seed"]
     tr, va, te = seed <= 19, (seed >= 20) & (seed <= 21), seed >= 22
+    if args.setting == "mixed":          # no LA on the mixed validation routes: fold 4
+        tr, va, te = seed <= 16, (seed >= 17) & (seed <= 19), np.zeros_like(tr)
     lab = g["label"]
     print(f"[gate] {args.arm}: fit {tr.sum()} / validation {va.sum()} / test {te.sum()} decisions; "
           f"value of a call, mean {lab[tr].mean()*60:.2f} / {lab[va].mean()*60:.2f} / "
           f"{lab[te].mean()*60:.2f} min")
     rng = np.random.default_rng(0)
 
-    tag = f"gate_{args.arm}" + ("_ro" if args.label == "rollout" else "")
+    tag = f"{prefix}{args.arm}" + ("_ro" if args.label == "rollout" else "")
     meta_path = os.path.join(MODELS, f"{tag}_meta.json")
     if not args.test:
         rows = [(k, curve(lab[va], v, rng)) for k, v in baselines(g, va, rng).items()]
@@ -151,7 +158,9 @@ def main():
         b.save_model(os.path.join(MODELS, f"{tag}.txt"), num_iteration=b.best_iteration)
         block, target = CONFIGS[name]
         with open(meta_path, "w") as fh:
-            json.dump(dict(tag=tag, arm=args.arm, config=name, block=block, target=target,
+            extra = (dict(student="tmlp_T144_physmix_split_list_s0", other="gbt_P102_physmix_s0",
+                          oracle=None) if args.setting == "mixed" else {})
+            json.dump(dict(tag=tag, arm=args.arm, config=name, block=block, target=target, **extra,
                            features=features(g, block)[1], thresholds=thr,
                            trees=b.best_iteration), fh, indent=1)
         imp = sorted(zip(b.feature_importance("gain"), features(g, block)[1]), reverse=True)[:12]

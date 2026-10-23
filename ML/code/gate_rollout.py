@@ -54,7 +54,7 @@ from src.simulation.scenarios import generate_scenarios           # noqa: E402
 
 from dataset import DATA, load                                    # noqa: E402
 from extract import reconstruct_spread                            # noqa: E402
-from features import Precomp, action_key, key_to_action           # noqa: E402
+from features import Precomp, action_key, charger_curve, key_to_action  # noqa: E402
 from fpi_policy import drive_fleet                                # noqa: E402
 from gate_data import ARMS, FOLDS, fold_of                        # noqa: E402
 from policy_core import load_policy                               # noqa: E402
@@ -73,6 +73,9 @@ def call_value(fd, pre, veh, cv, pol, la_act, la_tauc, s_act, s_tauc, k, seed):
     s0, N = int(veh.stop), int(fd["N"])
     scen = generate_scenarios(fd, s0, N, n_scenarios=k, cv=cv, seed=seed)
     vehs, sc = [], []
+    tbar = fd["Tbar"]
+    if fd.get("TbarK"):            # per-charger curves: this stop's, as run_student
+        fd["Tbar"] = charger_curve(fd, s0 if s0 in pre.K else int(pre.next_cs[s0]))
     for act, tc in ((la_act, la_tauc), (s_act, s_tauc)):
         for x in scen:
             v = clone(veh)
@@ -80,6 +83,7 @@ def call_value(fd, pre, veh, cv, pol, la_act, la_tauc, s_act, s_tauc, k, seed):
             vehs.append(v)
             sc.append(x)
     cost = drive_fleet(pol, fd, pre, cv, vehs, sc)
+    fd["Tbar"] = tbar
     ok = cost < FAIL_H / 2
     ref = float(np.median(cost[ok])) if ok.any() else 0.0
     cost = np.where(ok, cost, ref + FAIL_EXTRA_H)

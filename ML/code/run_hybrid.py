@@ -90,10 +90,15 @@ class Gate:
         self.thr = float(self.meta["thresholds"][f"{budget:g}"]) if budget is not None else None
         self.names = self.meta["features"]
         other = "torch" if arm == "gbt" else "gbt"
-        self.other = load_policy(other, self.STUDENT[other], guard_q=0.99, spread_room=True)
-        self.oracle = load_policy("gbt", "gbt_F95_oracle_s0", guard_q=0.99, spread_room=True)
+        self.student = self.meta.get("student", self.STUDENT[arm])
+        kind = lambda t: "torch" if t.startswith("tmlp_") else "gbt"
+        o_tag = self.meta.get("other", self.STUDENT[other])
+        r_tag = self.meta.get("oracle", "gbt_F95_oracle_s0")
+        self.other = load_policy(kind(o_tag), o_tag, guard_q=0.99, spread_room=True)
+        self.oracle = (load_policy(kind(r_tag), r_tag, guard_q=0.99, spread_room=True)
+                       if r_tag and "oracle_dis" in self.names else None)
         for p in (self.other, self.oracle):
-            if nominal:
+            if nominal and p is not None:
                 p.feature_q = None
         self.scores = []
 
@@ -113,7 +118,7 @@ class Gate:
         pz = np.exp(z) / np.exp(z).sum()
         top2 = cand[np.argsort(cost[cand])[:2]]
         ko = self._pick(self.other, fd, pre, s, veh, cv)
-        kr = self._pick(self.oracle, fd, pre, s, veh, cv)
+        kr = self._pick(self.oracle, fd, pre, s, veh, cv) if self.oracle is not None else keys[j]
         gap = lambda k: (cost[keys.index(k)] - cost[j]) if k in keys else 0.0
         sig = dict(margin=c[1] - c[0] if len(c) > 1 else 9.0,
                    rest_margin=abs(r.min() - n.min()) if len(r) and len(n) else 9.0,
@@ -201,6 +206,8 @@ def drive(fd, D, E, cv, pol, name, tag, margin_h, final_h, dry, workers, time_li
                          workers, time_limit)
             la_s += time.time() - t0
             calls.append(s)
+            if curves:      # back to this charger's curve for the shield's clamp and the check
+                fd["Tbar"] = charger_curve(fd, s if s in pre.K else int(pre.next_cs[s]))
             if got is None:
                 fallback += 1
                 if curves:
@@ -307,6 +314,8 @@ def main():
                     help="students pay the charge-then-rest overhead, as the LA does")
     ap.add_argument("--nominal-features", action="store_true",
                     help="student inputs at nominal travel times, as in training")
+    ap.add_argument("--alone", action="store_true",
+                    help="the student alone (no trigger), rows written as config 'alone'")
     ap.add_argument("--dry", action="store_true",
                     help="no LA: drive the student, report how often each trigger fires")
     ap.add_argument("--slice", default="0/1")
@@ -322,12 +331,13 @@ def main():
            + (f"f{args.final:g}" if args.final is not None else "")
            + (f"g{args.gate}{args.budget:g}" if args.gate and args.budget is not None else "")
            + ("ro" if args.gate_model and args.gate_model.endswith("_ro") else "")
+           + ("mx" if args.gate_model and args.gate_model.startswith("gate_mixed") else "")
            + (f"r{args.random:g}" if args.random is not None else ""))
-    if not cfg and not args.dry:
-        ap.error("give --margin, --final, --gate with --budget, or --random (or --dry)")
+    if not cfg and not args.dry and not args.alone:
+        ap.error("give --margin, --final, --gate with --budget, --random or --alone (or --dry)")
+    if args.alone:
+        cfg = "alone"
     if args.check is not None:
-        if args.routes != "base":
-            ap.error("--check rolls out without per-charger curves: base routes only")
         cfg += f"c{args.check}z{args.check_z:g}"
     if args.shield_la:
         cfg += "L"
@@ -360,9 +370,8 @@ def main():
     for k, (v, name, path, spec) in enumerate(jobs):
         kind, _, tag = spec.rpartition(":")
         kind = kind or "torch"
-        if gate is not None and tag != Gate.STUDENT[args.gate]:
-            raise SystemExit(f"the {args.gate} gate was trained for {Gate.STUDENT[args.gate]}, "
-                             f"not {tag}")
+        if gate is not None and tag != gate.student:
+            raise SystemExit(f"the gate {gate.model} was trained for {gate.student}, not {tag}")
         if spec not in pols:
             pol = load_policy(kind, tag, guard_q=0.99, spread_room=True)
             if args.nominal_features:
