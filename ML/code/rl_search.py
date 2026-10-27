@@ -44,6 +44,11 @@ from multiprocessing import Pool
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# the repository root, for `src`: on the laptop the editable install provides
+# it, on the cluster nothing does (same trap as torch_train.py, 2026-10-02)
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from fpi_policy import walk_to_end                                   # noqa: E402
 from policy_core import _norm                                        # noqa: E402

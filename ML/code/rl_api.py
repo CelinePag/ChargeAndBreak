@@ -39,6 +39,9 @@ from multiprocessing import Pool
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _ROOT not in sys.path:                    # `src` on machines without the editable install
+    sys.path.insert(0, _ROOT)
 
 from features import Precomp, action_key                             # noqa: E402
 from fpi_policy import walk_to_end                                   # noqa: E402

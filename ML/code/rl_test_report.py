@@ -33,6 +33,9 @@ from collections import defaultdict
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _ROOT not in sys.path:                    # `src` on machines without the editable install
+    sys.path.insert(0, _ROOT)
 
 RESULTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results")
 BETA, T0 = 0.5, 8.0
