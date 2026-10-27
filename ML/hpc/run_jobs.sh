@@ -27,6 +27,9 @@
 #     bash ML/hpc/run_jobs.sh mixed-train 0|1  # fold models (seed 0 / seed 1) for the mixed-route gate
 #     bash ML/hpc/run_jobs.sh mixed-val-a i/n  # margin trigger +/- check on the 32 mixed validation routes
 #     bash ML/hpc/run_jobs.sh mixed-val-b i/n  # the mixed gate + check vs margin + check, mixed validation
+#     bash ML/hpc/run_jobs.sh rl-test        # student + decisive-state rollout, 125 base test routes, once
+#     bash ML/hpc/run_jobs.sh rl-mixed-test  # the same with the mixed student, 64 mixed test routes, once
+#     bash ML/hpc/run_jobs.sh rl-mixed-eq    # optional: the rollout over the equal-power student, mixed test
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -567,11 +570,73 @@ mixed-val-b)
   log "mixed-val-b $SL done"
   ;;
 
+rl-test)
+  # The decisive-state rollout over the base-case students (2026-10-27;
+  # rl_policy.RolloutChooser through rl_search.py): at a stop where a rest is
+  # within 2 h of the best other action, or the two best actions are within
+  # 0.25 h, the student's 4 best actions (always the best rest and the best
+  # non-rest) are each tried with the student driving on to the destination
+  # under 32 shared travel-time futures, raced in rounds of 8; the best is
+  # taken if it beats the student's own.  No solver.  125 base-case TEST
+  # routes, ONCE, stored realisations.  Settings fixed before validation
+  # (66 validation routes: trees -0.29, PyTorch -1.06 pp vs the LA).  Seed 0
+  # is the validated student; seeds 1-2 give the paper's three-seed mean.
+  # Do not change the settings or rerun after looking at the result.
+  # Writes results/rl_search_dsr_test_<tag>.jsonl (resumable by route).
+  export OMP_NUM_THREADS=1          # one LightGBM thread per worker process
+  TH='[{"dsr": 32, "race": 8}]'
+  for spec in torch:tmlp_F95_split_list_s0 torch:tmlp_F95_split_list_s1 \
+              torch:tmlp_F95_split_list_s2 gbt:gbt_F95_base_s0 gbt:gbt_F95_base_s1 \
+              gbt:gbt_F95_base_s2; do
+    kind=${spec%%:*}; tag=${spec#*:}
+    log "rl-test: $tag on the 125 base-case test routes ($NCPU workers)"
+    python -u ML/code/rl_search.py --kind "$kind" --tag "$tag" --routes base --split test \
+      --draws 0 --realised --theta "$TH" --name "dsr_test_$tag" --workers "$NCPU" \
+      >> "$LOGS/rl_test.log" 2>&1
+  done
+  log "rl-test done"
+  ;;
+
+rl-mixed-test)
+  # The same rollout, same frozen settings, over the MIXED student
+  # (tmlp_T144_physmix_split_list_s*: all uniform physics + the 238 mixed
+  # training routes; the student of the paper's mixed figure and of the mixed
+  # gate) on the 64 mixed-charger TEST routes (32 pmix + 32 mix), ONCE,
+  # stored realisations, seeds 0-2.  Writes results/rl_search_dsr_mtest_<tag>.jsonl.
+  export OMP_NUM_THREADS=1
+  TH='[{"dsr": 32, "race": 8}]'
+  for s in 0 1 2; do
+    tag=tmlp_T144_physmix_split_list_s$s
+    log "rl-mixed-test: $tag on the 64 mixed test routes ($NCPU workers)"
+    python -u ML/code/rl_search.py --kind torch --tag "$tag" --routes mixed \
+      --variants pmix,mix --split test --draws 0 --realised --theta "$TH" \
+      --name "dsr_mtest_$tag" --workers "$NCPU" >> "$LOGS/rl_mixed_test.log" 2>&1
+  done
+  log "rl-mixed-test done"
+  ;;
+
+rl-mixed-eq)
+  # Optional ablation: the same rollout over the EQUAL-POWER student
+  # (tmlp_T144_phys_split_list_s0: all uniform physics, no mixed routes; 61 %
+  # of its energy at >= 700 kW against 79 % for the mixed student) on the
+  # same 64 mixed test routes: can simulating the real chargers replace the
+  # mixed-route training data?
+  export OMP_NUM_THREADS=1
+  TH='[{"dsr": 32, "race": 8}]'
+  tag=tmlp_T144_phys_split_list_s0
+  log "rl-mixed-eq: $tag on the 64 mixed test routes ($NCPU workers)"
+  python -u ML/code/rl_search.py --kind torch --tag "$tag" --routes mixed \
+    --variants pmix,mix --split test --draws 0 --realised --theta "$TH" \
+    --name "dsr_mtest_$tag" --workers "$NCPU" >> "$LOGS/rl_mixed_eq.log" 2>&1
+  log "rl-mixed-eq done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq"
   exit 1
   ;;
 esac

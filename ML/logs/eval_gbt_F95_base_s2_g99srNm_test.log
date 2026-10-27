@@ -1,0 +1,55 @@
+[eval] kind=gbt tag=gbt_F95_base_s2 on test: 125 instances
+  25/125  11s
+  50/125  19s
+  75/125  24s
+  100/125  28s
+  125/125  32s
+[eval] 125 routes in 31.9s
+
+==========================================================================
+CLOSED-LOOP RESULT  —  gbt:gbt_F95_base_s2 on test
+==========================================================================
+routes                125
+completed             125
+infeasible            0
+latency               1.563 ms/decision (median 1.334)
+teacher latency       70617 ms/decision (45,183x slower)
+
+vs LA  (paired on 125 routes both completed)
+   median    -0.02 %
+   mean      +0.30 %
+   IQR     [-0.58, +0.97]
+   best/worst -25.10 % / +27.40 %
+   student faster on 64/125 routes
+
+vs GREEDY  (paired on 120 routes both completed)
+   median    -2.44 %
+   mean      -2.63 %
+   IQR     [-3.72, -1.53]
+   best/worst -11.62 % / +8.39 %
+   student faster on 116/120 routes
+
+vs ORACLE (hindsight objective - T_START, 125 routes)
+   median    +2.10 %     NOTE: obj includes the TW penalty on windowed routes
+
+time-window misses over 737 customer visits
+   student 111   LA 57   GREEDY 182
+
+penalised objective vs LA (duration + 0.5*misses, 125 routes)
+   median   +0.25 %   mean   +0.70 %
+
+rests   student   290  LA   289   mean +0.008/route   fewer on 3/125 routes
+charges student  1079  LA  1174   mean -0.760/route
+
+worst 5 families (median % vs LA)
+   RlongCmediumTlarge         n=  2  median  +4.51 %  worst +10.17 %
+   RshortCmediumTtight        n=  4  median  +1.62 %  worst  +2.26 %
+   RmediumCmediumTtight       n=  4  median  +0.98 %  worst +15.09 %
+   RmediumCfewTmedium         n=  4  median  +0.85 %  worst  +2.88 %
+   RshortCmanyTtight          n=  4  median  +0.81 %  worst  +2.45 %
+
+teacher on these routes: infeasible 0, no duration 0
+policy: forcing left 1 action 10x, left none 0x, charge clamp moved 6x
+spread room: actions removed 91x, charges shortened 6x
+
+[saved] C:\Users\celinep\Documents\GitHub\ChargeAndBreak\ML\results\eval_gbt_F95_base_s2_g99srNm_test.json

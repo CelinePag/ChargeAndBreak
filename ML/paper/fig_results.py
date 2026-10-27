@@ -220,6 +220,122 @@ def hybrid(me, G, P, cfg="m60"):
                 la_pen=float(np.mean(la_p)), calls=float(np.mean(calls)), routes=len(hyb))
 
 
+# ── the paper's mixed-route figure, final protocol (2026-10-26) ──────────────
+# Re-driven the way every table of the paper runs the learned policies: inputs
+# at nominal travel times and the repositioning time paid (run_hybrid --mseq
+# --nominal-features).  Seed 0 is checked against hybrid_alone_ms_N.jsonl,
+# which run_hybrid wrote under the same protocol.
+MIXED_TAGS = [f"tmlp_T144_physmix_split_list_s{s}" for s in range(3)]
+UNIFORM_TAG = "tmlp_T144_phys_split_list_s0"
+
+
+class _Fwd:
+    """Keeps the vehicle for its charging history; every other attribute
+    (pay_mseq, ...) is the policy's own."""
+
+    def __init__(self, pol):
+        self.pol, self.veh = pol, None
+
+    def __getattr__(self, k):
+        return getattr(self.pol, k)
+
+    def decide(self, fd, pre, stop, veh, cv):
+        self.veh = veh
+        return self.pol.decide(fd, pre, stop, veh, cv)
+
+
+def mixed_final():
+    """Energy taken at >= 700 kW chargers on the 64 mixed test routes the LA
+    ran, and the gap to the oracle (time only / with the window penalty) on
+    the routes with a certified oracle that every policy completed."""
+    import collections
+    import mixed_eval as me
+    from features import charger_kw
+    from policy_core import load_policy, run_student
+    me.ROUTE_SET = "test"
+    pols = {}
+    for tag in MIXED_TAGS + [UNIFORM_TAG]:
+        p = load_policy("torch", tag, guard_q=0.99, spread_room=True)
+        p.feature_q, p.pay_mseq = None, True
+        pols[tag] = p
+    groups = {"best": ["oracle"], "la": ["LA"], "greedy": ["Greedy"],
+              "uniform": [UNIFORM_TAG], "mixed": MIXED_TAGS}
+    stored = {}
+    for x in open(os.path.join(RES, "hybrid_alone_ms_N.jsonl")):
+        if x.strip():
+            r = json.loads(x)
+            stored[(r["variant"], r["instance"])] = r
+    E = collections.defaultdict(lambda: collections.defaultdict(float))
+    G, P, dev, n_routes = {}, {}, [], 0
+    for v in ("pmix", "mix"):
+        keep = set(me.la_routes(v))
+        for _v, name, path in me.instances([v], uniform=False):
+            if name not in keep:
+                continue
+            n_routes += 1
+            fd, D, Ereal, cv = me.load(path)
+            kw = {k: int(round(charger_kw(fd, k))) for k in fd["K"]}
+            o = me.read_oracle(v, name)
+            cert = o is not None and (o["gap"] or 0) <= 0.01
+            rows = {}
+            with open(me.oracle_path(v, name)) as fh:
+                for s in json.load(fh).get("sol") or []:
+                    if s["i"] in kw and s["ed"] - s["ea"] > 1e-3:
+                        E["oracle"][kw[s["i"]]] += s["ed"] - s["ea"]
+            la = me.la_row(v, name)
+            tr = la["trajectory"]
+            for k in range(len(tr) - 1):
+                st = int(tr[k]["stop"])
+                c = float(tr[k + 1]["e_arr"]) + float(Ereal[st]) - float(tr[k]["e_arr"])
+                if st in kw and c > 1e-3:
+                    E["LA"][kw[st]] += c
+            rows["LA"] = la
+            veh = me.run_greedy_ml(fd, D, Ereal, cv, return_vehicle=True)
+            done = (not veh.is_halted) and veh.stop >= int(fd["N"])
+            rows["Greedy"] = dict(duration_h=(veh.t_arr - float(fd.get("T_START", 8.0)))
+                                  if done else None, tw=len(veh.tw_misses))
+            for st, c in me._charged(veh, Ereal).items():
+                if st in kw and c > 1e-3:
+                    E["Greedy"][kw[st]] += c
+            for tag, pol in pols.items():
+                fd, D, Ereal, cv = me.load(path)
+                spy = _Fwd(pol)
+                r = run_student(fd, D, Ereal, spy, cv=cv)
+                rows[tag] = dict(duration_h=r["duration_h"], tw=r["tw_misses"])
+                for st, c in me._charged(spy.veh, Ereal).items():
+                    if st in kw and c > 1e-3:
+                        E[tag][kw[st]] += c
+                if tag == MIXED_TAGS[0] and (v, name) in stored:
+                    a, b = r["duration_h"], stored[(v, name)]["duration_h"]
+                    dev.append(abs(a - b) if a is not None and b is not None
+                               else (0.0 if a is b else float("inf")))
+            if cert:
+                for lab, r in rows.items():
+                    if r.get("duration_h") is not None:
+                        G[(lab, v, name)], P[(lab, v, name)] = me._gap(r, o), gap_pen(r, o)
+    per = {k: [] for k in groups}
+    per_p = {k: [] for k in groups if k != "best"}
+    n_gap = 0
+    for (lab, v, name) in [k for k in G if k[0] == "LA"]:
+        x = {k: [G.get((m, v, name)) for m in labs] for k, labs in groups.items() if k != "best"}
+        xp = {k: [P.get((m, v, name)) for m in labs] for k, labs in groups.items() if k != "best"}
+        if any(y is None for vals in list(x.values()) + list(xp.values()) for y in vals):
+            continue
+        n_gap += 1
+        for k in x:
+            per[k].append(float(np.mean(x[k])))
+            per_p[k].append(float(np.mean(xp[k])))
+
+    def share(labs):
+        tot = sum(sum(E[x].values()) for x in labs)
+        return sum(e for x in labs for k, e in E[x].items() if k >= 700) / tot
+    return dict(share={k: share(labs) for k, labs in groups.items()},
+                gap={k: float(np.mean(per[k])) for k in per_p},
+                gap_pen={k: float(np.mean(per_p[k])) for k in per_p},
+                routes_energy=n_routes, routes_gap=n_gap,
+                check_s0_max_abs_h=max(dev) if dev else None, check_s0_n=len(dev))
+
+
 def recompute():
     data = {"base": base_case()}
     with contextlib.redirect_stdout(io.StringIO()):
@@ -362,22 +478,28 @@ def fig_base(plt, d):
 
 
 def fig_mixed(plt, d):
-    m, mp, s = d["mixed"]["gap"], d["mixed"]["gap_pen"], d["share_v2"]
-    rows = [("Best schedule in hindsight", C_BEST, s["best"], None, None),
-            ("Look-ahead", C_LA, s["la"], "la", None),
-            ("Learned policy", C_LEARN, s["uniform"], "uniform", "trained on uniform routes"),
-            ("Learned policy", C_LEARN, s["mixed"], "mixed", "+ look-ahead data on mixed routes"),
-            ("Greedy rule", C_GREEDY, s["greedy"], "greedy", None)]
-    fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.2, 2.3),
-                                 gridspec_kw=dict(width_ratios=[1, 1.25], wspace=0.3))
+    """The paper's figure (final protocol, mixed_final): where the energy is
+    taken, and what it costs.  Terms of the companion paper: oracle, LA,
+    greedy heuristic, gap with / without the window penalty."""
+    f = d["mixed_final"]
+    m, mp, s = f["gap"], f["gap_pen"], f["share"]
+    rows = [("Oracle", C_BEST, s["best"], None, "perfect hindsight"),
+            ("Look-ahead (LA)", C_LA, s["la"], "la", "solver at every stop"),
+            ("Learned policy", C_LEARN, s["uniform"], "uniform", "trained on equal-power routes"),
+            ("Learned policy", C_LEARN, s["mixed"], "mixed", "+ LA runs on mixed routes"),
+            ("Greedy heuristic", C_GREEDY, s["greedy"], "greedy", None)]
+    global TIME_ONLY, WITH_TW
+    TIME_ONLY, WITH_TW = "duration only", "with window penalty"
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.4, 2.3),
+                                 gridspec_kw=dict(width_ratios=[1, 1.25], wspace=0.42))
     fig.subplots_adjust(left=0.33)
     bars(ax, [(lab, 100 * sh, col, sub) for lab, col, sh, _k, sub in rows],
-         "(a) Energy taken at\nfast chargers", " %", 125, fmt="{:.0f}")
+         "(a) Share of energy\ncharged at ≥ 700 kW", " %", 125, fmt="{:.0f}")
     # same rows on the right, labels already on the left
     pair_bars(bx, [(lab, m[k] if k else None, mp[k] if k else None, col, sub)
                    for lab, col, _sh, k, sub in rows],
-              "(b) Extra time over\nthe best schedule", " %", 1.3 * max(mp.values()),
-              ref_note="reference (0 %)", labels=False)
+              "(b) Gap to\nthe oracle", " %", 1.3 * max(mp.values()),
+              ref_note="reference", labels=False)
     save(plt, fig, "fig_mixed")
 
 
@@ -411,6 +533,15 @@ def main():
     data = recompute() if args.recompute or not os.path.exists(CACHE) else json.load(open(CACHE))
     if "share_v2" not in data or "gap_pen" not in data.get("base", {}):
         data = recompute()
+    if "mixed_final" not in data or args.recompute:
+        print("[fig] re-driving the policies on the mixed test routes (final protocol) ...",
+              flush=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            data["mixed_final"] = mixed_final()
+        with open(CACHE, "w") as fh:
+            json.dump(data, fh, indent=1)
+        print("[fig] mixed_final:", json.dumps({k: v for k, v in data["mixed_final"].items()}),
+              flush=True)
     plt = setup()
     fig_base(plt, data)
     fig_mixed(plt, data)

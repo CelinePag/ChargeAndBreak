@@ -1,9 +1,12 @@
-% CPAIOR 2027 -- draft 2 (2026-10-04), rewritten after CPAIOR 2020/2026 papers
-% (structure, formal problem definition, algorithm box, protocol, tone).
-% Needs llncs.cls and splncs04.bst from the template, references.bib and
-% fig_effort.pdf (python ML/paper/fig_effort.py) in the same folder.
-% Every number comes from ML/results (see ML/STATUS.html); the script that
-% produced each table is named in a comment above it.
+% CPAIOR 2027 short paper -- draft 4 (2026-10-26).
+% Draft 3 (2026-10-23) rewritten in the tone and structure of the authors'
+% companion paper (Paper_4_BreakAndCharge) and of Pagnier et al. (TR-D 2026):
+% research questions, "First/Second/Finally" contributions, positioning table,
+% companion notation (Gamma_i, D_i xi_i, beta_i, u^t_N), American spelling.
+% Previous drafts: main_draft3.tex (2026-10-23), main_draft2.tex (2026-10-04).
+% Needs llncs.cls and splncs04.bst from the user's template, references.bib
+% and fig_mixed.pdf (fig_results.py).  Every number comes from ML/results;
+% the script is named above each table.  Red \tbd{} marks what is missing.
 \documentclass[runningheads]{llncs}
 %
 \usepackage[T1]{fontenc}
@@ -13,558 +16,510 @@
 \usepackage{booktabs}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{xcolor}
+\newcommand{\tbd}[1]{\textcolor{red}{[#1]}}
 %
 \begin{document}
 %
-% working title: OR x ML for electric truck driver scheduling
-\title{Learning Charging and Rest Decisions for Electric Trucks from a
-Stochastic Look-Ahead Policy}
-\titlerunning{Learning Charging and Rest Decisions from a Look-Ahead Policy}
+\title{Learning When to Call the Solver: Imitation and Selective Look-Ahead
+for Scheduling Electric Truck Drivers under Uncertainty}
+\titlerunning{Learning When to Call the Solver}
 %
 \author{C\'eline Pagnier\inst{1}\orcidID{0009-0009-7276-9525} \and
 Steffen J. S. Bakker\inst{2,3}\orcidID{0000-0002-2656-3827}}
 %
 \authorrunning{C. Pagnier and S. J. S. Bakker}
-% TODO: affiliations 2 and 3 for the second author
-\institute{Department of Industrial Economics and Technology Management, Norwegian University of Science and Technology, Trondheim, Norway}
+% TODO: affiliations 2 and 3 for the second author (as in the user's template)
+\institute{Department of Industrial Economics and Technology Management,
+Norwegian University of Science and Technology, Trondheim, Norway}
 %
 \maketitle
 %
 \begin{abstract}
-We consider the online scheduling of charging stops, breaks and daily rests
-for a battery-electric truck under the EU driving-time regulation, with
-uncertain travel times. A stochastic rolling-horizon look-ahead policy that
-solves a mixed-integer program for every candidate action at every stop
-reaches a median gap of 2.1\% to the hindsight optimum, but requires about a
-minute of solver time per decision. We study to what extent a policy learned
-by imitation of this look-ahead can replace it. The learned policy is trained
-on the costs that the look-ahead computes for every candidate action and is
-executed behind a symbolic shield that enforces the regulation. On 125
-held-out routes, it is statistically indistinguishable from the look-ahead
-($+0.17\pm0.30$\% route duration) and never violates the regulation, at 3\,ms
-per decision. It generalizes to battery capacities, charger powers and
-charger spacings within the training range, but not to chargers slower than
-those seen in training, nor to routes on which charger power varies along the
-route, where every policy trained on uniform routes loses at least 3.7
-percentage points while the look-ahead loses nothing. On such routes, data
-aggregation (DAgger) with the look-ahead as expert recovers about half of the
-loss using 1{,}781 expert queries, which is as good as or better than adding
-up to 8{,}246 decisions of whole-route demonstrations.
-\keywords{Imitation learning \and Rolling-horizon look-ahead \and Electric
-vehicles \and Hours-of-service regulation \and Data aggregation}
+Battery electric trucks are competitive on long-haul routes only if they
+charge during the breaks and rests imposed by the EU driving-time regulation,
+which uncertain travel times make difficult. A rolling-horizon look-ahead
+policy, which solves a mixed-integer linear program for every candidate action
+and travel-time scenario, stays close to a perfect-hindsight benchmark but
+needs more than a minute of solver time at every stop. We study when calling
+this solver is worth it. First, we train gradient-boosted trees and a neural
+network on the costs that the look-ahead computes for every candidate action,
+behind a rule-based safety filter. On 125 test routes, these policies are
+within 0.7 percentage points of the look-ahead and none of their 750 runs
+breaches the regulation, whereas imitating hindsight-optimal schedules causes
+unnecessary daily rests. Second, a learned gate selects the decisions passed
+to the look-ahead, and a rollout check keeps its action only if it remains
+better when the learned policy drives on. This hybrid policy matches the
+look-ahead while calling it at 8.5\% of the decisions. \tbd{One sentence on
+charging stations of different powers.}
+\keywords{Imitation learning \and Rolling horizon \and Hybrid policies \and
+Electric trucks \and Truck driver scheduling}
 \end{abstract}
 %
 %
 \section{Introduction}
 \label{sec:intro}
 
-The electrification of road freight requires heavy-duty trucks to recharge
-during long-haul trips. For a battery-electric truck, charging cannot be
-planned independently of the driver: EU Regulation 561/2006~\cite{eu561}
-imposes breaks after 4.5 hours of driving and daily rests within each
-working day, and these stops are natural opportunities to charge. The joint
-problem of when to charge, for how long, and when to break or rest is further
-complicated by uncertain travel times, which make a plan computed at departure
-quickly obsolete. Decisions are therefore taken online, at each stop of the
-route.
+Battery electric trucks are the leading pathway to decarbonize road
+freight~\cite{pagnier2026linking}, but on long-haul routes their charging
+stops interact with the rules on driving time. The EU hours-of-service (HoS)
+regulation~\cite{eu561} imposes a 45-minute break after at most 4.5 hours of
+driving and a daily rest within every 24 hours. Since such a break is long
+enough for a substantial fast charge, synchronizing charging with breaks and
+rests is what keeps electric trucks close to the route durations of diesel
+trucks~\cite{brockmann2025}. However, this synchronization is fragile under
+uncertain travel times, since a delay on a single leg uses driving time and
+energy before the planned stop is reached.
 
-Electric vehicle routing with recharging~\cite{schneider2014,montoya2017} and
-vehicle scheduling under drivers' working-hour
-regulations~\cite{goel2009,goel_vidal2014} have been studied extensively, but
-mostly separately and in deterministic settings. In a companion
-paper~\cite{pagnier_bakker_journal}, we formulated the joint problem as a
-mixed-integer program (MIP) and compared several online policies under
-travel-time uncertainty. The best of them is a stochastic rolling-horizon
-look-ahead (LA)~\cite{powell2022}, which evaluates every candidate action at
-the current stop by solving the MIP over the next 24 hours for 25 sampled
-travel-time scenarios. The LA reaches a median gap of 2.1\% to the hindsight
-optimum. However, each decision takes about one minute of solver time, it
-requires a commercial MIP solver, and the computation must be repeated for
-every route, vehicle and charging network.
+In a companion paper~\cite{pagnier_companion}\footnote{\tbd{Venue of the
+companion paper, as the call for papers requires.}}, we formulated this
+problem as a sequential decision model and compared several scheduling
+policies in a discrete-event simulator. The best one is a rolling-horizon
+look-ahead (LA), which solves a mixed-integer linear program (MILP) over the
+next 24 hours for every candidate action and 25 travel-time scenarios. It
+stays within 2 to 5\% of a perfect-hindsight oracle, but a decision requires
+more than a minute of solver time, at every stop of every route. A learned
+policy decides in milliseconds, but it offers no guarantee with respect to the
+regulation, and it can make rare but costly errors. Indeed, a single wrong
+decision can force an additional daily rest, which adds at least 9 hours to
+the route. This motivates our research questions: Can a policy learned from
+the LA take its decisions at a fraction of its cost? And at which decisions is
+calling the LA still worth it?
 
-Learning a policy from an expensive optimization procedure is a recurring
-idea in the integration of machine learning and combinatorial
-optimization~\cite{bengio2021,amos2023}; learning to branch by imitation of
-strong branching is a well-known example~\cite{khalil2016,gasse2019}. In this
-paper, we apply this idea to the LA and ask two questions. First, can a policy
-learned by imitation match the LA on the routes it was trained for, without
-violating the regulation? Second, under which changes of the vehicle or the
-charging network does the learned policy remain reliable, and how should
-solver time be spent when it does not?
+Our contributions are as follows. First, we train a policy on the costs that
+the LA computes for all candidate actions, rather than on its choice only, and
+execute it behind a rule-based safety filter. We also compare this teacher
+with the oracle. Second, we propose a hybrid policy in which a gate, trained on
+out-of-fold errors of the learned policy, decides at which stops to call the
+LA, and a rollout check keeps the action of the LA only if it remains better
+when the learned policy takes the subsequent decisions. Finally, we evaluate
+both policies on routes whose charging stations (CS) have different powers,
+where the policy must also choose where to charge.
 
-Our contributions are as follows. (i) We propose a cost-sensitive imitation
-of the LA that uses the costs the LA computes for every candidate action,
-combined with a symbolic shield that enforces the regulation independently of
-the learned model. (ii) We show on 125 held-out routes that the learned policy
-matches the LA with no rule violation, at 3\,ms per decision. (iii) We
-characterize its generalization across battery capacities, charger powers and
-charger spacings, and identify routes on which charger power varies as a case
-where all learned policies fail. (iv) We show that, on these routes, data
-aggregation~\cite{ross2011} with the LA as expert is a more efficient use of
-solver time than additional demonstrations.
+Our results show that the learned policies are within 0.7 percentage points
+(pp) of the LA on 125 test routes, while imitating the oracle causes
+additional daily rests. The hybrid policy matches the LA while calling it at
+8.5\% of the decisions, and the rollout check is necessary for this result. On
+routes with CS of different powers, the learned policy charges at the fast
+stations almost as often as the LA, but remains 2.8\,pp behind it. \tbd{Hybrid
+result on these routes.}
 
-The rest of the paper is organized as follows. Section~\ref{sec:related}
-reviews related work. Section~\ref{sec:problem} defines the problem, the LA
-and the hindsight oracle. Section~\ref{sec:method} presents the learning
-method, and Sect.~\ref{sec:exp} reports the computational experiments.
-Section~\ref{sec:conclusion} concludes.
+The remainder of the paper is organized as follows.
+Section~\ref{sec:related} reviews related work, Sect.~\ref{sec:problem}
+defines the problem and the LA, and Sect.~\ref{sec:method} presents the
+learned and hybrid policies. Section~\ref{sec:exp} reports the computational
+results, and Sect.~\ref{sec:conclusion} concludes.
 
 \section{Related Work}
 \label{sec:related}
 
-\subsubsection{Electric vehicles and driving-time regulations.}
-The electric vehicle routing problem with time windows and recharging
-stations was introduced by Schneider et al.~\cite{schneider2014}, and Montoya
-et al.~\cite{montoya2017} showed the importance of modelling the nonlinear
-charging function. Goel~\cite{goel2009} studied vehicle scheduling and routing
-under the EU regulation on drivers' working hours, and Goel and
-Vidal~\cite{goel_vidal2014} compared the regulations of several countries.
-These works consider deterministic travel times and, to the best of our
-knowledge, do not combine charging decisions with the full set of break and
-rest rules. The companion paper~\cite{pagnier_bakker_journal} addresses this
-combination under uncertainty with MIP-based policies.
+Our work combines three research areas, which we review in turn before
+positioning our contribution.
 
 \subsubsection{Learning from optimization experts.}
-Machine learning has been used to replace or accelerate expensive components
-of optimization algorithms~\cite{bengio2021}. Khalil et al.~\cite{khalil2016}
-and Gasse et al.~\cite{gasse2019} learn branching rules by imitating strong
-branching, and amortized optimization~\cite{amos2023} more generally learns
-to predict the solutions of a family of optimization problems. In imitation
-learning, a policy trained on the states visited by the expert can reach
-states that the expert never visits; DAgger~\cite{ross2011} addresses this
-covariate shift by querying the expert on the states visited by the learned
-policy. In our setting, the expert is an optimization procedure that can be
-queried at any state, which makes this approach directly applicable.
+Imitation learning trains a policy on states labeled by an expert, and
+DAgger~\cite{ross2011} collects these states with the learned policy.
+AggreVaTe~\cite{ross_bagnell2014,sun2017aggrevated} uses the expert's
+cost-to-go of every action, which bounds the cost of the learned policy by
+that of the expert plus the regression error, and our training targets are of
+this kind. As noted by Chang et al.~\cite{chang2015lols}, improving on the
+expert requires roll-outs with the learned policy. Since each scenario is
+solved with perfect information, the LA is an instance of the expectation
+algorithm~\cite{vanhentenryck2006} and of hindsight
+optimization~\cite{yoon2008}. Policies can also be learned from
+hindsight-optimal solutions directly~\cite{baty2024,sinclair2023}. At CPAIOR,
+Bourgeat et al.~\cite{bourgeat2026} imitate a global solver before fine-tuning
+by reinforcement learning, and Anand et al.~\cite{anand2026} fine-tune a
+MILP-based policy by reinforcement learning.
 
-\subsubsection{Safety of learned policies.}
-Shielding~\cite{alshiekh2018} restricts the actions of a learned policy to
-those that a formal specification allows. We follow the same principle: the
-legality of an action is never learned but checked against the regulation
-before the learned model is consulted.
+\subsubsection{Approximate predictive control and safety.}
+The LA is a stochastic model predictive controller. Learned approximations of
+such controllers~\cite{hertneck2018,karg2020} are often combined with a safety
+filter~\cite{wabersich2021} or a shield~\cite{alshiekh2018} that restricts
+unsafe actions, and Zhang et al.~\cite{zhang2019certificate} learn an online
+estimate of their suboptimality. Choosing between a cheap and an expensive
+method is related to algorithm selection, which Guigal et
+al.~\cite{guigal2026} apply per instance within a rolling horizon.
 
-\section{Problem Definition}
+\subsubsection{Electric trucks and driving-time regulations.}
+Truck driver scheduling under EU rules~\cite{goel2010,garaix2024} and electric
+vehicle routing with recharging stations~\cite{schneider2014,montoya2017} have
+mostly been studied separately. Recent works combine them on a fixed route
+with deterministic travel times~\cite{bai2023,brockmann2025}, and Bai et
+al.~\cite{bai2023} use a rollout algorithm. Dynamic variants of electric
+vehicle routing are addressed with rollout policies~\cite{kullman2021} or safe
+reinforcement learning~\cite{basso2022}, but without driving-time rules.
+
+\subsubsection{Contribution.}
+Table~\ref{tab:positioning} positions the present work against the most
+closely related papers. In contrast with them, we learn from the action costs
+of a stochastic look-ahead, and we learn at which decisions this look-ahead is
+worth calling. To our knowledge, learned policies have not yet been applied to
+the joint charging and rest decisions of electric trucks.
+
+\begin{table}[t]
+\caption{Positioning of the present work in the literature. Teacher: what the
+policy is trained on; Solver calls: when an optimization model is solved while
+driving; CO: combinatorial optimization.}
+\label{tab:positioning}
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lllll}
+\toprule
+Ref. & Application & Teacher & Solver calls & Feasibility\\
+\midrule
+Hertneck et al.~\cite{hertneck2018} & Control & Robust MPC & -- & Validation\\
+Sinclair et al.~\cite{sinclair2023} & Allocation & Hindsight & -- & --\\
+Baty et al.~\cite{baty2024} & Dynamic VRP & Hindsight & Every decision & CO layer\\
+Guigal et al.~\cite{guigal2026} & Task planning & Best method & Per instance & --\\
+Pagnier et al.~\cite{pagnier_companion} & E-truck, HoS & -- & Every decision & MILP\\
+\midrule
+This paper & E-truck, HoS & Stochastic LA & Selected decisions & Rule filter\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Problem and Look-Ahead Policy}
 \label{sec:problem}
 
-\subsubsection{Route, uncertainty and state.}
-A truck drives a fixed route of stops $i\in\{0,\dots,N\}$, from the origin
-$0$ to the destination $N$. The set of stops is partitioned into charging
-stations $K$, placed about every 60\,km as required on the core European
-network~\cite{afir}, laybys $L$ where the driver can stop but not charge, and
-customers $C$, each with a service time of 0.5\,h and possibly a time window
-$[e_i,l_i]$. Leg $i$ goes from stop $i$ to stop $i+1$ and has a nominal travel
-time $d_i$. Its realized travel time is $d_i\xi_i$, where
+We briefly recall the sequential decision model of the companion
+paper~\cite{pagnier_companion}, which follows the framework of
+Powell~\cite{powell2019}.
+
+\subsubsection{Route and uncertainty.}
+A truck drives a fixed route of stops $i\in\mathcal{I}=\{0,\dots,N\}$:
+customers $\mathcal{C}$, CS $\mathcal{K}$ and rest areas $\mathcal{L}$. Leg $i$
+has an average travel time $D_i$ and a realized travel time
 \begin{equation}
-\xi_i=\min\{\xi^{\min}+\eta_i,\ \xi^{\max}\},\qquad
-\eta_i\sim\mathrm{LogNormal}(\mu,\sigma^2),
+\tilde D_i=D_i\,\xi_i,\qquad
+\xi_i=\min\{\underline{\xi}+Y_i,\ \overline{\xi}\},
 \label{eq:xi}
 \end{equation}
-with $\xi^{\min}=8/9$ (an 80\,km/h nominal speed against the 90\,km/h speed
-limiter), $\xi^{\max}=1.6$, and $(\mu,\sigma)$ calibrated so that
-$\mathbb{E}[\xi_i]=1$ with a target coefficient of variation of 0.15. The
-energy consumed on a leg follows a road-load model at the realized speed.
-Both are revealed only once the leg has been driven. On arrival at stop $i$,
-the state $s_i=(t_i,\epsilon_i,c_i)$ consists of the arrival time $t_i$, the
-battery energy $\epsilon_i$, and a vector $c_i$ of regulatory counters: driving
-time since the last break, driving and on-duty time in the current shift,
-time elapsed since the end of the last daily rest, the progress of a split
-break, and the remaining numbers of reduced rests and extended shifts.
+where $Y_i$ is lognormal and independent across legs, with
+$\mathbb{E}[\xi_i]=1$ and a coefficient of variation of 0.15,
+$\underline{\xi}\approx0.889$ and $\overline{\xi}=1.6$. The energy of a leg
+follows from the realized speed, and both are revealed once the leg is
+driven. Each customer has a service time and a soft time window, and serving
+it outside its window costs a penalty $\beta_i$ of 30 minutes.
 
-\subsubsection{Actions and regulation.}
-At stop $i$, an action $a=(y,b,r)$ specifies whether the truck charges
-($y=1$, only if $i\in K$), and either a break $b\in\{b_{45},b_{15},b_{30}\}$ or
-a daily rest $r\in\{r_{11},r_9\}$ (of 11 or 9 hours), or neither. Together with
-$y$, this gives a set $\mathcal{A}$ of twelve action types. A charging action
-is completed by a charging duration $\tau\ge 0$. Following~\cite{eu561} and
-Directive 2002/15/EC~\cite{eu2002_15}, driving between two breaks is limited to
-4.5\,h, where the 45-minute break $b_{45}$ may be split into $b_{15}$ followed
-by $b_{30}$; driving within a shift is limited to 9\,h, or 10\,h at most twice
-per week; and a daily rest of 11\,h, or 9\,h at most three times per week, must
-start at most 13\,h, or 15\,h for a reduced rest, after the end of the
-previous one. We denote by $\mathcal{A}(s_i)\subseteq\mathcal{A}$ the set of
-actions that are legal in state $s_i$. A route on which a limit is exceeded is
-counted as infeasible.
-
-\subsubsection{Charging and objective.}
-The battery has a capacity $\epsilon^{\max}=500$\,kWh and must stay above
-$0.2\,\epsilon^{\max}$. A station $k\in K$ rated at $P_k$\,kW charges at rate
-$P_k$ up to $0.8\,\epsilon^{\max}$ and at $\min\{P_k,0.4\,\epsilon^{\max}/\text{h}\}$
-above it; it has a known expected queueing time $Q_k$ (10\,min on average)
-and a setup time of 10\,min. A break or rest taken at a station overlaps with
-charging. For a policy $\pi$, the cost of a route is
+\subsubsection{State, actions and objective.}
+Upon arrival at stop $i$, the state $\Gamma_i$ contains the clock time, the
+battery energy, the driving time since the last break, the driving and
+working times of the shift, the time since the last daily rest, the
+split-break flag, and the numbers of reduced rests and extended shifts used.
+An action $a_i$ combines a charging decision (only at a CS), a break type
+(45 minutes, or 15 and 30 minutes for a split break) and a rest type (11 or
+9 hours), with their durations; $\mathcal{A}_i$ denotes the discrete actions
+that are structurally feasible at stop $i$. A driver may not drive more than
+4.5 hours without a break, nor more than 9 hours per shift (10 hours twice a
+week), and must complete a daily rest within 24 hours of the previous
+one~\cite{eu561,eu2002_15}, so that a shift lasts at most 13 hours (15 before a
+reduced rest). A charge counts as a break only if it lasts as long as the
+break. The 500\,kWh battery must stay above 20\% of its capacity, and
+charging slows down above 80\%. A run in which the truck is stranded or the
+driver breaches a limit is infeasible. A policy $\pi$ maps the state to an
+action, $a_i=A^\pi(\Gamma_i)$, and we seek one that minimizes
 \begin{equation}
-z(\pi)=t_N+\beta\sum_{i\in C}\mathbf{1}\{t_i\notin[e_i,l_i]\},
+\mathbb{E}\Big[u^t_N+\sum_{i\in\mathcal{C}}\beta_i\delta_i\Big],
 \label{eq:obj}
 \end{equation}
-the arrival time at the destination plus a penalty $\beta=0.5$\,h per missed
-time window, and the goal is to minimize $\mathbb{E}[z(\pi)]$.
+the expected arrival time at the destination plus the penalties, where
+$\delta_i=1$ if customer $i$ is served outside its window.
 
-\subsubsection{Look-ahead policy and hindsight oracle.}
-Let $\Omega_i$ be a set of 25 travel-time scenarios sampled from
-(\ref{eq:xi}) for the legs within 24\,h of stop $i$, and let $z^H(s_i,a,\omega)$
-be the optimal value of the MIP of~\cite{pagnier_bakker_journal} over these
-legs, with the first action fixed to $a$ and travel times $\omega$. The LA
-selects
+\subsubsection{Look-ahead policy and oracle.}
+At stop $i$, the LA selects a horizon end-stop $h$ within 24 hours, draws
+$S=25$ travel-time scenarios $\xi^{(k)}$, and solves, for every
+$a\in\mathcal{A}_i$ and every $k$, the MILP of~\cite{pagnier_companion} over
+$[i,h]$ with $a$ fixed at stop $i$. The score of action $a$ is
 \begin{equation}
-a_i^{\mathrm{LA}}\in\arg\min_{a\in\mathcal{A}(s_i)}\ \bar c(s_i,a),\qquad
-\bar c(s_i,a)=\frac{1}{|\Omega_i|}\sum_{\omega\in\Omega_i}z^H(s_i,a,\omega),
+f_i(a)=\frac{1}{S}\sum_{k=1}^{S}z_i\big(a,\xi^{(k)}\big),
 \label{eq:la}
 \end{equation}
-where infeasible scenarios are penalized, and prefers a charging action when
-its value is within 5\,min of the minimum. The MIPs are solved with Gurobi
-through Pyomo; with eight parallel workers on a laptop, a decision takes 71\,s
-on average (110\,s at charging stations). The \emph{oracle} solves the MIP
-over the whole route with the realized travel times, which gives a lower bound
-$z^\ast$ on the cost of any policy. We report the gap $(z(\pi)-z^\ast)/z^\ast$.
+where $z_i(a,\xi^{(k)})$ is the optimal arrival time at $h$ plus penalties,
+or a large constant if the scenario is infeasible. The LA executes
+$a^\ast\in\arg\min_{a\in\mathcal{A}_i}f_i(a)$, with durations from a final
+MILP at average travel times. The oracle solves the MILP over the whole route
+with the realized travel times once the run is finished. It is a benchmark
+rather than a policy, and we report the gap of each policy to it.
 
-\section{Learning Method}
+\section{Learned and Hybrid Policies}
 \label{sec:method}
 
-\subsubsection{Training data.}
-To compute~(\ref{eq:la}), the LA evaluates $\bar c(s,a)$ for every action
-$a\in\mathcal{A}(s)$. Instead of recording only the selected action, we record
-all of these values. Let $\mathcal{A}^F(s)\subseteq\mathcal{A}(s)$ be the
-actions that are feasible in all scenarios. For $a\in\mathcal{A}^F(s)$, the
-regression target is the regret
+\subsubsection{Learning from the action costs of the LA.}
+To select its action, the LA computes $f_i(a)$ for every
+$a\in\mathcal{A}_i$, and we record all these scores rather than its choice
+only. Let $\mathcal{A}^F_i$ be the actions that are feasible in all
+scenarios. For $a\in\mathcal{A}^F_i$, the regression target is the regret
+$q_i(a)=f_i(a)-\min_{a'\in\mathcal{A}^F_i}f_i(a')$, and
+$\mathbf{1}\{a\in\mathcal{A}^F_i\}$ is the target of a feasibility model. A
+state--action pair is described by 95 features computed at average travel
+times: the slack to each regulatory limit, the energy margin to the next
+stations, the next CS and customers, and the action. We train a regret model
+$\hat q$, a feasibility model $\hat p$ and a charging-duration model, either
+as gradient-boosted trees (LightGBM~\cite{ke2017}) with a Huber loss for the
+regret, or as multilayer perceptrons (PyTorch~\cite{paszke2019}) whose regret
+model minimizes
 \begin{equation}
-\rho(s,a)=\bar c(s,a)-\min_{a'\in\mathcal{A}^F(s)}\bar c(s,a'),
-\label{eq:regret}
-\end{equation}
-and the binary label $\mathbf{1}\{a\in\mathcal{A}^F(s)\}$ is the target of a
-feasibility model. A state therefore yields between 4 and 10 labelled
-actions. Each pair $(s,a)$ is described by 95 features, 77 for the state (the
-slack to each regulatory limit, the energy margin to the next stations, the
-next three stations and two customers, a summary of the 24-hour window of the
-LA, and the remaining route) and 18 for the action (e.g., its duration and
-the slack it leaves at the next time window).
-
-\subsubsection{Models.}
-We train three models: a cost model $\hat c(s,a)$ for the regret, a
-feasibility model $\hat p(s,a)$, and a model of the charging duration. With
-gradient-boosted trees (LightGBM~\cite{ke2017}), each model is a separate
-booster and the cost model minimizes a Huber loss. Each decision is weighted
-by $w(s)=m(s)/(m(s)+2\,\mathrm{se}(s))$, where $m(s)$ is the difference between
-the two best values of $\bar c(s,\cdot)$ and $\mathrm{se}(s)$ its standard
-error over the scenarios, so that decisions on which the LA is indifferent
-receive little weight. With neural networks (PyTorch~\cite{paszke2019}), each
-model is a separate multilayer perceptron, and the cost model minimizes
-\begin{equation}
-\mathcal{L}(\theta)=\sum_{s}w(s)\Big[\sum_{a\in\mathcal{A}^F(s)}
-\ell_\delta\big(\hat c_\theta(s,a)-\rho(s,a)\big)
-+\lambda\,\mathrm{CE}\big(\mathrm{sm}(-\rho(s,\cdot)/T),\,\mathrm{sm}(-\hat c_\theta(s,\cdot)/T)\big)\Big],
+\sum_{i}\Big[\sum_{a\in\mathcal{A}^F_i}\ell\big(\hat q_i(a)-q_i(a)\big)
++\lambda\,\mathrm{CE}\big(\mathrm{sm}(-q_i/\tau),\,
+\mathrm{sm}(-\hat q_i/\tau)\big)\Big],
 \label{eq:loss}
 \end{equation}
-where $\ell_\delta$ is the Huber loss, $\mathrm{sm}$ the softmax over
-$\mathcal{A}^F(s)$, and CE the cross-entropy, with $\delta=1$\,h, $T=0.25$\,h
-and $\lambda=1$. The second term penalizes errors in the order of the actions
-of a state rather than in their values. Without it, the network predicted the
-cost of daily rests more accurately than the trees but ranked them worse, and
-took an unnecessary daily rest on several short routes.
+where $\ell$ is the Huber loss with a threshold of 1 hour, $\mathrm{sm}$ the
+softmax over $\mathcal{A}^F_i$, CE the cross-entropy, $\tau=0.25$\,h and
+$\lambda=1$. The second term penalizes errors in the ranking of the actions.
 
-\subsubsection{Decision rule and shield.}
-The learned policy selects
-\begin{equation}
-\hat\pi(s)\in\arg\min\big\{\hat c(s,a):\ a\in\hat{\mathcal{A}}(s),\
-\hat p(s,a)\ge 0.5\big\},
-\label{eq:policy}
-\end{equation}
-where $\hat{\mathcal{A}}(s)\subseteq\mathcal{A}(s)$ is computed by a symbolic
-shield. The legal set $\mathcal{A}(s)$ and the actions that the regulation
-makes mandatory are derived from the simulator's rules and are never
-learned. The shield further removes an action if one of the regulatory
-counters would exceed its limit when the next leg is driven with the 0.99
-quantile of $\xi$, or if the duration of the stop would exceed the time left
-before the next daily rest. The predicted charging duration is clipped to the
-interval between the charge needed to reach the next station in the worst
-case and a full battery.
+\subsubsection{Safety filter.}
+The learned policy selects $\hat a_i\in\arg\min\{\hat q_i(a):
+a\in\hat{\mathcal{A}}_i,\ \hat p_i(a)\ge0.5\}$. The set
+$\hat{\mathcal{A}}_i\subseteq\mathcal{A}_i$ is computed by rules and is never
+learned: it removes an action if a regulatory counter would exceed its limit
+when the next leg is driven at the 0.99 quantile of $\xi_i$, if the stop would
+not fit before the next daily rest, or if the regulation makes another action
+mandatory. The charge is clipped between the energy needed to reach the next
+CS at the same quantile and a full battery.
 
-\subsubsection{Data aggregation with the look-ahead as expert.}
-The training states are those visited by the LA. Algorithm~\ref{alg:dagger}
-adds states visited by the learned policy itself. The learned policy drives
-the training routes (line~5); every state it visits that differs from the
-states reached by the LA on the same route, and in which at least two actions
-are admissible, is stored (line~6), and the LA is queried at that state with
-its usual configuration (line~7). The policy is then retrained on all the
-data collected so far (line~9). As a sanity check, we queried the LA again
-at 24 states that it had visited itself: it selected the same action in all
-24 cases, and the differences between the two evaluations of $\bar c$ were
-within the scenario standard errors.
+\subsubsection{A gate for calls to the LA.}
+The hybrid policy follows the learned policy and calls the LA at selected
+stops. In a state visited by the LA, a call is worth $v_i=q_i(\hat a_i)$, the
+regret of the learned action. To obtain the errors made on unseen routes, we
+split the training routes into five folds and compute $\hat a_i$ with a model
+trained on the other four. A gradient-boosted regressor $\hat v$ then predicts
+$\log(1+v_i)$ from signals available online: the gap between the two best
+predicted costs, the gap between the best rest and the best action without
+rest, the entropy of $\mathrm{sm}(-\hat q_i/\tau)$, the predicted
+feasibility, the disagreement with a second learned policy, and the state
+features. For a budget of $b\%$ of the decisions, the LA is called when $\hat
+v$ exceeds the corresponding quantile on the validation decisions.
+
+\subsubsection{Rollout check.}
+The score~(\ref{eq:la}) assumes that the LA also takes the subsequent
+decisions. In the hybrid policy, the learned policy does, and an action that
+suits the plan of the LA, such as an early daily rest, can be harmful when the
+learned policy drives on. When the LA returns an action
+$a^{\mathrm{LA}}\neq\hat a_i$, we therefore draw $F$ travel-time futures,
+apply either action, and let the learned policy drive each copy to the
+destination. Let $d_k$ be the cost of the route after $\hat a_i$ minus its
+cost after $a^{\mathrm{LA}}$ in future $k$. The action of the LA is kept only
+if $\bar d-z\,\mathrm{se}(d)>0$, and both actions share each future so that
+the comparison is paired. This is the roll-out with the learner
+of~\cite{chang2015lols}, used as an acceptance test rather than for training.
+Furthermore, the action of the LA must belong to $\hat{\mathcal{A}}_i$, and its
+charge is raised to the safe minimum if needed. Algorithm~\ref{alg:hybrid}
+summarizes one decision.
 
 \begin{algorithm}[t]
-\caption{Data aggregation with the look-ahead as expert}
-\label{alg:dagger}
+\caption{One decision of the hybrid policy at stop $i$}
+\label{alg:hybrid}
 \begin{algorithmic}[1]
-\Require training routes $\mathcal{R}$, LA data $\mathcal{D}_0$, number of rounds $R$
-\State train $\hat\pi_0$ on $\mathcal{D}_0$
-\For{$k=1,\dots,R$}
-  \State $\mathcal{D}_k\gets\emptyset$
-  \For{each route $q\in\mathcal{R}$}
-    \State drive $\hat\pi_{k-1}$ on $q$ with its realized travel times
-    \State $S\gets$ visited states that differ from the LA's on $q$, with $|\hat{\mathcal{A}}(s)|\ge2$
-    \State evaluate $\bar c(s,a)$ with the LA for all $s\in S$, $a\in\mathcal{A}(s)$; add them to $\mathcal{D}_k$
-  \EndFor
-  \State train $\hat\pi_k$ on $\mathcal{D}_0\cup\dots\cup\mathcal{D}_k$
-\EndFor
-\State \Return $\hat\pi_R$
+\Require state $\Gamma_i$, learned policy, gate $\hat v$ with threshold $\theta_b$, futures $F$, $z$
+\State $a\gets\hat a_i$ \Comment{argmin of $\hat q_i$ over the filtered actions $\hat{\mathcal{A}}_i$}
+\If{$|\hat{\mathcal{A}}_i|\ge2$ \textbf{and} $\hat v(\Gamma_i)\ge\theta_b$}
+  \State $a^{\mathrm{LA}}\gets$ action executed by the LA in state $\Gamma_i$
+  \If{$a^{\mathrm{LA}}\in\hat{\mathcal{A}}_i$ \textbf{and} $a^{\mathrm{LA}}\neq a$}
+    \State draw futures $\omega_1,\dots,\omega_F$; in each, drive the learned policy to the destination after $a$ and after $a^{\mathrm{LA}}$
+    \State $d_k\gets$ cost after $a$ minus cost after $a^{\mathrm{LA}}$ under $\omega_k$
+    \If{$\bar d-z\,\mathrm{se}(d)>0$} $a\gets a^{\mathrm{LA}}$ \EndIf
+  \EndIf
+\EndIf
+\State \Return $a$
 \end{algorithmic}
 \end{algorithm}
 
 \section{Computational Experiments}
 \label{sec:exp}
 
-\subsection{Protocol}
-\label{sec:protocol}
+The experiments consist of three parts. First, we compare the learned
+policies with the LA. Second, we evaluate the hybrid policy, together with
+ablations of the gate and of the rollout check. Finally, we evaluate the
+policies on routes whose CS have different powers.
+
+\subsection{Setup}
+\label{sec:setup}
 
 \subsubsection{Instances.}
-Routes are 800--1{,}200, 1{,}500--2{,}500 or 3{,}000--4{,}000\,km long, which
-gives 39--61, 72--120 and 144--185 stops, and serve 1--3, 4--6 or 7--15
-customers with no, tight (0.5--1\,h half-width), medium (1--3\,h) or large
-(3--6\,h) time windows. The resulting 36 families have 25 routes each, and
-each route has one travel-time realization. Routes with seeds 1--19 are used
-for training (639 routes solved by the LA, 56{,}104 decisions), seeds 20--21
-for model selection and early stopping (66 routes), and seeds 22--25 for
-testing (125 routes). Each configuration is trained with three random seeds,
-selected on the validation routes, and evaluated once on the test routes.
+We use the 900 routes of the companion paper~\cite{pagnier_companion}, which
+combine three route lengths (800 to 4{,}000\,km), three numbers of customers
+(1 to 15) and four time-window widths, with 25 routes and one travel-time
+realization each. CS have 350\,kW and are placed on average every 60\,km, as
+mandated for the TEN-T core network by 2030~\cite{afir}. Routes with seeds
+1--19 are used for training (639 routes solved by the LA, 56{,}104
+decisions), seeds 20--21 for validation (66 routes), and seeds 22--25 for
+testing (125 routes with an LA run). For the third part, the power of each CS
+is drawn from $\{150,350,700,1000\}$\,kW, either alone or together with the
+spacing between stations, and the LA was run on 238 training and 64 test
+routes.
 
-\subsubsection{Methods.}
-We compare the following policies:
-\begin{enumerate}
-\item \emph{Greedy}, the rule-based policy of~\cite{pagnier_bakker_journal};
-\item \emph{LA}, the look-ahead policy~(\ref{eq:la}), which is also the expert;
-\item \emph{Trees}, the learned policy~(\ref{eq:policy}) with LightGBM models
-  (63 leaves, depth 6, at most 1{,}200 rounds with early stopping);
-\item \emph{Network}, the learned policy~(\ref{eq:policy}) with neural models
-  (cost model with layers of 256, 256 and 128 units, other models with two
-  layers of 128 units, AdamW, early stopping on the validation decisions);
-\item \emph{MLP}, a scikit-learn network trained by squared error on each
-  action separately, without~(\ref{eq:loss}), as a simpler neural baseline.
-\end{enumerate}
-The learned policies run on a CPU and use the full shield. The LA runs were
-made on a laptop with four cores and on a 32-core Linux server, with Gurobi
-12.0.
+\subsubsection{Measures and protocol.}
+As in the companion paper, we report the gap to the oracle in route duration,
+with and without the out-of-window penalty of~(\ref{eq:obj}). Differences
+between policies are given in pp, paired by route, with $\pm$ one standard
+error; training seeds are averaged per route first. The oracle is solved to a
+0.5\% optimality gap on 114 of the 125 test routes. All design choices were
+made on the validation routes, and each test configuration was run once. The
+MILPs are solved with Gurobi~12.
 
-\subsubsection{Metrics.}
-We report the gap to the oracle and, for each learned policy, the relative
-difference in route duration with the LA, paired by route and averaged over
-the three training seeds; $\pm$ denotes one standard error over routes. We
-also report the number of routes on which the regulation is violated and the
-computing time per decision.
+\subsection{Learned Policies}
+\label{sec:learned}
 
-\subsection{Comparison with the Look-Ahead Policy}
-\label{sec:base}
-
-% numbers: ML/scratch/cmp_test.py g99sr (3 seeds each, route mean over seeds)
+% numbers: ML/scratch/both_metrics.py machinery on eval_*_g99srNm_test.json
+% (3 training seeds), nsN for the runs without filter; compare_oracle.py
 \begin{table}[t]
-\caption{Results on the 125 test routes. Relative route duration with
-respect to the LA, paired by route and averaged over three training seeds.
-The LA has a median gap of 2.1\% to the oracle, Greedy 4.8\%.}
-\label{tab:base}
+\caption{Learned policies on the 125 test routes (three training seeds):
+difference to the LA in the gap to the oracle (pp), with the window penalty
+and in route duration only, missed time windows (737 customer visits), and
+infeasible runs. The LA is 3.05\% above the oracle (2.77\% in duration only).}
+\label{tab:learned}
 \centering
 \begin{tabular}{lrrrr}
 \toprule
-Policy & vs.\ LA (mean) & vs.\ LA (median) & violations & time/decision\\
+Policy & vs.\ LA & duration only & missed windows & infeasible\\
 \midrule
-Network & $+0.17\pm0.30$\% & $-0.07$\% & 0/375 & 3\,ms\\
-Trees & $+0.48\pm0.35$\% & $+0.16$\% & 0/375 & 2\,ms\\
-MLP & $+1.56\pm0.35$\% & $+0.81$\% & 0/375 & --\\
-LA & -- & -- & 0/125 & 71\,s\\
+LA & -- & -- & 57 & 0/125\\
+Trees & $+0.68\pm0.43$ & $+0.23\pm0.41$ & 116 & 0/375\\
+Neural network & $+0.50\pm0.37$ & $+0.10\pm0.35$ & 111 & 0/375\\
+Greedy heuristic~\cite{pagnier_companion} & $+3.95\pm0.46$ & $+2.81\pm0.40$ & 174 & 5/125\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsubsection{Solution quality and computing time.}
-Table~\ref{tab:base} shows that the network and the trees are statistically
-indistinguishable from the LA on the test routes, while the MLP trained
-without the ranking term is 1.6\% worse on average. The learned policies take
-2 to 3\,ms per decision, against 71\,s for the LA; the 125 test routes
-required 234 hours of computation with the LA and 31 seconds with a learned
-policy. The amount of data needed is moderate: with two training routes per
-family (65 routes), the trees are within $0.87\pm0.35$ percentage points of
-the LA, and within $0.26\pm0.43$ with all 19.
+Table~\ref{tab:learned} shows that both learned policies are within 0.7\,pp of
+the LA, and within 0.25\,pp in route duration only. Indeed, most of the
+difference comes from missed time windows, which are twice as frequent as for
+the LA. A decision takes 1 to 5\,ms. Furthermore, no run is infeasible, which
+is due to the safety filter rather than to the models: without the filter, 18
+of the 375 runs of the trees and 38 of the 375 runs of the network breach a
+limit.
 
-\subsubsection{Effect of the shield.}
-No learned policy violates the regulation on any test route. This is due to
-the shield rather than to the models. In an experiment in which the trees were
-trained on short and medium routes and tested on long ones, they violated the
-regulation in 90 route runs with a drive guard at the 0.95 quantile, in 39
-after adding the check on the time left before the daily rest, and in none
-with the guard at the 0.99 quantile. On the test routes, with the 0.95 guard
-and without that check, the network violated the regulation in 6 of its 375
-runs and the trees in 1.
+We then train the same models to reproduce the actions of the oracle on its
+stored schedules. We observe that the resulting policies are worse, by
+$+2.05\pm0.48$\,pp for the trees and $+6.42\pm0.66$\,pp for the network. They
+take one more daily rest than the LA on 13\% (trees) and 32\% (network) of the
+runs, against 3\% and 2\% when trained on the costs of the LA. This is
+explained by the information the oracle has: knowing the travel times, it
+plans the last shifts close to the limits, and a policy that reproduces these
+choices without this knowledge is regularly forced into an additional rest.
 
-\subsubsection{Compounding errors and the tail of the expert.}
-We queried the LA, as in lines~5--7 of Algorithm~\ref{alg:dagger}, at 108
-states visited by each learned policy on the validation routes. The mean
-regret per decision was 0.62\,min for the network (0.83\,min on the LA's own
-states) and 1.13\,min for the trees (0.85\,min), both within noise. On the base case, errors therefore
-do not accumulate along the route. The learned policies, however, inherit a
-weakness of the LA: over all 836 base-case LA runs, 60 of the 71 runs whose gap
-exceeds 8\% take one more daily rest than the oracle, near the end of long
-routes. Three attempts to correct this (a rollout over the three best actions
-of the learned policy, one round of fitted policy iteration, and a MIP over
-the last shifts) did not reduce the number of extra rests. The learned
-policies also miss about twice as many time windows as the LA (112 to 120
-against 57 of 737 customer visits).
+\subsection{Calling the Look-Ahead}
+\label{sec:hybrid}
 
-\subsection{Generalization across Vehicles and Charging Networks}
-\label{sec:physics}
+We study the hybrid policy with the trees, which leave more room for
+improvement than the network on the validation routes. On the validation
+decisions, the gate recovers 65\% of the regret of the learned policy when
+calling the LA at 5\% of the decisions, and 87\% at 10\%, against 26\% and
+30\% when calling where the best rest and the best action without rest are
+closest. However, in closed loop, the gate alone helped less than these
+numbers suggest. On 2 of the 66 validation routes, a call led to an additional
+daily rest, adding 16 and 30\,pp to these routes. On the second one, the LA
+chose an early daily rest, and the learned policy, which took the subsequent
+decisions, then reached the 15-hour limit and had to rest a second time. The
+rollout check was introduced for this reason. With $F=32$ futures and $z=1$,
+it costs up to 30\,s of simulation per route.
 
-% numbers: python ML/code/phys_eval.py --report (trees, seed 1, test seeds 22-25)
+% numbers: ML/code/gate_report.py --set test, hybrid_base_*L_ms_N.jsonl
 \begin{table}[t]
-\caption{Difference in gap with the LA (percentage points, paired, about 40
-test routes per value) for trees trained on the base case only, on all
-values, and on all values except the tested one. No violation occurred.}
-\label{tab:physics}
+\caption{Hybrid policies on the 125 test routes (trees, one training seed),
+run once: calls to the LA per route (out of 95.5 decisions), difference to the
+LA and to the learned policy alone in the gap to the oracle (pp), routes with
+more daily rests than the LA, and infeasible runs. All hybrid variants filter
+the actions of the LA.}
+\label{tab:hybrid}
 \centering
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrrrr}
 \toprule
-Tested value & base only & all values & all but tested & Greedy\\
+Policy & calls & vs.\ LA & vs.\ alone & extra rests & infeasible\\
 \midrule
-Battery 300\,kWh & $+2.6\pm1.0$ & $+0.3\pm1.2$ & $+0.8\pm1.4$ & $+8.6\pm1.8$\\
-Battery 700\,kWh & $+2.0\pm0.8$ & $+1.5\pm0.9$ & $+0.9\pm0.4$ & $+6.3\pm0.9$\\
-Battery 900\,kWh & $+1.8\pm1.0$ & $+1.6\pm1.2$ & $+1.6\pm1.2$ & $+3.8\pm0.9$\\
-Charger 150\,kW & $+9.9\pm1.7$ & $+0.5\pm1.0$ & $+5.5\pm1.4$ & $+4.8\pm1.2$\\
-Charger 700\,kW & $+3.0\pm0.9$ & $+1.8\pm0.8$ & $+2.5\pm1.1$ & $+3.6\pm0.4$\\
-Charger 1000\,kW & $+1.8\pm0.8$ & $+2.4\pm1.0$ & $+1.9\pm0.9$ & $+8.6\pm1.0$\\
-Stations every 100\,km & $-0.1\pm1.0$ & $+0.2\pm1.0$ & $+0.2\pm0.9$ & $+2.8\pm1.2$\\
+Learned policy alone & 0 & $+0.73\pm0.44$ & -- & 3 & 0\\
+Gate, without check & 9.1 & $+0.09\pm0.35$ & $-0.64\pm0.30$ & 2 & 0\\
+Rest margin with check & 9.4 & $+0.00\pm0.37$ & $-0.73\pm0.26$ & 2 & 0\\
+Gate with check & 8.1 & $-0.36\pm0.33$ & $-1.09\pm0.30$ & 2 & 0\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The LA was also run on the test routes with one parameter changed at a time:
-the battery capacity, the charger power, and the distance between stations.
-Table~\ref{tab:physics} reports the trees trained on the base case only, on
-all values, and on all values except the tested one. A single model trained
-on all values performs well on each of them, at a cost of $0.4\pm0.3$
-percentage points on the base case. A value excluded from training is handled
-nearly as well as an included one, with one exception: chargers of 150\,kW,
-slower than any charger in the remaining training data, for which the trees
-are worse than Greedy. Neural networks extrapolate less well. Trained on the
-base case only, the MLP has a gap of 35\% at 150\,kW against 7\% for the
-trees; trees treat an unseen input value as the nearest seen one, whereas a
-network extrapolates it.
+Table~\ref{tab:hybrid} reports the results on the test routes. The hybrid
+policy with gate and rollout check is at the level of the LA
+($-0.36\pm0.33$\,pp) and improves on the learned policy alone by
+$1.09\pm0.30$\,pp, while calling the LA at 8.5\% of the decisions, or about
+10\% of its computing time including the roll-outs. At a similar number of
+calls, the gate is better than the rest margin ($-0.37\pm0.18$\,pp, paired),
+and the rollout check improves the gate ($-0.45\pm0.11$\,pp) by rejecting 33\%
+of the actions of the LA. The filter rejected 23 further actions of the LA as
+unsafe, and no run is infeasible. It should be noted that the advantage over
+the LA seen on the validation routes ($-0.67\pm0.28$\,pp) is not confirmed on
+the test routes, and that the gain over the learned policy is concentrated on
+short and medium routes.
 
 \subsection{Charging Stations of Different Powers}
 \label{sec:mixed}
 
-\subsubsection{Instances.}
-In all previous experiments, the stations of a route have the same power. We
-generated 32 test routes (short and medium routes, seeds 22--25) on which the
-power of each station is drawn uniformly from $\{150,350,700,1000\}$\,kW, with
-the same geometry and travel times as the original routes, and solved them
-with the LA and the oracle. For each policy, we measure the difference between
-its gap on the modified route and its gap on the original route. We also
-generated 124 such training routes (short routes with seeds 1--19 and medium
-routes with seeds 1--12) and solved 121 of them with the LA.
-
-% numbers: ML/scratch/cmp_curve.py (Network: 3 seeds, route mean over seeds)
-\begin{table}[t]
-\caption{Increase of the gap to the oracle (percentage points) when the
-station powers vary along the route, on 32 test routes, and the same increase
-minus that of the LA, paired over the 31 routes solved by the LA in both
-versions. The network rows are trained on all values of
-Sect.~\ref{sec:physics}, with 49 additional features describing the current
-station and the next six. Expert effort is the number of LA decisions used to
-train on routes with varying powers.}
-\label{tab:mixed}
-\centering
-\begin{tabular}{llrr}
-\toprule
-Policy & expert effort & increase & minus LA\\
-\midrule
-LA & -- & $-0.6\pm1.1$ & --\\
-Greedy & -- & $+6.0\pm0.9$ & --\\
-Trees, uniform routes only & 0 & $+5.4\pm0.9$ & --\\
-Network, uniform routes only & 0 & $+3.7\pm1.5$ & $+4.5\pm2.0$\\
-\quad + 47 routes with varying powers & 2{,}279 & $+2.3\pm0.8$ & $+2.9\pm1.4$\\
-\quad + 121 routes with varying powers & 8{,}246 & $+2.3\pm1.2$ & $+3.0\pm2.3$\\
-\quad + Algorithm~\ref{alg:dagger}, one round & 1{,}781 & $+1.5\pm0.9$ & $+2.1\pm1.5$\\
-\quad + Algorithm~\ref{alg:dagger}, two rounds & 3{,}557 & $+1.5\pm0.4$ & $+2.1\pm1.3$\\
-\bottomrule
-\end{tabular}
-\end{table}
-
+% numbers: ML/paper/fig_results.py (mixed_final, cached in fig_data.json);
+% the 3 extra rests: hybrid_alone_ms_N.jsonl, seed 0, 61 routes
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{fig_effort.pdf}
-\Description{Dot chart with six rows. Each row joins a hollow dot, the mean
-gap to the hindsight optimum on 32 test routes whose stations have the same
-power, to a filled dot, the same routes with stations of different powers.
-Look-ahead: 3.0 to 2.4 percent. Network trained on uniform routes only: 3.0 to
-6.8. With 47 routes from the look-ahead: 3.5 to 5.7. With 121: 3.0 to 5.3.
-With one round of data aggregation: 3.1 to 4.6. With two rounds: 3.2 to 4.7.}
-\caption{Mean gap to the oracle of the network on the 32 test routes, with
-stations of equal power (hollow) and of different powers (filled), depending on
-the additional training data. The number is the increase in percentage
-points. Paired statistics are given in Table~\ref{tab:mixed}.}
-\label{fig:effort}
+\includegraphics[width=\textwidth]{fig_mixed.pdf}
+\caption{Test routes with CS of different powers. (a) Share of the charged
+energy taken at 700 and 1000\,kW stations (64 routes). (b) Gap to the oracle
+in route duration only (light) and with the window penalty (dark), on the 60
+routes with an oracle within 1\% of optimality. Learned policies: three
+training seeds, one for the policy trained on equal-power routes.}
+\label{fig:mixed}
 \end{figure}
 
-\subsubsection{Results.}
-Table~\ref{tab:mixed} shows that the LA does not suffer from the variation in
-power: its gap decreases slightly, because it takes 81\% of its energy at
-700 and 1000\,kW stations and only 3\% at 150\,kW stations. In contrast, all
-policies trained on routes with equal powers lose at least 3.7 percentage
-points, and the trees distribute their charging almost evenly over the
-stations. On a route with equal powers, the features of the current station
-and of the next ones always coincide, so that the data contain no information
-on how to choose between stations of different powers. Neither the 49
-additional features nor a network architecture that evaluates every station
-with a shared sub-network and compares the current station with the best
-reachable one closed this gap; the latter showed an advantage on the
-validation routes that did not hold on the test routes.
+When the CS of a route have different powers, the policy must also choose
+where to charge. Figure~\ref{fig:mixed}(a) shows that the oracle takes 89\% of
+its energy at 700 and 1000\,kW stations, and the LA 82\%. A learned policy
+trained on routes with equal powers takes only 61\%, since its training data
+never offered such a choice, and its gap to the oracle is three times that of
+the LA. Adding the runs of the LA on 238 training routes with mixed powers
+raises this share to 79\% and reduces the gap from 8.2\% to 5.6\%. In
+comparison, the greedy heuristic, which charges to full whenever it stops,
+takes 52\% of its energy at fast stations. The learned policy therefore
+charges almost where the LA does, but remains 2.8\,pp behind it, and three of
+its 61 runs with a solved oracle (first training seed) take an additional
+daily rest.
 
-\subsubsection{Additional demonstrations versus data aggregation.}
-We then compared two ways of using the LA on routes with varying powers
-(Table~\ref{tab:mixed} and Fig.~\ref{fig:effort}): adding the LA's runs on 47
-or 121 such training routes, or applying Algorithm~\ref{alg:dagger} on the
-47 short training routes. Additional demonstrations reduce the increase from
-3.7 to 2.3 percentage points, but 3.6 times more LA decisions bring no further
-improvement. One round of data aggregation, with 1{,}781 LA queries, reduces
-the increase to 1.5 percentage points. It is the only configuration whose
-improvement over the network trained on uniform routes is clearly larger than
-the noise ($2.2\pm0.7$ points), and it is at least as good as additional
-demonstrations ($0.8\pm0.9$ points better than with 47 routes, $0.8\pm1.2$
-better than with 121). A second round reduces the variance across training
-seeds but not the mean. The labels collected in this way are specific to the
-policy that visited the states: the same labels do not improve the trees
-($+5.2\pm1.4$, against $+3.6\pm1.3$ with 121 additional routes). On routes
-where both the power and the distance between stations vary, the benefit of
-data aggregation is smaller, since it was only applied to routes with varying
-power. None of these additions degrades the base case: all models remain
-within noise of the LA on the 125 base-case test routes, without violation.
-
-\subsubsection{Remaining gap.}
-After either kind of additional data, the learned policy remains about two
-percentage points behind the LA on these routes (Table~\ref{tab:mixed}, last
-column). Note that on the first eight routes solved by the LA, the learned
-policy appeared to be within one point of it; the larger sample does not
-confirm this. The variability of the LA itself, whose route durations differ
-by 0.35\% (median) between two runs on the same route and realization, is of
-the same order as several of the effects reported here.
+For these routes, the second policy of the gate is the same network trained
+with another seed, and the gate is selected on held-out training routes, since
+the LA was not run on the validation routes. On the 30 validation routes with
+a solved oracle, calling the LA where the rest margin is below 20 minutes
+improves on the learned policy by $0.45\pm0.25$\,pp with the rollout check,
+and is worse without it, due to one additional daily rest. \tbd{Gate with
+check on the validation routes; test results against the LA in a table like
+Table~\ref{tab:hybrid}.}
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-In this work, we studied a policy learned by imitation of a stochastic
-look-ahead for the joint scheduling of charging, breaks and daily rests of an
-electric truck. Using the costs computed by the look-ahead for every
-candidate action, and enforcing the regulation through a symbolic shield, the
-learned policy matches the look-ahead on held-out routes, never violates the
-regulation, and decides in a few milliseconds. It generalizes to battery
-capacities, charger powers and station spacings within the training range,
-but not to slower chargers or to routes on which charger power varies. In the
-latter case, data aggregation with the look-ahead as expert is the most
-efficient use of solver time among the options we tested, and recovers about
-half of the loss. The remaining gap of about two percentage points did not
-decrease with more data of either kind. A natural extension is a hybrid
-policy that calls the look-ahead only for the charging decisions on such
-routes. The main limitations of this study are the synthetic instances, the
-size of the sample of routes with varying powers (32), and the use of a single
-training seed for the trees in Sects.~\ref{sec:physics} and~\ref{sec:mixed}.
+This paper studied learned policies for the charging, break and rest decisions
+of an electric truck under uncertain travel times, and a hybrid policy that
+calls a stochastic look-ahead only where a learned gate expects a gain.
+
+The main findings are as follows. First, policies trained on the action costs
+of the look-ahead are close to it, and a rule-based filter keeps all their
+runs within the regulation, whereas imitating hindsight-optimal schedules
+leads to additional daily rests. Second, the hybrid policy matches the
+look-ahead at about a tenth of its computing time, provided that each action
+of the look-ahead is checked by rolling out the learned policy. Finally, with
+charging stations of different powers, the learned policy learns where to
+charge, but a gap of 2.8\,pp to the look-ahead remains. \tbd{Hybrid on these
+routes.}
+
+Several directions could address the limitations of the present work. First,
+the hybrid policies were trained with a single seed on synthetic routes.
+Second, the look-ahead itself still takes additional daily rests near the end
+of long routes, which neither policy removes; training the learned policy
+with its own roll-outs~\cite{chang2015lols} could address this. Finally,
+correlated travel times and uncertain queuing times at the stations would
+test whether the gate remains reliable under richer uncertainty.
 
 \begin{credits}
 \subsubsection{\ackname}
-% TODO: funding
+% Funding statement of the companion paper and of Pagnier et al. (TR-D 2026);
+% TODO: confirm it applies to this paper too.
+This paper was prepared as a part of the Norwegian Research Centre for Energy
+Transition Studies (FME NTRANS, p-nr: 296205), funded by the Research Council
+of Norway.
 \subsubsection{\discintname}
 The authors have no competing interests to declare that are relevant to the
 content of this article.
