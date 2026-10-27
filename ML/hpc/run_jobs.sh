@@ -30,6 +30,7 @@
 #     bash ML/hpc/run_jobs.sh rl-test        # student + decisive-state rollout, 125 base test routes, once
 #     bash ML/hpc/run_jobs.sh rl-mixed-test  # the same with the mixed student, 64 mixed test routes, once
 #     bash ML/hpc/run_jobs.sh rl-mixed-eq    # optional: the rollout over the equal-power student, mixed test
+#     bash ML/hpc/run_jobs.sh rl-exit R      # expert iteration round R (1, 2, ...): labels, fine-tune, validate
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -631,12 +632,56 @@ rl-mixed-eq)
   log "rl-mixed-eq done"
   ;;
 
+rl-exit)
+  # Expert iteration, round R (2026-10-27): learn the rollout's decisions, so
+  # the PyTorch student takes them in milliseconds (ML/RL_THEORY.md §13).
+  #   1. labels: the current student (round 1: tmlp_F95_split_list_s0; round
+  #      R: the round R-1 model) drives the 639 training routes under 2 fresh
+  #      draws; at every decisive stop the rollout (32 futures, raced in
+  #      rounds of 8, the student driving on) scores its candidates; the
+  #      student's own pick is executed (DAgger) -> data/rl_exit_r<R>/.
+  #   2. fine-tune the ORIGINAL student's cost network on the labels of
+  #      rounds 1..R, anchored to it (KL + imitation rows); early stopping on
+  #      the states of route seeds 17-19 -> models/<base>_exit<R>.
+  #   3. validate on the 66 validation routes, stored realisations: the new
+  #      student alone, with the rollout, and the original student (same
+  #      routes, paired) -> results/rl_search_exit_val_r<R>.jsonl.
+  # Run the rounds one after the other (round R needs round R-1's model).
+  R=${2:?usage: rl-exit R   (R = 1, 2, ...)}
+  export OMP_NUM_THREADS=1
+  BASE0=tmlp_F95_split_list_s0
+  PREV=$BASE0
+  [ "$R" -gt 1 ] && PREV=${BASE0}_exit$((R - 1))
+  NEW=${BASE0}_exit$R
+  DATA=exit_r1
+  for k in $(seq 2 "$R"); do DATA="$DATA,exit_r$k"; done
+  if [ ! -f "ML/models/${PREV}_meta.json" ]; then
+    log "rl-exit $R: $PREV not found -- run round $((R - 1)) first"; exit 1
+  fi
+  log "rl-exit $R: labels with $PREV, 639 training routes x 2 draws ($NCPU workers)"
+  python -u ML/code/rl_exit_collect.py --kind torch --tag "$PREV" --split fit --draws 2 \
+    --name "exit_r$R" --workers "$NCPU" >> "$LOGS/rl_exit_r$R.log" 2>&1
+  if [ -f "ML/models/${NEW}_meta.json" ]; then
+    log "rl-exit $R: $NEW exists, not retrained"
+  else
+    log "rl-exit $R: fine-tuning $BASE0 on $DATA -> $NEW"
+    python -u ML/code/rl_torch_ft.py --data "$DATA" --base "$BASE0" --out "$NEW" \
+      --threads $(( NCPU < 16 ? NCPU : 16 )) >> "$LOGS/rl_exit_r$R.log" 2>&1
+  fi
+  TH='[{"dsr": 32, "race": 8}, {"net": "torch:tmlp_F95_split_list_s0"}]'
+  log "rl-exit $R: $NEW on the 66 validation routes"
+  python -u ML/code/rl_search.py --kind torch --tag "$NEW" --routes base --split stop \
+    --draws 0 --realised --theta "$TH" --name "exit_val_r$R" --workers "$NCPU" \
+    >> "$LOGS/rl_exit_r$R.log" 2>&1
+  log "rl-exit $R done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R"
   exit 1
   ;;
 esac

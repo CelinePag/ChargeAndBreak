@@ -97,8 +97,10 @@ def main():
                     _GREEDY[(r["variant"], r["instance"])] = r
 
     per = defaultdict(lambda: dict(student=[], rollout=[], broken=0, secs=[], rests_s=[],
-                                   rests_r=[], changed=[]))
+                                   rests_r=[], changed=[], extra=defaultdict(list),
+                                   rests_x=defaultdict(list)))
     names = [n for n in a.runs.split(",") if n]
+    extra_names = []                     # variants beyond the second (e.g. an old student)
     for name in names:
         with open(os.path.join(RESULTS, f"rl_search_{name}.jsonl")) as fh:
             for line in fh:
@@ -107,8 +109,12 @@ def main():
                     raise SystemExit(f"{name}: needs rl_search --realised")
                 k = (r.get("variant", "base"), r["instance"])
                 s, d = r["res"][0][0], r["res"][1][0]
+                xs = [(r["variants"][i], r["res"][i][0]) for i in range(2, len(r["res"]))]
+                for vn, _ in xs:
+                    if vn not in extra_names:
+                        extra_names.append(vn)
                 x = per[k]
-                if s["failed"] or d["failed"]:
+                if s["failed"] or d["failed"] or any(e["failed"] for _, e in xs):
                     x["broken"] += 1
                     continue
                 x["student"].append((s["duration"], s["misses"]))
@@ -117,6 +123,9 @@ def main():
                 x["rests_r"].append(d["rests"])
                 x["changed"].append(d["changed"])
                 x["secs"].append(r["seconds"])
+                for vn, e in xs:
+                    x["extra"][vn].append((e["duration"], e["misses"]))
+                    x["rests_x"][vn].append(e["rests"])
 
     rows, no_orc, broken = [], 0, 0
     for (v, inst), x in sorted(per.items()):
@@ -131,12 +140,16 @@ def main():
             continue
         gs = np.mean([ref["gaps"](dur, tw) for dur, tw in x["student"]], axis=0)
         gr = np.mean([ref["gaps"](dur, tw) for dur, tw in x["rollout"]], axis=0)
-        rows.append(dict(variant=v, inst=inst, length=("short" if inst.startswith("Rshort") else
-                                                       "medium" if inst.startswith("Rmedium") else "long"),
-                         student=gs, rollout=gr, la=ref["la"], greedy=ref["greedy"],
-                         la_rests=ref["la_rests"], rests_s=np.mean(x["rests_s"]),
-                         rests_r=np.mean(x["rests_r"]), changed=np.mean(x["changed"]),
-                         secs=np.mean(x["secs"])))
+        row = dict(variant=v, inst=inst, length=("short" if inst.startswith("Rshort") else
+                                                 "medium" if inst.startswith("Rmedium") else "long"),
+                   student=gs, rollout=gr, la=ref["la"], greedy=ref["greedy"],
+                   la_rests=ref["la_rests"], rests_s=np.mean(x["rests_s"]),
+                   rests_r=np.mean(x["rests_r"]), changed=np.mean(x["changed"]),
+                   secs=np.mean(x["secs"]))
+        for vn in extra_names:
+            row["x:" + vn] = np.mean([ref["gaps"](dur, tw) for dur, tw in x["extra"][vn]], axis=0)
+            row["rests_x:" + vn] = np.mean(x["rests_x"][vn])
+        rows.append(row)
     ok = [r for r in rows if r["la"][1] is not None]
     print(f"{a.out}: {len(per)} routes run x {len(names)} seed(s); {broken} with a broken run "
           f"(left out), {no_orc} without a usable oracle, {len(ok)} compared with the LA")
@@ -150,8 +163,9 @@ def main():
     out = dict(runs=names, routes=a.routes, n=len(ok), broken=broken, no_oracle=no_orc)
     print(f"{'policy':22s} {'gap pen %':>9s} {'gap %':>7s} {'vs LA pen (pp)':>16s} "
           f"{'vs student pen':>16s} {'rests > LA':>10s}")
-    for lab, key in (("LA", "la"), ("student", "student"), ("student + rollout", "rollout"),
-                     ("Greedy", "greedy")):
+    policies = ([("LA", "la"), ("student", "student"), ("student + rollout", "rollout")]
+                + [(vn[:22], "x:" + vn) for vn in extra_names] + [("Greedy", "greedy")])
+    for lab, key in policies:
         sub = [r for r in ok if r[key][1] is not None]
         gp = [r[key][1] for r in sub]
         g = [r[key][0] for r in sub]
@@ -159,15 +173,16 @@ def main():
         line = f"{lab:22s} {np.mean(gp):9.2f} {np.mean(g):7.2f} {dl[0]:+8.2f} ± {dl[1]:4.2f}  "
         res = dict(n=len(sub), gap_pen=float(np.mean(gp)), gap=float(np.mean(g)),
                    vs_la_pen=dl)
-        if key == "rollout":
-            dsd = ms([r["rollout"][1] - r["student"][1] for r in sub])
+        if key == "rollout" or key.startswith("x:"):
+            dsd = ms([r[key][1] - r["student"][1] for r in sub])
             line += f"{dsd[0]:+8.2f} ± {dsd[1]:4.2f}"
             res["vs_student_pen"] = dsd
-            res["better_than_student"] = int(sum(r["rollout"][1] < r["student"][1] - 1e-9 for r in sub))
+            res["better_than_student"] = int(sum(r[key][1] < r["student"][1] - 1e-9 for r in sub))
         else:
             line += " " * 16
-        if key in ("student", "rollout"):
-            rk = "rests_s" if key == "student" else "rests_r"
+        if key in ("student", "rollout") or key.startswith("x:"):
+            rk = ("rests_s" if key == "student" else "rests_r" if key == "rollout"
+                  else "rests_" + key)
             more = sum(1 for r in sub if r["la_rests"] is not None and r[rk] > r["la_rests"] + 1e-9)
             line += f" {more:10d}"
             res["routes_more_rests_than_la"] = more

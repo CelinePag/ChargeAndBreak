@@ -52,7 +52,8 @@ class RolloutChooser:
     .switches count rollouts and changed decisions."""
 
     def __init__(self, base, futures=32, topk=4, contest=2.0, margin=0.25,
-                 z=0.0, min_gain=0.0, seed=0, race=0, race_z=2.0):
+                 z=0.0, min_gain=0.0, seed=0, race=0, race_z=2.0,
+                 record=None, follow="expert"):
         self.base, self.futures, self.topk = base, int(futures), int(topk)
         self.contest, self.margin = float(contest), float(margin)
         self.z, self.min_gain, self.seed = float(z), float(min_gain), int(seed)
@@ -62,6 +63,14 @@ class RolloutChooser:
         # decision rule is unchanged (mean + z*se < -min_gain over all the
         # futures a surviving challenger saw).  race = 0: all futures at once.
         self.race, self.race_z = int(race), float(race_z)
+        # record: a list to append every evaluated decision to (expert
+        # iteration labels, rl_exit_collect.py): the candidates' feature rows,
+        # keys and student scores, and each one's measured mean cost minus the
+        # pick's (d, the pick first with 0), its se and number of futures.
+        # follow "student": execute the student's own pick, so the labels are
+        # taken at the states the student visits (DAgger); "expert": the
+        # rollout's choice (the rollout policy itself).
+        self.record, self.follow = record, follow
         self.cv, self.route = 0.15, ""
         self.calls = self.switches = self.rollouts = 0
 
@@ -118,17 +127,28 @@ class RolloutChooser:
                     keep.append(a)
             alive = keep
             if not alive:
-                return j0
+                break
         best, best_val = None, None
         for a in alive:
             x = np.array(d_all[a])
             val = x.mean() + self.z * x.std(ddof=1) / np.sqrt(len(x))
             if best_val is None or val < best_val:
                 best, best_val = a, val
-        if best is not None and best_val < -self.min_gain:
+        choice = cand[best] if (best is not None and best_val < -self.min_gain) else j0
+        if self.record is not None:
+            n = [0] + [len(d_all[a]) for a in range(1, len(keys))]
+            dm = [0.0] + [float(np.mean(d_all[a])) for a in range(1, len(keys))]
+            ds = [0.0] + [float(np.std(d_all[a], ddof=1) / np.sqrt(len(d_all[a])))
+                          if len(d_all[a]) > 1 else 0.0 for a in range(1, len(keys))]
+            self.record.append(dict(
+                stop=int(veh.stop), kind=kind, keys=keys,
+                rows=np.asarray(rows[cand], dtype=np.float32),
+                score=np.asarray(score[cand], dtype=np.float32),
+                d_mean=np.array(dm, dtype=np.float32), d_se=np.array(ds, dtype=np.float32),
+                n_fut=np.array(n, dtype=np.int16), choice=cand.index(choice)))
+        if choice != j0:
             self.switches += 1
-            return cand[best]
-        return j0
+        return j0 if self.follow == "student" else choice
 
 
 class ApiChooser:

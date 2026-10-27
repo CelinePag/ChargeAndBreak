@@ -650,6 +650,36 @@ window penalty, `ML/scratch/dsr_vs_la.py`):
 * 81 / 276 / 1000 s of one core per short / medium / long route;
 * its parameters were fixed a priori; the test routes have not been run.
 
+**Test result** (2026-10-27, run once on the cluster;
+`ML/code/rl_test_report.py`, reports in `results/rl_test_report_*.json`).
+Three training seeds, averaged per route; gap to the oracle with the window
+penalty. The student, LA and Greedy numbers reproduce the paper's Table 1.
+
+| routes | policy | gap | vs LA (pp) | vs its student (pp) |
+|---|---|---|---|---|
+| base, 125 | LA | 3.05 % | — | — |
+| | PyTorch student | 3.55 % | +0.50 ± 0.37 | — |
+| | PyTorch + rollout | **2.38 %** | **−0.67 ± 0.34** | −1.17 ± 0.19 (better on 118 / 125) |
+| | trees student | 3.73 % | +0.68 ± 0.43 | — |
+| | trees + rollout | **2.33 %** | **−0.72 ± 0.33** | −1.40 ± 0.26 (109 / 125) |
+| | Greedy | 7.01 % | +3.95 ± 0.46 | |
+| mixed, 61 certified | LA | 2.73 % | — | — |
+| | mixed student | 5.52 % | +2.79 ± 0.70 | — |
+| | mixed student + rollout | **2.71 %** | **−0.02 ± 0.26** | −2.81 ± 0.61 (56 / 61) |
+| | equal-power student | 8.07 % | +5.34 ± 0.86 | — |
+| | equal-power + rollout | 4.99 % | +2.26 ± 0.63 | −3.08 ± 0.94 (48 / 61) |
+
+* 0 of the 1,500 base and 732 mixed runs broke a rule.
+* Routes resting more than the LA: PyTorch 4 → 3, trees 5 → 2, mixed 7 → 3.
+* One core per route on the cluster, both policies: PyTorch 11 / 36 / 166 s
+  and trees 40 / 105 / 342 s (short / medium / long).
+* For comparison, the LA-calling hybrid (gate + check) was −0.36 ± 0.33 pp vs
+  the LA, with 8.1 LA calls per route.
+
+On mixed routes, rollout with equal-power training alone (4.99 %) ends up
+about where the mixed-trained student alone is (5.52 %). It does not replace
+the mixed data, but adds to it.
+
 Read with §6: improving at the student's own decisive states, with the
 student continuing, is LOLS-style local improvement. It is enough to bring
 a +1.36 pp student to LA parity without a solver. Most of the gain is timing
