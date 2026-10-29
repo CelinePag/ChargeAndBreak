@@ -33,6 +33,8 @@
 #     bash ML/hpc/run_jobs.sh rl-exit R      # expert iteration round R (1, 2, ...): labels, fine-tune, validate
 #     bash ML/hpc/run_jobs.sh rl-exit-test R # the frozen round-R student on the 125 test routes, once
 #     bash ML/hpc/run_jobs.sh rl-window-val  # rollout + window-critical stops vs plain rollout, validation
+#     bash ML/hpc/run_jobs.sh rl-mixed-exit  # base-trained students (+ RL round 2) + rollout on the mixed test routes
+#     bash ML/hpc/run_jobs.sh rl-phys-test   # rollout on the other truck types (base / RL / all-types students), test
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -726,12 +728,55 @@ rl-window-val)
   log "rl-window-val done"
   ;;
 
+rl-mixed-exit)
+  # Students trained on the BASE case only, on the 64 mixed-charger TEST routes
+  # (32 pmix + 32 mix), with the frozen rollout, ONCE, stored realisations:
+  # the original PyTorch student and the round-2 RL student (neither has
+  # charger-power inputs nor saw a mixed route).  Compare with the mixed
+  # student's rl-mixed-test.  Writes results/rl_search_dsr_mtest_base_torch.jsonl
+  # and ..._dsr_mtest_exit2.jsonl (variants: student, student + rollout).
+  export OMP_NUM_THREADS=1
+  TH='[{"dsr": 32, "race": 8}]'
+  for spec in tmlp_F95_split_list_s0:dsr_mtest_base_torch tmlp_F95_split_list_s0_exit2:dsr_mtest_exit2; do
+    tag=${spec%%:*}; name=${spec#*:}
+    log "rl-mixed-exit: $tag on the 64 mixed test routes ($NCPU workers)"
+    python -u ML/code/rl_search.py --kind torch --tag "$tag" --routes mixed \
+      --variants pmix,mix --split test --draws 0 --realised --theta "$TH" \
+      --name "$name" --workers "$NCPU" >> "$LOGS/rl_mixed_exit.log" 2>&1
+  done
+  log "rl-mixed-exit done"
+  ;;
+
+rl-phys-test)
+  # The frozen rollout on the OTHER TRUCK TYPES (instances_sens, one setting
+  # changed from the base case: battery 300/700/900 kWh, chargers 150/700/1000
+  # kW, chargers every 30/100 km), the 48 TEST routes (seeds 22-25) of each,
+  # ONCE, stored realisations.  Students: the original PyTorch student and the
+  # round-2 RL student (both trained on the base case only), and the PyTorch
+  # student trained on all truck types (tmlp_F95_phys_split_list_s0, the
+  # in-distribution reference).  Writes results/rl_search_dsr_ptest_{torch,
+  # exit2,phys}.jsonl (variants: student, student + rollout; record "variant"
+  # = the axis).
+  export OMP_NUM_THREADS=1
+  TH='[{"dsr": 32, "race": 8}]'
+  AX=kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100
+  for spec in tmlp_F95_split_list_s0:dsr_ptest_torch tmlp_F95_split_list_s0_exit2:dsr_ptest_exit2 \
+              tmlp_F95_phys_split_list_s0:dsr_ptest_phys; do
+    tag=${spec%%:*}; name=${spec#*:}
+    log "rl-phys-test: $tag on the 384 truck-type test routes ($NCPU workers)"
+    python -u ML/code/rl_search.py --kind torch --tag "$tag" --routes phys \
+      --variants "$AX" --split test --draws 0 --realised --theta "$TH" \
+      --name "$name" --workers "$NCPU" >> "$LOGS/rl_phys_test.log" 2>&1
+  done
+  log "rl-phys-test done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val|rl-mixed-exit|rl-phys-test"
   exit 1
   ;;
 esac

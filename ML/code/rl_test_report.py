@@ -52,9 +52,33 @@ def _gaps_mixed(dur, tw, o):
             100.0 * (dur + BETA * tw - od - o["pen"]) / (od + o["pen"]))
 
 
+def _la_rests(bucket, inst, method):
+    """Daily rests of the latest stored run of `method` (evaluate.baselines' count)."""
+    import glob
+    fs = sorted(glob.glob(os.path.join(_ROOT, "solutions", bucket, f"{inst}_{method}_2*.json")))
+    if not fs:
+        return None
+    with open(fs[-1]) as fh:
+        acts = json.load(fh).get("actions") or []
+    return sum(1 for a in acts if str(a.get("rest_type")).lower() not in ("0", "none", "-", ""))
+
+
 def references(routes, variant, inst):
     """oracle, (LA gap, LA gap pen), (Greedy gaps), LA rests -- or None if the
     route has no usable oracle."""
+    if routes == "phys":
+        # other truck types: ood_eval's oracle and gap (phys_eval's tables), the
+        # stored LA runs ("LA" in solutions/sensitivity) and the corrected Greedy
+        from ood_eval import baseline, gap, oracle
+        orc = oracle("sensitivity", inst)
+        if orc is None:
+            return None
+        la = baseline("sensitivity", inst, "LA", orc, T0)
+        gr = baseline("sensitivity", inst, "GREEDY_CORR2", orc, T0)
+        return dict(gaps=lambda d, tw: gap(d, tw, T0, orc),
+                    la=(la["gap"], la["gap_pen"]) if la and la["completed"] else (None, None),
+                    greedy=(gr["gap"], gr["gap_pen"]) if gr and gr["completed"] else (None, None),
+                    la_rests=_la_rests("sensitivity", inst, "LA"))
     if routes == "base":
         from evaluate import baselines
         from paper_link import baseline_gaps, gaps, oracle_facts
@@ -83,7 +107,7 @@ _GREEDY = {}
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--routes", default="base", choices=["base", "mixed"])
+    ap.add_argument("--routes", default="base", choices=["base", "mixed", "phys"])
     ap.add_argument("--runs", required=True, help="rl_search run names, comma-separated "
                                                   "(one per training seed)")
     ap.add_argument("--out", required=True)

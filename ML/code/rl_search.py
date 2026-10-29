@@ -240,9 +240,10 @@ def main():
     ap.add_argument("--kind", default="gbt")
     ap.add_argument("--tag", default="gbt_F95_base_s0")
     ap.add_argument("--split", default="fit", choices=["fit", "stop", "test"])
-    ap.add_argument("--routes", default="base", choices=["base", "mixed"],
-                    help="base-case routes, or the mixed-charger routes of mixed_eval "
-                         "(--variants; --split test or stop = its validation set)")
+    ap.add_argument("--routes", default="base", choices=["base", "mixed", "phys"],
+                    help="base-case routes, the mixed-charger routes of mixed_eval "
+                         "(--variants; --split test or stop = its validation set), or "
+                         "the other truck types (--variants kwh300,kw150,...; rl_env.PHYS)")
     ap.add_argument("--variants", default="pmix,mix")
     ap.add_argument("--lengths", default="short,medium,long")
     ap.add_argument("--draws", type=int, default=2)

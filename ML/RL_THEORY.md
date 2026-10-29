@@ -598,8 +598,8 @@ Under fresh draws the rest count changes on 0 / 11 / 15 % of short /
 medium / long routes. So the headroom cannot be reached by one bias applied
 everywhere.
 
-**Step 2, targeted rollout labels (`rl_api.py`, first 69 medium and long
-routes).** At decisive states (a rest within 2 h of the best non-rest, or the
+**Step 2, targeted rollout labels (`rl_api.py`, `data/rl_api_r1_gbt`: 70 long
+fit routes, up to 8 states each; corrected 2026-10-29, was "69 medium and long").** At decisive states (a rest within 2 h of the best non-rest, or the
 two best within 0.25 h), the student's pick is beaten by more than 2 se on
 ~30 % of states; chance would give ~5–7 %. "Rest now" is overpriced: rests
 that keep the nominal rest count measure +0.2 / +1.3 / +3.0 h against
@@ -738,6 +738,25 @@ student continuing, is LOLS-style local improvement. It is enough to bring
 a +1.36 pp student to LA parity without a solver. Most of the gain is timing
 (dwell, charging, windows); on these routes the rest count moved only where
 the student had taken an extra rest.
+
+**Window-critical trigger (2026-10-29, cluster stage `rl-window-val`;
+`results/rl_test_report_win_val_*.json`, `rl_compare.py win_val_* --ref 1`).**
+Validation, 66 routes, stored realisation + 2 fresh draws; the rollout also
+checks a stop when a customer is within 10 h of driving and the student's pick
+arrives early, late or with < 0.5 h of slack.
+
+| student | rollout | vs LA, stored (pp) | missed, stored / fresh (132 runs) |
+|---|---|---|---|
+| original PyTorch s0 | plain | −1.06 ± 0.33 | 32 / 85 |
+| | + window stops | −0.95 ± 0.33 | 42 / 79 |
+| round-2 RL student | plain | −1.33 ± 0.41 | 42 / 70 |
+| | + window stops | −1.28 ± 0.41 | 37 / 60 |
+
+* Fresh draws, window minus plain: +0.03 ± 0.04 h per route (original),
+  −0.03 ± 0.05 h (round 2): no difference; it changes ~10 % more decisions.
+* Not kept. The early misses are set by where the rests fell a shift before
+  the customer (the paper's Fig. 1 route: the fix was a rest moved at hour 6.6),
+  so checking the stops near the customer comes too late.
 
 ## References (links checked 2026-10-26)
 

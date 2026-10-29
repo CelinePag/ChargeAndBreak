@@ -81,7 +81,7 @@ ITEMS = [
     ("dsr", 5, 7, 0, "Rollout at close calls", "−0.7 pp vs LA (test), no solver", "worked"),
     ("rl1", 5, 7, 1, "RL round 1", "−0.24 h/route vs student", "worked"),
     ("rl2", 5, 8, 1, "RL round 2", "≈ LA alone; −1.2 pp w. rollout", "worked"),
-    ("win", 5, 8, 0, "Rollout + window stops", "running", "running"),
+    ("win", 5, 8, 0, "Rollout + window stops", "no gain vs plain rollout (val)", "failed"),
 ]
 ARROWS = [("roll1", "check"), ("check", "dsr"), ("fpi", "G"), ("labels", "dsr"),
           ("labels", "rl1"), ("rl1", "rl2"), ("dsr", "mixroll"), ("mixdata", "mixroll"),

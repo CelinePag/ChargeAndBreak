@@ -27,7 +27,9 @@ DATA = os.path.join(HERE, "..", "data")
 MODELS = os.path.join(HERE, "..", "models")
 
 
-def main(name):
+def candidates(name):
+    """[(count-neutral, allowance lost h, predicted h, measured h, its se, d rests)]
+    for every rest candidate measured against a non-rest pick."""
     meta = json.load(open(os.path.join(DATA, f"rl_api_{name}", "meta.json")))
     feats = json.load(open(os.path.join(MODELS, f"{meta['tag']}_meta.json")))["features"]
     i_sd, i_ext = feats.index("sd"), feats.index("ext_left")
@@ -44,7 +46,21 @@ def main(name):
                 out.append((neutral, lost, float(r["score"][j] - r["score"][0]),
                             float(r["d_mean"][j]), float(r["d_se"][j]),
                             float(r["rests_mean"][j] - r["rests_mean"][0])))
-    a = np.array(out, dtype=float)
+    return np.array(out, dtype=float)
+
+
+def cell(a, neutral, lo, hi):
+    """(n, mean predicted, mean measured, se of measured) for one bin, or None."""
+    m = (a[:, 0] == float(neutral)) & (a[:, 1] >= lo) & (a[:, 1] < hi)
+    if m.sum() == 0:
+        return None
+    b = a[m]
+    se = b[:, 3].std(ddof=1) / np.sqrt(len(b)) if len(b) > 1 else 0.0
+    return int(m.sum()), float(b[:, 2].mean()), float(b[:, 3].mean()), float(se)
+
+
+def main(name):
+    a = candidates(name)
     print(f"{name}: {len(a)} rest candidates vs a non-rest pick")
     print(f"{'nominal count':14s} {'lost h':>8s} {'n':>5s} {'predicted h':>12s} "
           f"{'measured h':>11s} {'meas. better':>13s} {'d rests':>8s}")

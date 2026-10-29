@@ -80,14 +80,33 @@ def load_route(inst, root=None, path=None):
     return fd, D_real, E_real, cv
 
 
+PHYS = {"kwh300": "battery_300", "kwh700": "battery_700", "kwh900": "battery_900",
+        "kw150": "charger_power_150", "kw700": "charger_power_700",
+        "kw1000": "charger_power_1000", "cs30": "cs_spacing_30", "cs100": "cs_spacing_100"}
+
+
 def route_set(routes, split, variants="pmix,mix"):
     """[(variant, name, path)].  routes "base": the base-case routes with an LA
     run, split fit / stop (validation) / test.  routes "mixed": the mixed-
     charger routes of mixed_eval (variants pmix / dmix / mix), split test
-    (seeds 22-25) or stop (= mixed_eval's "val", seeds 20-21)."""
+    (seeds 22-25) or stop (= mixed_eval's "val", seeds 20-21).  routes
+    "phys": the other truck types of instances_sens (variants = axes of PHYS,
+    e.g. kwh300,kw150,cs100; one setting changed from the base case), by
+    route seed as for base."""
     if routes == "base":
         root = os.path.join(_ROOT, "instances")
         return [("base", n, os.path.join(root, n + ".json")) for n in split_routes(split)]
+    if routes == "phys":
+        import glob
+        seeds = dict(fit=range(1, 20), stop=range(20, 22), test=range(22, 26))[split]
+        out = []
+        for ax in variants.split(","):
+            d = os.path.join(_ROOT, "instances_sens", PHYS[ax])
+            for p in sorted(glob.glob(os.path.join(d, "*.json"))):
+                name = os.path.splitext(os.path.basename(p))[0]
+                if int(name.split("__")[0].rsplit("_", 1)[1]) in seeds:
+                    out.append((ax, name, p))
+        return out
     import mixed_eval as me
     if split not in ("test", "stop"):
         raise ValueError("mixed routes: split test or stop (validation)")

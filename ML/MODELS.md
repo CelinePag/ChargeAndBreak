@@ -114,6 +114,9 @@ routes, 82,580 decisions) instead of the LA's costs.
   in round 2 (round-1 student driving). Early stopping on route seeds 17-19.
 * **Validated** on 66 routes × 16 fresh draws; round 2 **tested** once (125
   routes). One training seed (0).
+* Tried on top of H: also checking the stops where a time window is at stake
+  (window trigger). Validation: no gain over the plain rollout (+0.03 ± 0.04 h
+  and −0.03 ± 0.05 h per route on fresh draws); not kept.
 
 ### J. Dropped along the way
 The classifier of the LA's choice and the scikit-learn network (dropped

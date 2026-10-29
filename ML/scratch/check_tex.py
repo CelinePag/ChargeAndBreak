@@ -1,5 +1,5 @@
 """Static checks of ML/paper/main.tex (no LaTeX on this machine): braces,
-environments, labels vs refs, cite keys vs references.bib, word count."""
+environments, labels vs refs, cite keys vs lib.bib, word count."""
 import os
 import re
 
@@ -32,7 +32,7 @@ labels = set(re.findall(r"\\label\{([^}]*)\}", body))
 refs = set(re.findall(r"\\ref\{([^}]*)\}", body))
 print("refs without label:", refs - labels, "| labels never referenced:", labels - refs)
 
-bib = open(os.path.join(P, "references.bib"), encoding="utf-8").read()
+bib = open(os.path.join(P, "lib.bib"), encoding="utf-8").read()
 keys = set(re.findall(r"@\w+\{([^,]+),", bib))
 cites = set(k.strip() for grp in re.findall(r"\\cite\{([^}]*)\}", body) for k in grp.split(","))
 print("cited but missing from bib:", cites - keys, "| in bib, never cited:", keys - cites)
