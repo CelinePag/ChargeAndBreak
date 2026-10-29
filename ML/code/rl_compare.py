@@ -12,6 +12,7 @@ policy broke a rule are counted and left out.  Writes
 results/rl_compare_<run>.json.
 
     python ML/code/rl_compare.py exit_test_fresh_r2
+    python ML/code/rl_compare.py win_val_torch --ref 1   # window rollout minus the others
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ import numpy as np
 RESULTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results")
 
 
-def main(run):
+def main(run, ref=0):
     recs = [json.loads(l) for l in open(os.path.join(RESULTS, f"rl_search_{run}.jsonl"))
             if l.strip()]
     names = recs[0]["variants"]
@@ -35,8 +36,10 @@ def main(run):
         lo = 1 if r.get("realised_first") else 0
         ln = ("short" if r["instance"].startswith("Rshort") else
               "medium" if r["instance"].startswith("Rmedium") else "long")
-        base = r["res"][0][lo:]
-        for v in range(1, len(names)):
+        base = r["res"][ref][lo:]
+        for v in range(len(names)):
+            if v == ref:
+                continue
             other = r["res"][v][lo:]
             ok = [i for i in range(len(base)) if not (base[i]["failed"] or other[i]["failed"])]
             broken += len(base) - len(ok)
@@ -53,11 +56,11 @@ def main(run):
                 o["miss"].append(np.mean(m))
                 o["rests"].append(np.mean(s))
     nd = len(recs[0]["res"][0]) - (1 if recs[0].get("realised_first") else 0)
-    print(f"{run}: {len(recs)} routes x {nd} fresh draws; {names[0]} minus each other policy, "
+    print(f"{run}: {len(recs)} routes x {nd} fresh draws; {names[ref]} minus each other policy, "
           f"paired; {broken} draws with a broken run left out")
     js = {}
     for vn, byk in out.items():
-        print(f"\n{names[0]}  minus  {vn}:")
+        print(f"\n{names[ref]}  minus  {vn}:")
         for k in ("all", "short", "medium", "long"):
             o = byk.get(k)
             if not o:
@@ -74,8 +77,10 @@ def main(run):
                                             misses=float(np.mean(o["miss"])),
                                             rests=float(np.mean(o["rests"])))
     with open(os.path.join(RESULTS, f"rl_compare_{run}.json"), "w") as fh:
-        json.dump(dict(run=run, base=names[0], n_draws=nd, broken=broken, vs=js), fh, indent=1)
+        json.dump(dict(run=run, base=names[ref], n_draws=nd, broken=broken, vs=js), fh, indent=1)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    # rl_compare.py <run> [--ref k]: k = index of the reference variant (default 0)
+    k = int(sys.argv[sys.argv.index("--ref") + 1]) if "--ref" in sys.argv else 0
+    main(sys.argv[1], ref=k)

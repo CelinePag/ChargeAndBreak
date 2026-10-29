@@ -711,6 +711,28 @@ calls. The original student was then fine-tuned on both rounds' labels.
   the LA (original student + rollout −1.06).
 * 0 broken runs.
 
+**Test of the frozen round-2 student** (2026-10-29, run once on the cluster;
+`results/rl_test_report_exit_test_r2.json`, `rl_compare_exit_test_fresh_r2.json`).
+125 test routes, PyTorch, one training seed; gap to the oracle with the
+window penalty, stored realizations.
+
+| policy | gap | vs LA (pp) | vs the original counterpart (pp) |
+|---|---|---|---|
+| LA | 3.05 % | — | — |
+| original student | 3.54 % | +0.49 ± 0.36 | — |
+| round-2 student | 3.08 % | +0.03 ± 0.35 | −0.46 ± 0.20 |
+| original + rollout | 2.39 % | −0.66 ± 0.33 | — |
+| round-2 + rollout | **1.84 %** | **−1.21 ± 0.32** | −0.55 ± 0.18 |
+| Greedy | 7.01 % | +3.95 ± 0.46 | |
+
+* 16 fresh draws per test route, paired: round 2 against the original,
+  −0.25 ± 0.05 h per route (−0.37 ± 0.07 %), better on 88 routes and worse
+  on 31; long routes −0.56 ± 0.13 h. Validation had predicted −0.35 ± 0.11 h.
+* 0 broken runs.
+* The original student inside this run reproduces its own test run on
+  125 / 125 routes.
+* Caveat: one training seed, where the paper's Table 1 averages three.
+
 Read with §6: improving at the student's own decisive states, with the
 student continuing, is LOLS-style local improvement. It is enough to bring
 a +1.36 pp student to LA parity without a solver. Most of the gain is timing

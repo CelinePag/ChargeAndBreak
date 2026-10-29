@@ -32,6 +32,7 @@
 #     bash ML/hpc/run_jobs.sh rl-mixed-eq    # optional: the rollout over the equal-power student, mixed test
 #     bash ML/hpc/run_jobs.sh rl-exit R      # expert iteration round R (1, 2, ...): labels, fine-tune, validate
 #     bash ML/hpc/run_jobs.sh rl-exit-test R # the frozen round-R student on the 125 test routes, once
+#     bash ML/hpc/run_jobs.sh rl-window-val  # rollout + window-critical stops vs plain rollout, validation
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -702,12 +703,35 @@ rl-exit-test)
   log "rl-exit-test $R done"
   ;;
 
+rl-window-val)
+  # Window-critical rollout (2026-10-29), VALIDATION routes only (66, seeds
+  # 20-21).  The rollout also checks a stop when the next customer is within
+  # 10 h of driving and the student's own pick is predicted to arrive early,
+  # late, or within 0.5 h of the window's closing (rl_policy.RolloutChooser
+  # window=(10, 0.5)): the stops that decide the early misses, which the plain
+  # rollout never checks ("rest now" scores ~+9 h there).  Both rollouts on
+  # the same futures, stored realisation + 2 fresh draws, for two students:
+  # the original PyTorch student and the round-2 RL student.
+  # Writes results/rl_search_win_val_torch.jsonl and ..._win_val_exit2.jsonl
+  # (variants: student, rollout + window stops, plain rollout).
+  export OMP_NUM_THREADS=1
+  TH='[{"dsr": 32, "race": 8, "window": [10, 0.5]}, {"dsr": 32, "race": 8}]'
+  for spec in tmlp_F95_split_list_s0:win_val_torch tmlp_F95_split_list_s0_exit2:win_val_exit2; do
+    tag=${spec%%:*}; name=${spec#*:}
+    log "rl-window-val: $tag on the 66 validation routes ($NCPU workers)"
+    python -u ML/code/rl_search.py --kind torch --tag "$tag" --routes base --split stop \
+      --draws 2 --realised --theta "$TH" --name "$name" --workers "$NCPU" \
+      >> "$LOGS/rl_window_val.log" 2>&1
+  done
+  log "rl-window-val done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val"
   exit 1
   ;;
 esac
