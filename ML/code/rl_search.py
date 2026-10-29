@@ -200,7 +200,8 @@ def make_chooser(base, th, contest):
         from rl_policy import RolloutChooser
         return RolloutChooser(base, futures=int(th["dsr"]), z=th.get("z", 0.0),
                               min_gain=th.get("min_gain", 0.0), contest=contest,
-                              race=int(th.get("race", 0)))
+                              race=int(th.get("race", 0)),
+                              window=tuple(th["window"]) if "window" in th else None)
     if "net" in th:
         return NetChooser(th["net"])
     return Corrected(base, th, contest)

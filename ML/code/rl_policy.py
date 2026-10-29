@@ -53,7 +53,7 @@ class RolloutChooser:
 
     def __init__(self, base, futures=32, topk=4, contest=2.0, margin=0.25,
                  z=0.0, min_gain=0.0, seed=0, race=0, race_z=2.0,
-                 record=None, follow="expert"):
+                 record=None, follow="expert", window=None):
         self.base, self.futures, self.topk = base, int(futures), int(topk)
         self.contest, self.margin = float(contest), float(margin)
         self.z, self.min_gain, self.seed = float(z), float(min_gain), int(seed)
@@ -71,6 +71,15 @@ class RolloutChooser:
         # taken at the states the student visits (DAgger); "expert": the
         # rollout's choice (the rollout policy itself).
         self.record, self.follow = record, follow
+        # window = (reach_h, margin_h): ALSO check a stop when the next
+        # customer is within reach_h of nominal driving and the student's own
+        # pick is predicted (its a_cu1_* action features) to arrive early,
+        # late, or within margin_h of the window's closing.  The early misses
+        # are a daily rest's worth early and "rest now" scores ~+9 h, so the
+        # stops that decide them are never "decisive" otherwise
+        # (ML/scratch/window_misses.py, 2026-10-27).  None: off.
+        self.window = window
+        self._wix = None
         self.cv, self.route = 0.15, ""
         self.calls = self.switches = self.rollouts = 0
 
@@ -93,6 +102,16 @@ class RolloutChooser:
         from rl_env import fresh_draws
         kind, order = decisive(legal, score, self.contest, self.margin)
         j0 = int(np.argmin(score))
+        if kind is None and self.window is not None and len(order) >= 2:
+            if self._wix is None:
+                names = list(self.base.state_names) + list(self.base.action_names)
+                self._wix = [names.index(n) for n in ("cu1_drive", "a_cu1_early",
+                                                      "a_cu1_late", "a_cu1_slack_after")]
+            i_dr, i_e, i_l, i_s = self._wix
+            r = rows[j0]
+            reach, wmargin = self.window
+            if 0 <= r[i_dr] <= reach and (r[i_e] > 0.5 or r[i_l] > 0.5 or 0 <= r[i_s] < wmargin):
+                kind = "window"
         if kind is None:
             return j0
         cand = candidates(legal, order, self.topk)

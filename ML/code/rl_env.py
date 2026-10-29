@@ -193,7 +193,8 @@ class ForceFirst:
         return int(np.argmin(score))
 
 
-def run_batch(base, fd, cv, jobs, pre=None, on_decision=None, start=None):
+def run_batch(base, fd, cv, jobs, pre=None, on_decision=None, start=None,
+              return_vehicles=False):
     """Drive len(jobs) vehicles to the destination on route `fd`.
 
     jobs: [(chooser, draw), ...].  chooser is None (the student) or an object
@@ -277,4 +278,5 @@ def run_batch(base, fd, cv, jobs, pre=None, on_decision=None, start=None):
             live = [i for i in live if not vehs[i].is_halted and vehs[i].stop < N]
     finally:
         fd["Tbar"] = tbar
-    return [_summary(fd, v, st[i], n_dec[i]) for i, v in enumerate(vehs)]
+    out = [_summary(fd, v, st[i], n_dec[i]) for i, v in enumerate(vehs)]
+    return (out, vehs) if return_vehicles else out

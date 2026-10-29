@@ -31,6 +31,7 @@
 #     bash ML/hpc/run_jobs.sh rl-mixed-test  # the same with the mixed student, 64 mixed test routes, once
 #     bash ML/hpc/run_jobs.sh rl-mixed-eq    # optional: the rollout over the equal-power student, mixed test
 #     bash ML/hpc/run_jobs.sh rl-exit R      # expert iteration round R (1, 2, ...): labels, fine-tune, validate
+#     bash ML/hpc/run_jobs.sh rl-exit-test R # the frozen round-R student on the 125 test routes, once
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -676,12 +677,37 @@ rl-exit)
   log "rl-exit $R done"
   ;;
 
+rl-exit-test)
+  # The expert-iteration student of round R, FROZEN (2026-10-29: R = 2, chosen
+  # on validation: -0.35 +- 0.11 h per route vs the original student, 16 fresh
+  # draws), on the 125 base-case TEST routes, ONCE.  Reported whatever later
+  # rounds or variants bring; those are chosen on validation only.
+  #   a) stored realisations: the student alone, with the rollout (same
+  #      settings as rl-test), and the original student, paired
+  #      -> results/rl_search_exit_test_r<R>.jsonl (vs LA / oracle / Greedy)
+  #   b) 16 fresh draws per test route: the student vs the original, paired
+  #      -> results/rl_search_exit_test_fresh_r<R>.jsonl
+  R=${2:?usage: rl-exit-test R}
+  export OMP_NUM_THREADS=1
+  NEW=tmlp_F95_split_list_s0_exit$R
+  if [ ! -f "ML/models/${NEW}_meta.json" ]; then log "rl-exit-test $R: $NEW not found"; exit 1; fi
+  log "rl-exit-test $R: $NEW on the 125 test routes, stored realisations ($NCPU workers)"
+  python -u ML/code/rl_search.py --kind torch --tag "$NEW" --routes base --split test \
+    --draws 0 --realised --theta '[{"dsr": 32, "race": 8}, {"net": "torch:tmlp_F95_split_list_s0"}]' \
+    --name "exit_test_r$R" --workers "$NCPU" >> "$LOGS/rl_exit_test_r$R.log" 2>&1
+  log "rl-exit-test $R: $NEW vs the original on 16 fresh draws per test route"
+  python -u ML/code/rl_search.py --kind torch --tag "$NEW" --routes base --split test \
+    --draws 16 --theta '[{"net": "torch:tmlp_F95_split_list_s0"}]' \
+    --name "exit_test_fresh_r$R" --workers "$NCPU" >> "$LOGS/rl_exit_test_r$R.log" 2>&1
+  log "rl-exit-test $R done"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R"
   exit 1
   ;;
 esac

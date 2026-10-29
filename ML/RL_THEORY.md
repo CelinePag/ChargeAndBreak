@@ -680,6 +680,37 @@ On mixed routes, rollout with equal-power training alone (4.99 %) ends up
 about where the mixed-trained student alone is (5.52 %). It does not replace
 the mixed data, but adds to it.
 
+**Expert iteration, round 1** (2026-10-27, cluster stage `rl-exit 1`; the
+reinforcement-learning step proper). The PyTorch student drove the 639
+training routes under 2 fresh draws each. At every decisive stop the rollout
+scored its candidates (49,171 labelled decisions). The original cost network
+was then fine-tuned on these labels, anchored to the original student by a
+KL term and by imitation rows.
+
+* Held-out training routes: −0.022 ± 0.003 h per decisive decision.
+* Validation, 66 routes × 16 fresh draws, new student against the original,
+  paired:
+  * overall −0.24 ± 0.10 h per route (−0.30 ± 0.14 %);
+  * long −0.60 ± 0.24 h, medium −0.10 ± 0.17 h, short −0.09 ± 0.07 h;
+  * 0.22 fewer missed windows per route; 0 broken runs.
+* On the single stored realizations the difference is within noise.
+
+That is about a quarter of the rollout's gain, now at millisecond decisions.
+
+**Round 2** (2026-10-29). Labels were collected with the round-1 student:
+32,998 decisions, fewer than round 1 because that student has fewer close
+calls. The original student was then fine-tuned on both rounds' labels.
+
+* Validation, 66 routes × 16 fresh draws, paired:
+  * against the original student: −0.35 ± 0.11 h per route
+    (−0.43 ± 0.14 %), better on 47 of 66 routes; long routes
+    −0.78 ± 0.31 h;
+  * against round 1: −0.11 ± 0.09 h, not significant, so the gains are
+    levelling off.
+* With the rollout on top, on the stored realizations: −1.33 ± 0.41 pp vs
+  the LA (original student + rollout −1.06).
+* 0 broken runs.
+
 Read with §6: improving at the student's own decisive states, with the
 student continuing, is LOLS-style local improvement. It is enough to bring
 a +1.36 pp student to LA parity without a solver. Most of the gain is timing
