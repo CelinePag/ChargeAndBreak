@@ -206,6 +206,19 @@ hold).
   calls with the rollout check improves the mixed student by
   −0.45 ± 0.25 pp; the learned mixed gate was not finished.
 
+### Rollout on route types the student was not trained on (*final*, seed 0, run once)
+
+| test routes | student trained on | alone | + rollout | rollout vs LA |
+|---|---|---|---|---|
+| 8 other truck types (314; LA 4.15 %) | base case | 10.89 % | 7.06 % | +2.91 ± 0.47 |
+| | base case, RL round 2 | 9.80 % | 6.96 % | +2.81 ± 0.47 |
+| | all truck types | 4.58 % | **2.65 %** | **−1.50 ± 0.28** |
+| mixed charger powers (61; LA 2.73 %) | base case | 18.68 % | 11.26 % | +8.53 ± 1.23 |
+| | base case, RL round 2 | 18.06 % | 10.91 % | +8.18 ± 0.90 |
+
+* The rollout helps every student; it beats the LA only on route types the
+  student was trained on (all-types student: below the LA on all 8 types).
+
 ### Use case: the Arendal tour with ferries (*earlier*)
 With the full shield, the only failures left in any experiment were 8 ferry
 crossings: a forced 3.8-4.9 h crossing needs a rest before boarding, which a

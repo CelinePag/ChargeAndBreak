@@ -758,6 +758,29 @@ arrives early, late or with < 0.5 h of slack.
   the customer (the paper's Fig. 1 route: the fix was a rest moved at hour 6.6),
   so checking the stops near the customer comes too late.
 
+**Route types the student was not trained on (2026-10-29, cluster stages
+`rl-mixed-exit`, `rl-phys-test`, run once; `results/rl_test_report_mtest_*.json`,
+`rl_test_report_ptest_*.json`).** Frozen rollout, stored realisations, seed 0.
+
+| test routes | student trained on | alone | + rollout | rollout vs LA (pp) |
+|---|---|---|---|---|
+| 8 other truck types (314 with an LA run; LA 4.15 %) | base case | 10.89 % | 7.06 % | +2.91 ± 0.47 |
+| | base case, RL round 2 | 9.80 % | 6.96 % | +2.81 ± 0.47 |
+| | all truck types (`tmlp_F95_phys_split_list_s0`) | 4.58 % | **2.65 %** | **−1.50 ± 0.28** |
+| mixed charger powers (61; LA 2.73 %) | base case | 18.68 % | 11.26 % | +8.53 ± 1.23 |
+| | base case, RL round 2 | 18.06 % | 10.91 % | +8.18 ± 0.90 |
+| | equal-power truck types (earlier) | 8.07 % | 4.99 % | +2.26 ± 0.63 |
+| | + mixed routes (earlier, 3 seeds) | 5.52 % | 2.71 % | −0.02 ± 0.26 |
+
+* The rollout improves every student, but beats the LA only when the
+  student was trained on that route type. The all-types student + rollout is
+  below the LA on all eight types (−0.6 to −3.2 pp; kwh300 −3.17 ± 1.07).
+* The base student's worst types are the charger powers it never saw:
+  kw150 +21.4 → +14.1 pp, kw1000 +17.3 → +8.3 pp vs the LA.
+* Routes resting more than the LA: base 58 → 19; all-types 13 → 3. 0 broken runs.
+* Expert iteration on the base case does not transfer (round 2 ≈ original on
+  other types).
+
 ## References (links checked 2026-10-26)
 
 * Alshiekh et al. (2018). Safe reinforcement learning via shielding. AAAI.

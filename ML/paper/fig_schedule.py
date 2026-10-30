@@ -147,23 +147,29 @@ def draw(data, rows=None):
     xmax = max(r["arrival"] for r in R)
     for _c, a, b in data["windows"]:
         ax.axvspan(a, b, color=COL["window"], alpha=0.13, lw=0, zorder=0)
+    sys.path.insert(0, CODE)
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from rl_env import load_route
+    serv = {int(k): float(v) for k, v in load_route(data["instance"])[0]["S"].items()}
     for y, r in zip(range(n - 1, -1, -1), R):
         ax.barh(y, r["arrival"], height=0.16, color=COL["drive"], lw=0, zorder=1)
         for s in r["stops"]:
-            dw = s["td"] - s["ta"]
-            if dw <= 1e-4:
+            if s["td"] - s["ta"] <= 1e-4:
                 continue
-            if s["taur"] > 0.5:
-                c = COL["rest"]
-            elif s["tauc"] > 1e-6:
-                c = COL["charge"]
-            elif s["taub"] > 1e-6:
-                c = COL["brk"]
-            elif s["cust"]:
-                c = COL["service"]
-            else:
+            t = s["ta"]
+            if s["cust"]:                       # service starts on arrival, before a rest there
+                sv = serv.get(s["stop"], 0.0)
+                ax.barh(y, sv, left=t, height=0.46, color=COL["service"], lw=0, zorder=3)
+                t += sv
+            c = (COL["rest"] if s["taur"] > 0.5 else COL["charge"] if s["tauc"] > 1e-6
+                 else COL["brk"] if s["taub"] > 1e-6 else None)
+            if c is None or s["td"] <= t + 1e-4:
                 continue
-            ax.barh(y, dw, left=s["ta"], height=0.46, color=c, lw=0, zorder=2)
+            ax.barh(y, s["td"] - t, left=t, height=0.46, color=c, lw=0, zorder=2)
+            if s["taur"] > 0.5:                 # the rest's length: 9 h (reduced) or 11 h (regular)
+                ax.text(t + s["taur"] / 2, y, f"{s['taur']:.0f} h", ha="center", va="center",
+                        fontsize=5.6, color="white", zorder=5)
         for s in r["stops"]:
             if s["cust"] and s["miss"]:
                 ax.plot(s["ta"], y + 0.36, marker="x", ms=4.2, mew=1.1, color=COL["miss"], zorder=4,
@@ -171,9 +177,9 @@ def draw(data, rows=None):
         tchg = {s["stop"]: s["ta"] for s in r["stops"]}
         for k in r["changed"]:
             ax.plot(tchg[k], y - 0.36, marker="^", ms=3.2, color="#000000", zorder=4, ls="none")
-        lab = f"{r['arrival']:.1f} h, gap {r['gap']:.2f}%"
-        lab += f", {r['misses']} missed" if r["misses"] else ", no miss"
-        ax.text(-2.0, y + 0.13, r["name"], va="center", ha="right", fontsize=8, color="#111111")
+        lab = f"gap {r['gap']:.2f}%, " + (f"{r['misses']} missed" if r["misses"] else "no miss")
+        name = {"Oracle (hindsight)": "Oracle", "Learned network": "Network"}.get(r["name"], r["name"])
+        ax.text(-2.0, y + 0.13, name, va="center", ha="right", fontsize=8, color="#111111")
         ax.text(-2.0, y - 0.22, lab, va="center", ha="right", fontsize=6.5, color="#444444")
     ax.set_yticks([])
     ax.set_ylim(-0.7, n - 0.4)
@@ -192,7 +198,7 @@ def draw(data, rows=None):
     ax.legend(handles=handles, ncol=4, loc="lower left", bbox_to_anchor=(0.0, 1.0), frameon=False,
               fontsize=7, handlelength=1.2, columnspacing=1.0, handletextpad=0.4, borderaxespad=0.2)
     fig.tight_layout(pad=0.2)
-    fig.subplots_adjust(left=0.25, right=0.99)
+    fig.subplots_adjust(left=0.21, right=0.99)
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(HERE, f"fig_schedule.{ext}"), dpi=300)
     print("wrote fig_schedule.pdf/.png")

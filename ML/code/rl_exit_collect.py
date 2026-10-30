@@ -80,8 +80,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", default="torch")
     ap.add_argument("--tag", default="tmlp_F95_split_list_s0")
-    ap.add_argument("--routes", default="base", choices=["base", "mixed"])
-    ap.add_argument("--variants", default="pmix,mix")
+    ap.add_argument("--routes", default="base",
+                    help="comma list of route sets (rl_env.route_set): base, mixed, phys; "
+                         "e.g. base,phys = the base case + the one-at-a-time truck types")
+    ap.add_argument("--variants", default="pmix,mix", help="variants of the mixed routes")
+    ap.add_argument("--phys", default="kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100",
+                    help="axes of the phys routes")
     ap.add_argument("--split", default="fit", choices=["fit"],
                     help="training routes only: labels are training data")
     ap.add_argument("--lengths", default="short,medium,long")
@@ -93,8 +97,6 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
     a = ap.parse_args()
-    if a.routes == "mixed":
-        raise SystemExit("mixed training routes: not wired yet (mixed_eval has no fit split)")
     out_dir = os.path.join(DATA, f"rl_exit_{a.name}")
     os.makedirs(out_dir, exist_ok=True)
     cfg = dict(dir=out_dir, draws=a.draws, futures=a.futures, race=a.race, seed=a.seed)
@@ -102,7 +104,10 @@ def main():
         json.dump(dict(kind=a.kind, tag=a.tag, routes=a.routes, split=a.split,
                        **{k: v for k, v in cfg.items() if k != "dir"}), fh, indent=1)
     lens = tuple("R" + x for x in a.lengths.split(","))
-    jobs = [j for j in route_set(a.routes, a.split, a.variants) if j[1].startswith(lens)]
+    jobs = []
+    for rs in a.routes.split(","):
+        var = a.phys if rs == "phys" else a.variants
+        jobs += [j for j in route_set(rs, a.split, var) if j[1].startswith(lens)]
     if a.limit:
         jobs = jobs[: a.limit]
     todo = [j for j in jobs if not os.path.exists(os.path.join(out_dir, j[1] + ".npz"))]

@@ -70,7 +70,8 @@ def load_states(names):
     for name in names:
         for f in sorted(glob.glob(os.path.join(label_dir(name), "*.npz"))):
             z = np.load(f, allow_pickle=True)
-            seed = int(str(z["instance"]).rsplit("_", 1)[1])
+            # "RshortCfewTnone_10" or "RshortCfewTnone_10__pmix" -> 10
+            seed = int(str(z["instance"]).split("__")[0].rsplit("_", 1)[1])
             for r in z["recs"]:
                 n = len(r["keys"])
                 if n < 2:
@@ -89,17 +90,28 @@ def load_states(names):
     return (np.stack(rows), np.stack(d), np.stack(mask), np.array(seeds))
 
 
-def anchor_rows(features, n, rng, fit_seeds=range(1, 20)):
-    """`n` random imitation rows (data/dataset.npz, fit route seeds), with the
-    student's own feature columns in its order."""
+def anchor_rows(features, n, rng, fit_seeds=range(1, 20), files=("dataset",)):
+    """`n` random imitation rows from the training data (data/<file>.npz for
+    each file, fit route seeds; spread over the files in proportion to their
+    fit rows), with the student's own feature columns in its order.  The
+    default is the base case; a student trained on more route types should be
+    anchored on its own training files (e.g. dataset,dataset_phys_pmix,...)."""
     if n <= 0:
         return None
-    z = np.load(os.path.join(DATA, "dataset.npz"), allow_pickle=True)
-    names = [str(x) for x in z["feature_names"]]
-    cols = [names.index(f) for f in features]
-    ok = np.where(np.isin(z["seed"], list(fit_seeds)))[0]
-    pick = rng.choice(ok, size=min(n, len(ok)), replace=False)
-    return np.asarray(z["X"][np.sort(pick)][:, cols], dtype=np.float32)
+    parts = []
+    for f in files:
+        z = np.load(os.path.join(DATA, f + ".npz"), allow_pickle=True)
+        names = [str(x) for x in z["feature_names"]]
+        cols = [names.index(c) for c in features]
+        ok = np.where(np.isin(z["seed"], list(fit_seeds)))[0]
+        parts.append((z, cols, ok))
+    total = sum(len(ok) for _z, _c, ok in parts)
+    out = []
+    for z, cols, ok in parts:
+        k = min(len(ok), int(round(n * len(ok) / total)))
+        pick = rng.choice(ok, size=k, replace=False)
+        out.append(np.asarray(z["X"][np.sort(pick)][:, cols], dtype=np.float32))
+    return np.vstack(out)
 
 
 def costs(net_cost, x, mean, std):
@@ -131,6 +143,8 @@ def main():
     ap.add_argument("--alpha", type=float, default=0.1)
     ap.add_argument("--gamma", type=float, default=1.0)
     ap.add_argument("--anchor-n", type=int, default=200_000)
+    ap.add_argument("--anchor-data", default="dataset",
+                    help="comma list of data/<name>.npz files to anchor on (the student's training data)")
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch", type=int, default=256)
@@ -157,7 +171,7 @@ def main():
     rows, d, mask, seeds = load_states(a.data.split(","))
     hold = np.isin(seeds, [int(s) for s in a.hold.split(",")])
     tr, va = np.where(~hold)[0], np.where(hold)[0]
-    A = anchor_rows(meta["features"], a.anchor_n, rng)
+    A = anchor_rows(meta["features"], a.anchor_n, rng, files=a.anchor_data.split(","))
     print(f"{len(rows)} labelled states ({len(tr)} fit, {len(va)} held out, seeds {a.hold}); "
           f"{0 if A is None else len(A)} anchor rows")
     g0 = one_step_gain(net.cost, rows[va], d[va], mask[va], mean, std)
@@ -213,6 +227,7 @@ def main():
     meta = dict(meta, tag=a.out, rl=dict(base=a.base, data=a.data, epoch=best[2],
                                          held_out_gain=best[0], tau=a.tau, beta=a.beta,
                                          alpha=a.alpha, gamma=a.gamma, anchor_n=a.anchor_n,
+                                         anchor_data=a.anchor_data,
                                          lr=a.lr))
     with open(os.path.join(MODELS, f"{a.out}_meta.json"), "w") as fh:
         json.dump(meta, fh, indent=1)

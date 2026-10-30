@@ -108,9 +108,9 @@ def route_set(routes, split, variants="pmix,mix"):
                     out.append((ax, name, p))
         return out
     import mixed_eval as me
-    if split not in ("test", "stop"):
-        raise ValueError("mixed routes: split test or stop (validation)")
-    me.ROUTE_SET = "test" if split == "test" else "val"
+    # mixed_eval's folders: ML/instances_mixed/<v>/ (test, seeds 22-25),
+    # .../val/<v>/ (seeds 20-21) and .../train/<v>/ (the training routes)
+    me.ROUTE_SET = dict(test="test", stop="val", fit="train")[split]
     return list(me.instances(variants.split(","), uniform=False))
 
 

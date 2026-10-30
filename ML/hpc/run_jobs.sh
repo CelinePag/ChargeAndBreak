@@ -35,6 +35,8 @@
 #     bash ML/hpc/run_jobs.sh rl-window-val  # rollout + window-critical stops vs plain rollout, validation
 #     bash ML/hpc/run_jobs.sh rl-mixed-exit  # base-trained students (+ RL round 2) + rollout on the mixed test routes
 #     bash ML/hpc/run_jobs.sh rl-phys-test   # rollout on the other truck types (base / RL / all-types students), test
+#     bash ML/hpc/run_jobs.sh rl-exit-x B R  # expert iteration of the mixed-charger student, round R (A: base+truck types)
+#     bash ML/hpc/run_jobs.sh rl-exit-x-test B R  # that student on the 64 mixed test routes, once
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -747,6 +749,70 @@ rl-mixed-exit)
   log "rl-mixed-exit done"
   ;;
 
+rl-exit-x)
+  # Expert iteration for the students of the mixed-charger study (2026-10-30),
+  # as rl-exit does for the base case.  M = A: tmlp_T144_phys_split_list_s0
+  # (base case + the 8 one-at-a-time truck types), labels on the base-case and
+  # truck-type training routes (2,463 routes; ~8 h per round on 32 cores);
+  # M = B: tmlp_T144_physmix_split_list_s0 (A's data + the 248 mixed training
+  # routes), labels on the mixed training routes (~15 min per round).  Anchors:
+  # the student's own training data.  Validation: the 32 mixed validation
+  # routes (no LA there), 8 fresh draws, new student vs the original
+  # (rl_compare.py xval_<M>_r<R>).  Run the rounds in order.
+  M=${2:?usage: rl-exit-x A|B R}
+  R=${3:?usage: rl-exit-x A|B R}
+  export OMP_NUM_THREADS=1
+  PH="dataset_phys_kwh300,dataset_phys_kwh700,dataset_phys_kwh900,dataset_phys_kw150,dataset_phys_kw700,dataset_phys_kw1000,dataset_phys_cs30,dataset_phys_cs100"
+  case "$M" in
+    A) BASE0=tmlp_T144_phys_split_list_s0;    ROUTES=base,phys; ANCH="dataset,$PH" ;;
+    B) BASE0=tmlp_T144_physmix_split_list_s0; ROUTES=mixed;     ANCH="dataset,$PH,dataset_phys_pmix,dataset_phys_mix" ;;
+    *) echo "M must be A or B"; exit 1 ;;
+  esac
+  PREV=$BASE0
+  [ "$R" -gt 1 ] && PREV=${BASE0}_exit$((R - 1))
+  NEW=${BASE0}_exit$R
+  DATA=x${M}_r1
+  for k in $(seq 2 "$R"); do DATA="$DATA,x${M}_r$k"; done
+  if [ ! -f "ML/models/${PREV}_meta.json" ]; then
+    log "rl-exit-x $M $R: $PREV not found -- run round $((R - 1)) first"; exit 1
+  fi
+  log "rl-exit-x $M $R: labels with $PREV on the $ROUTES training routes x 2 draws ($NCPU workers)"
+  python -u ML/code/rl_exit_collect.py --kind torch --tag "$PREV" --routes "$ROUTES" --split fit \
+    --draws 2 --name "x${M}_r$R" --workers "$NCPU" >> "$LOGS/rl_exit_x${M}_r$R.log" 2>&1
+  if [ -f "ML/models/${NEW}_meta.json" ]; then
+    log "rl-exit-x $M $R: $NEW exists, not retrained"
+  else
+    log "rl-exit-x $M $R: fine-tuning $BASE0 on $DATA -> $NEW"
+    python -u ML/code/rl_torch_ft.py --data "$DATA" --base "$BASE0" --out "$NEW" --anchor-data "$ANCH" \
+      --threads $(( NCPU < 16 ? NCPU : 16 )) >> "$LOGS/rl_exit_x${M}_r$R.log" 2>&1
+  fi
+  log "rl-exit-x $M $R: $NEW vs $BASE0 on the 32 mixed validation routes, 8 fresh draws"
+  python -u ML/code/rl_search.py --kind torch --tag "$NEW" --routes mixed --split stop \
+    --draws 8 --theta "[{\"net\": \"torch:$BASE0\"}]" --name "xval_${M}_r$R" --workers "$NCPU" \
+    >> "$LOGS/rl_exit_x${M}_r$R.log" 2>&1
+  log "rl-exit-x $M $R done"
+  ;;
+
+rl-exit-x-test)
+  # The frozen round-R student of rl-exit-x M on the 64 mixed-charger TEST
+  # routes, once, stored realisations: alone, with the rollout, and the
+  # original student (results/rl_search_xtest_<M>_r<R>.jsonl).
+  M=${2:?usage: rl-exit-x-test A|B R}
+  R=${3:?usage: rl-exit-x-test A|B R}
+  export OMP_NUM_THREADS=1
+  case "$M" in
+    A) BASE0=tmlp_T144_phys_split_list_s0 ;;
+    B) BASE0=tmlp_T144_physmix_split_list_s0 ;;
+    *) echo "M must be A or B"; exit 1 ;;
+  esac
+  NEW=${BASE0}_exit$R
+  log "rl-exit-x-test $M $R: $NEW on the 64 mixed test routes ($NCPU workers)"
+  python -u ML/code/rl_search.py --kind torch --tag "$NEW" --routes mixed --variants pmix,mix \
+    --split test --draws 0 --realised --theta "[{\"dsr\": 32, \"race\": 8}, {\"net\": \"torch:$BASE0\"}]" \
+    --name "xtest_${M}_r$R" --workers "$NCPU" >> "$LOGS/rl_exit_x_test.log" 2>&1
+  log "rl-exit-x-test $M $R done"
+  ;;
+
 rl-phys-test)
   # The frozen rollout on the OTHER TRUCK TYPES (instances_sens, one setting
   # changed from the base case: battery 300/700/900 kWh, chargers 150/700/1000
@@ -776,7 +842,7 @@ rl-phys-test)
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val|rl-mixed-exit|rl-phys-test"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val|rl-mixed-exit|rl-phys-test|rl-exit-x A|B R|rl-exit-x-test A|B R"
   exit 1
   ;;
 esac
