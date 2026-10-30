@@ -96,6 +96,15 @@ def route_set(routes, split, variants="pmix,mix"):
     if routes == "base":
         root = os.path.join(_ROOT, "instances")
         return [("base", n, os.path.join(root, n + ".json")) for n in split_routes(split)]
+    if routes == "new":
+        # brand-new routes of the base classes (new_routes.py, seeds 26+), for
+        # expert iteration only: no solver was run on them, so training only
+        import glob
+        if split != "fit":
+            raise SystemExit("route set 'new' has training routes only")
+        root = os.environ.get("CAB_NEW_ROUTES", os.path.join(_ROOT, "ML", "instances_new"))
+        return [("new", os.path.splitext(os.path.basename(p))[0], p)
+                for p in sorted(glob.glob(os.path.join(root, "*.json")))]
     if routes == "phys":
         import glob
         seeds = dict(fit=range(1, 20), stop=range(20, 22), test=range(22, 26))[split]

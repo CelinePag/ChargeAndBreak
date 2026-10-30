@@ -81,8 +81,9 @@ def main():
     ap.add_argument("--kind", default="torch")
     ap.add_argument("--tag", default="tmlp_F95_split_list_s0")
     ap.add_argument("--routes", default="base",
-                    help="comma list of route sets (rl_env.route_set): base, mixed, phys; "
-                         "e.g. base,phys = the base case + the one-at-a-time truck types")
+                    help="comma list of route sets (rl_env.route_set): base, mixed, phys, new; "
+                         "e.g. base,phys = the base case + the one-at-a-time truck types; "
+                         "new = brand-new base-class routes (new_routes.py)")
     ap.add_argument("--variants", default="pmix,mix", help="variants of the mixed routes")
     ap.add_argument("--phys", default="kwh300,kwh700,kwh900,kw150,kw700,kw1000,cs30,cs100",
                     help="axes of the phys routes")

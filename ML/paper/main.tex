@@ -30,10 +30,11 @@ neural network and gradient-boosted trees on the costs that the LA computes
 for every candidate action. Where the learned policy hesitates, a rollout
 simulates its best candidate actions until the destination, and expert
 iteration trains the network on these simulations. On 125 test routes, the
-rollout reduces the gap to a perfect-hindsight oracle from 3.05\% for the LA
-to 2.38\% at about one second per decision, and to 1.84\% after expert
-iteration. On new routes whose charging stations have different powers, the
-rollout of a network trained on such routes is at the level of the LA.
+rollout of the network reduces the gap to a perfect-hindsight oracle from
+3.05\% for the LA to 2.38\% at about one second per decision, and the rollout
+of the network after expert iteration to 1.84\%. On new routes whose charging
+stations have different powers, the rollout of a network trained on such
+routes is at the level of the LA.
 \keywords{Expert iteration \and Rollout algorithms \and Imitation learning
 \and Electric trucks \and Truck driver scheduling}
 \end{abstract}
@@ -41,7 +42,7 @@ rollout of a network trained on such routes is at the level of the LA.
 \section{Introduction}
 \label{sec:intro}
 
-Battery electric trucks are the leading pathway to decarbonize road
+Battery electric trucks are one of the main options to decarbonize road
 freight~\cite{pagnier2026linking}, but on long-distance routes their charging
 stops interact with the EU Hours-of-Service (HoS) regulation~\cite{eu561},
 which imposes a 45-minute break after at most 4.5 hours of driving and a daily
@@ -73,12 +74,8 @@ the evaluations of this rollout, in the manner of expert
 iteration~\cite{anthony2017}. Finally, we evaluate these policies on new
 routes whose charging stations (CS) have different powers, with and without
 training on such routes. The rollout improves on the LA at about 1\% of its
-decision time, and after expert iteration the network alone matches the LA.
-
-The remainder of the paper is organized as follows. Sections~\ref{sec:related}
-and~\ref{sec:problem} review related work and the problem,
-Sect.~\ref{sec:method} presents the methods, Sect.~\ref{sec:exp} reports the
-results, and Sect.~\ref{sec:conclusion} concludes.
+decision time, and after expert iteration, the network alone is at the level
+of the LA and its rollout is 1.21 percentage points below it.
 
 \section{Related Work}
 \label{sec:related}
@@ -86,36 +83,40 @@ results, and Sect.~\ref{sec:conclusion} concludes.
 \subsubsection{Imitation learning.}
 Fast policies for sequential decision problems are often obtained by imitating
 an optimization expert. AggreVaTe~\cite{ross_bagnell2014,sun2017aggrevated}
-learns the expert's cost of every action, which bounds the cost of the learned
-policy by that of the expert plus the learning error, and policies have also
-been learned from hindsight-optimal solutions~\cite{baty2024,sinclair2023}.
-Learned controllers are often executed behind a safety
-filter~\cite{wabersich2021} or a shield~\cite{alshiekh2018}.
+learns the expert's cost-to-go of every action at the states reached by the
+learned policy, which bounds its cost by that of the expert plus the learning
+error. This bound does not apply to our first policies, which learn the
+24-hour scores of the LA at the states of its own runs. Policies have also been learned from hindsight-optimal
+solutions~\cite{baty2024,sinclair2023}, and learned controllers are often
+executed behind a safety filter~\cite{wabersich2021} or a
+shield~\cite{alshiekh2018}.
 
 \subsubsection{Rollout.}
 Rollout algorithms improve a base policy by simulating it after each candidate
 action~\cite{tesauro1996,bertsekas1997}, which is one step of policy
 iteration, and they are widely used in stochastic vehicle
-routing~\cite{goodson2017,kullman2021}. Expert iteration~\cite{anthony2017}
+routing~\cite{goodson2017,kullman2021}. Bertsekas~\cite{bertsekas2022}
+interprets the online rollout of a policy trained offline, as in AlphaZero, as
+a Newton step for Bellman's equation. Expert iteration~\cite{anthony2017}
 trains a neural network on the decisions of a search that improves on it, and
 Chang et al.~\cite{chang2015lols} argue that improving on an expert requires
 roll-outs with the learned policy.
 
 \subsubsection{Electric trucks and driving-time regulations.}
 Truck driver scheduling under EU rules~\cite{goel2010,garaix2024} and electric
-vehicle routing with recharging stations~\cite{schneider2014,montoya2017} have
-mostly been studied separately, and the works that combine them assume
-deterministic travel times~\cite{bai2023,brockmann2025}.
+vehicle routing with recharging stations~\cite{schneider2014,montoya2017} were
+combined in~\cite{schiffer2017,brockmann2025} with deterministic travel times.
+Closest to this paper, Bai et al.~\cite{bai2023} decide where and how long an
+electric truck charges and rests by a rollout of greedy and relaxation-based
+solutions, also with deterministic travel times, whereas our rollout uses a
+learned base policy and sampled travel times.
 
 \subsubsection{Contribution.}
 To our knowledge, learned policies have not yet been applied to the joint
 charging and rest decisions of electric trucks, nor used as the base policy of
-a rollout that improves on the look-ahead they are learned from. This matters
-in practice, since the LA is the best policy of~\cite{pagnier2026scheduling}
-but needs a MILP solver and up to 18 minutes for a decision. The policies of
-this paper decide better than the LA, in about a second and without a solver,
-so that they can run on board and update the schedule of the driver in real
-time, at every stop and after every delay.
+a rollout that improves on the look-ahead they are learned from. Unlike the
+LA, such a rollout needs no solver, and can therefore run on board and update
+the schedule of the driver after every delay.
 
 \section{Problem Description}
 \label{sec:problem}
@@ -138,12 +139,13 @@ the 15 and 30 minutes of a split break) and a daily rest (none, 11 or 9
 hours). Breaks and rests have fixed durations, and the charging duration is
 set once the action is chosen. A driver may drive at most 4.5 hours without a
 break and 9 hours per shift (10 hours twice a week), and must complete a daily
-rest within 24 hours of the previous one~\cite{eu561,eu2002_15}, and a charge
-counts as a break if it lasts as long. The battery must stay above a minimum
-energy, and charging slows down above a threshold. A run in which the truck is
-stranded or the driver breaches a limit is infeasible. A policy $\pi$ chooses
-the action $a_i=A^\pi(\Gamma_i)$ from the state, and we seek one that never
-makes a run infeasible and minimizes
+rest within 24 hours of the previous one~\cite{eu561,eu2002_15}. As
+in~\cite{pagnier2026scheduling}, we assume that the truck can charge during
+breaks and rests, and a charge counts as a break if it lasts as long. The
+battery must stay above a minimum energy, and charging slows down above a
+threshold. A run in which the truck is stranded or the driver breaches a limit
+is infeasible. A policy $\pi$ chooses the action $a_i=A^\pi(\Gamma_i)$ from the
+state, and we seek one that never makes a run infeasible and minimizes
 \begin{equation}
 \mathbb{E}\Big[u^t_N+\sum_{i\in\mathcal{C}}\beta_i\delta_i\Big],
 \label{eq:obj}
@@ -165,10 +167,9 @@ the simulated policy.}
 \label{fig:methods}
 \end{figure}
 
-Figure~\ref{fig:methods} summarizes the policies. The LA and the rollout both
-look ahead, but the LA optimizes the next 24 hours of each scenario with its
-travel times known, whereas the rollout simulates a learned policy, which does
-not know them, until the destination.
+Figure~\ref{fig:methods} summarizes the policies: the LA optimizes the next
+24 hours of each scenario with its travel times known, whereas the rollout
+simulates a learned policy, which does not know them, until the destination.
 
 \subsection{Methods of~\cite{pagnier2026scheduling}}
 
@@ -181,11 +182,12 @@ the MILP of~\cite{pagnier2026scheduling} up to a horizon stop $h$ within 24
 hours, with $a$ fixed and the travel times of scenario $k$ known. It executes
 the action with the lowest score $f_i(a)=\frac{1}{S}\sum_{k}z_i(a,\xi^{(k)})$,
 where $z_i(a,\xi^{(k)})$ is the optimal arrival time at $h$ plus penalties,
-and takes its charging duration from a final MILP at average travel times.
-Finally, the oracle solves the MILP over the whole route once the run is
-finished, with the realized travel times known, which gives the best schedule
-in hindsight. It is a benchmark rather than a policy, and we report the gap of
-each policy to it.
+and takes its charging duration from a final MILP at average travel times. The
+LA is thus the expectation algorithm of~\cite{vanhentenryck2006}, over a
+horizon of 24 hours. Finally, the oracle solves the MILP over the whole route
+once the run is finished, with the realized travel times known, which gives
+the best schedule in hindsight. It is a benchmark rather than a policy, and we
+report the gap of each policy to it.
 
 \subsection{Learned Policies}
 
@@ -201,13 +203,12 @@ common, such as the remaining route, is removed.
 
 \subsubsection{Features.}
 Each state--action pair is described by 95 features computed at average travel
-times. The 77 state features describe how close the truck is to each limit and
-what lies ahead, namely the slack to each regulatory limit, the energy margins
+times. The 77 state features describe the slack to each regulatory limit, the
+energy margins
 to the next three CS, the next two customers and the slack to their windows, a
 summary of the next 24 hours, and what remains of the route. The 18 action
 features describe the charge, break and rest of the action, its duration, and
-the window slack after it. In preliminary experiments, smaller sets, and a
-larger one that adds the next 20 stops one by one, performed worse.
+the window slack after it.
 
 \subsubsection{Models.}
 A learned policy uses three learned models. The regret model predicts the
@@ -234,12 +235,13 @@ improves.
 \subsubsection{Safety filter.}
 The learned policy $\hat\pi$ picks the action with the lowest predicted regret
 $\hat q_i(a)$ among those predicted feasible, $\hat p_i(a)\ge0.5$, and allowed
-by a rule-based filter $\hat{\mathcal{A}}_i\subseteq\mathcal{A}_i$, which is
-not learned. The filter removes an action if a counter would exceed its limit
+by a rule-based filter $\hat{\mathcal{A}}_i\subseteq\mathcal{A}_i$. The filter removes an action if a counter would exceed its limit
 when the next leg is driven at the 0.99 quantile of $\xi_i$, if the stop would
 not fit before the next daily rest, or if another action is mandatory, and the
 charge is clipped between the energy needed to reach the next CS at that
-quantile and a full battery.
+quantile and a full battery. The upper bound $\overline{\xi}$ would also
+remove actions that fail only in rare draws, so the filter makes a breach
+unlikely but does not exclude it.
 
 \subsection{Decisive-State Rollout}
 
@@ -247,19 +249,21 @@ The rollout relies on a simple property~\cite{bertsekas1997}. If, at a stop, a
 few candidate actions are compared by simulating the rest of the route with
 $\hat\pi$ taking all later decisions, and the best one is applied, the
 resulting policy is on average no worse than $\hat\pi$, as long as the action
-of $\hat\pi$ is among the candidates. We make this comparison only at decisive
-stops, where the best rest and the best action without rest are within 2 hours
-of each other in predicted regret, or the two best actions within 0.25 hour,
-since elsewhere one action is clearly better and simulating would rarely
-change the decision. The four candidates have the lowest predicted regrets,
-always including the best rest and the best action without rest, and each one
-is simulated until the destination under the same 32 travel-time futures, so
-that they are compared under the same luck~\cite{ng2000pegasus}. The futures
-are simulated in rounds of 8, after which a candidate whose average extra cost
-over the action of $\hat\pi$ exceeds two standard errors is dropped, and the
-rollout applies the candidate with the lowest average cost. All candidates pass
-the safety filter, and all simulated decisions are taken by $\hat\pi$. These
-parameters were fixed before any validation run.
+of $\hat\pi$ is among the candidates and the candidates are evaluated exactly.
+We make this comparison only at decisive stops, where the best rest and the
+best action without rest are within 2 hours of each other in predicted regret,
+or the two best actions within 0.25 hour, since elsewhere one action is
+clearly better and simulating would rarely change the decision. The four
+candidates have the lowest predicted regrets, always including the best rest
+and the best action without rest, and each one is simulated until the
+destination under the same 32 travel-time futures, so that they are compared
+under the same luck~\cite{ng2000pegasus}. The futures are simulated in rounds
+of 8, after which a candidate whose average extra cost over the action of
+$\hat\pi$ exceeds two standard errors is dropped, and the rollout applies the
+candidate with the lowest average cost. All candidates pass the safety filter,
+and all simulated decisions are taken by $\hat\pi$. Since the lowest of
+several sampled averages is optimistic~\cite{smith2006}, the rollout can also
+switch to a worse action, so we measure its gain on separate realizations. These parameters were fixed before any validation run.
 
 \subsection{Expert Iteration}
 
@@ -281,13 +285,13 @@ C_s}p_\theta(j\mid s)\,\bar d_{sj}+R(\theta),
 where $\mathcal{D}$ is the set of labeled stops, $C_s$ the candidate actions
 compared by the rollout at stop $s$, and $p_\theta(j\mid s)$, the softmax of
 $-\hat q_\theta/\tau$ over $C_s$, the probability that the network picks $j$.
-The first term, the expected hours that the choice of the network costs
-compared with its original action, decreases when the network moves towards
-the candidates that the rollout found better. The term $R(\theta)$ keeps the
+The first term decreases when the network moves towards the candidates that
+the rollout found better. The term $R(\theta)$ keeps the
 network close to the original one, through the Kullback--Leibler divergence
 between $p_\theta$ and $p_{\theta_0}$ and the squared change of the predicted
-regrets on the candidates and on 200{,}000 training pairs, and the epoch is
-selected on 3 held-out training routes of each instance class.
+regrets on the candidates and on 200{,}000 training pairs. The epoch is
+selected on the labeled stops of 3 of the 19 training routes of each instance
+class, which are left out of this training.
 
 \section{Computational Experiments}
 \label{sec:exp}
@@ -299,18 +303,22 @@ The 900 routes of~\cite{pagnier2026scheduling} belong to 36 instance classes,
 which combine three ranges of route length (800 to 4{,}000\,km), three ranges
 of number of customers (1 to 15) and four types of time windows, with 25 routes
 per class. Travel times have a coefficient of variation of 0.15, the battery
-has 500\,kWh, and the 350\,kW CS are 60\,km apart on average, as mandated by
-2030~\cite{afir}. Of the 25 routes of each instance class, 19 are used for
-training, 2 for validation and 4 for testing, of which 125 test routes have an
-LA run. As in~\cite{pagnier2026scheduling}, we report the gap to the oracle on
-the realized travel times, with a window penalty $\beta_i$ of 30 minutes and in
-route duration only, and differences in percentage points (pp), paired by
-route, $\pm$ one standard error. Since training is random, the trees and the
-network are each trained three times on the same routes, and their results are
-averaged. Each test route has one stored realization of the travel times, on
-which the LA and the oracle were run. To compare the learned policies with
-each other more precisely, we also simulate them on 16 other realizations per
-test route, drawn from the same distribution.
+has 500\,kWh, and the 350\,kW CS are 60\,km apart on average, the maximum
+spacing that the EU sets for the core trans-European network by
+2030~\cite{afir}. Of
+the 25 routes of each instance class, 19 are used for training, 2 for
+validation and 4 for testing. The LA of~\cite{pagnier2026scheduling} has no
+complete run on 60 of the 900 routes, 56 of them long, and is infeasible on
+10, so we use the 639 training, 66 validation and 125 test routes on which it
+is feasible. As in~\cite{pagnier2026scheduling}, we report the gap to the
+oracle on the realized travel times, with a window penalty $\beta_i$ of 30
+minutes and in route duration only, and differences in percentage points (pp),
+paired by route, $\pm$ one standard error. The trees
+and the network are each trained three times, and their results averaged. The
+LA and the oracle were run on one stored realization of the travel times per
+test route, on which all policies are evaluated. The LA
+decisions behind the training data took about 1{,}200 hours
+in~\cite{pagnier2026scheduling}, and expert iteration 3 hours on 32 cores.
 
 \subsection{Improving on the Look-Ahead}
 \label{sec:base}
@@ -346,32 +354,32 @@ Network, expert iteration & 3.08 & 2.52 & $+0.03\pm0.35$ & 96 & 2 & 1.4\,ms\\
 
 Table~\ref{tab:base} shows that the learned policies are within 0.7\,pp of
 the LA, and within 0.25\,pp in route duration only, so that most of the
-difference comes from missed time windows. No run is infeasible, which is due
-to the safety filter, since without it 18 of the 375 runs of the trees and 38
-of the 375 runs of the network breach a limit.
+difference comes from missed time windows. No test run is infeasible, whereas
+without the safety filter, 18 of the 375 runs of the trees and 38 of the 375
+runs of the network breach a limit.
 
 With the rollout, both learned policies improve on the LA, by
-$0.72\pm0.33$\,pp for the trees and $0.67\pm0.34$\,pp for the network, and on
-themselves on 109 and 118 of the 125 routes. The rollout is triggered at 38\%
-of the stops and changes the action at 4.7\% of them, and with the network it
-takes about 1\,s per stop on average and at most about 30\,s, against 77\,s and
-18\,min for the LA.
+$0.72\pm0.33$\,pp for the trees and $0.67\pm0.34$\,pp for the network, and
+they are strictly better than without the rollout on 109 and 118 of the 125
+routes. The rollout is triggered at 38\% of the stops and changes the action
+at 4.7\% of them.
 
-Expert iteration was applied to the first of the three trained networks. After
-two rounds (49{,}171 and 32{,}998 labeled stops), this network alone is at the
-level of the LA ($+0.03\pm0.35$\,pp) and improves on its original version by
-$0.46\pm0.20$\,pp, which the 16 other realizations per route confirm
-($0.25\pm0.05$\,h per route, better on 88 routes and worse on 31), and its
-rollout is $1.21\pm0.32$\,pp below the LA. A third round was not run, since
-the second improved little on the first on the validation routes.
+Expert iteration was applied to the first of the three trained networks, whose
+gap is 3.54\% alone and 2.39\% with the rollout. After two rounds (49{,}171
+and 32{,}998 labeled stops), this network alone improves on its original
+version by $0.46\pm0.20$\,pp, and it is at the level of the LA ($+0.03\pm0.35$\,pp, 95\% confidence interval
+$[-0.65,0.71]$). Its rollout is $1.21\pm0.32$\,pp below the LA and never
+rests more often than the LA. A third round was not run, as the second gained little on the
+validation routes.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{fig_schedule.pdf}
-\caption{Schedules of the oracle, the LA, the network and its rollout on a long
-test route with five customers, whose gaps are closest to the averages of
-Table~\ref{tab:base}. Daily rests last 9 or 11 hours, and triangles mark the
-decisions changed by the rollout.}
+\caption{Schedules of the oracle, the LA, the first network and its rollout on
+a long test route with five customers, whose gaps are closest to the averages
+of Table~\ref{tab:base}, with the gap of each policy on this route. Daily
+rests last 9 or 11 hours, and triangles mark the decisions changed by the
+rollout.}
 \label{fig:schedule}
 \end{figure}
 
@@ -384,8 +392,7 @@ its third rest falls before these customers, as for the oracle, and it serves
 all customers within their windows. More generally, at the decisive stops of
 70 long training routes, resting now without adding a daily rest to the trip
 is estimated by the trees, which learn from the LA, at 5.2 hours, but costs
-only 1.6 hours when simulated until the destination, since the LA only looks
-24 hours ahead.
+only 1.6 hours when simulated until the destination.
 
 \subsection{Charging Stations of Different Powers}
 \label{sec:mixed}
@@ -394,7 +401,8 @@ only 1.6 hours when simulated until the destination, since the LA only looks
 \caption{Routes with CS of different powers: gap to the oracle with the window
 penalties (\%, 61 test routes with an oracle within 1\% of optimality) and
 share of the charged energy taken at each CS power (\%, 64 test routes). One
-trained model per network.}
+trained model per network; expert iteration: the network trained on mixed
+powers.}
 \label{tab:other}
 \centering\small
 \setlength{\tabcolsep}{4pt}
@@ -412,44 +420,55 @@ Network, equal powers & 8.07 & 18 & 21 & 33 & 28\\
 \quad + rollout & 4.99 & 6 & 20 & 37 & 36\\
 Network, mixed powers & 5.56 & 5 & 15 & 39 & 41\\
 \quad + rollout & 2.45 & 3 & 13 & 42 & 43\\
+\quad expert iteration & 3.54 & 3 & 16 & 42 & 39\\
+\quad\quad + rollout & 2.43 & 2 & 15 & 44 & 39\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Finally, we create new routes, which were not studied
-in~\cite{pagnier2026scheduling}, in which the power of each CS is drawn from
+Finally, we create new routes in which the power of each CS is drawn from
 $\{150,350,700,1000\}$\,kW, on half of them together with the spacing between
 CS, so that the policy must also choose where to charge. The LA was run on 238
 training and 64 test routes of this kind. We compare two networks. The first
 is trained on the base case and on the eight one-at-a-time variants
 of~\cite{pagnier2026scheduling}, in which one parameter changes for the whole
-route (a battery of 300 to 900\,kWh, CS of 150 to 1000\,kW, or CS 30 or 100\,km
-apart), so that it has seen every power but never two powers on the same route.
-The second is also trained on the 238 routes with mixed powers. Both networks
+route (battery, CS power or CS spacing), so that it has seen every power but
+never two powers on the same route. The second is also trained on the 238 routes with mixed powers. Both networks
 also read, for the CS at the stop and for each of the next six, its power,
-distance and charging time. Table~\ref{tab:other} shows that the network that never saw two powers on a route takes 18\% of its energy at 150\,kW CS, against 1\% for the oracle, and is 8.07\% above the oracle. The rollout moves most of this energy to faster CS and lowers the gap to 4.99\%, which is still $2.26\pm0.63$\,pp behind the LA. Trained on routes with mixed powers, the network charges almost where the LA does, and with the rollout it takes 85\% of its energy at 700 and 1000\,kW, close to the 89\% of the oracle, and is at the level of the LA (2.45\%, $-0.28\pm0.24$\,pp). The greedy heuristic, which charges to full at every stop, spreads its energy evenly over the four powers.
+distance and charging time. Table~\ref{tab:other} shows that the network that
+never saw two powers on a route takes 18\% of its energy at 150\,kW CS,
+against 1\% for the oracle, and is 8.07\% above the oracle. The rollout moves
+most of this energy to faster CS and lowers the gap to 4.99\%, which is still
+$2.26\pm0.63$\,pp behind the LA. Trained on routes with mixed powers, the
+network charges almost where the LA does, and with the rollout it takes 84\%
+of its energy at 700 and 1000\,kW, close to the 89\% of the oracle, and is at
+the level of the LA (2.45\%, $-0.28\pm0.24$\,pp). Two rounds of expert
+iteration on the 248 training routes with mixed powers (13{,}848 and 22{,}750
+labeled stops, no LA run needed) bring this network alone from 5.56 to 3.54\%
+($-2.03\pm0.99$\,pp), $0.81\pm0.30$\,pp above the LA, but leave its rollout
+unchanged (2.43\%).
 
 \section{Conclusion}
 \label{sec:conclusion}
 
 This paper studied how policies learned from a stochastic look-ahead can
 improve on it, for the charging, break and rest decisions of an electric truck
-under uncertain travel times. The main findings are as follows. First,
-gradient-boosted trees and neural networks trained on the action costs of the
-look-ahead are close to it. They perform alike, but the network decides ten
-times faster and can be trained by expert iteration. Second, rolling out the
-learned policy where it hesitates improves on the look-ahead at about 1\% of
-its decision time, mainly by resting earlier where the look-ahead, which only
-looks 24 hours ahead, overestimates the cost of an early rest. Third, expert
-iteration brings the network alone to the level of the look-ahead. Finally, on
-routes with CS of different powers, the rollout of a network trained on such
-routes is at the level of the look-ahead. A network that never saw two powers on the same route charges too often at slow CS, which the rollout only partly corrects.
+under uncertain travel times. First, gradient-boosted trees and neural
+networks trained on the action costs of the look-ahead are close to it and
+perform alike, but the network decides ten times faster and can be trained by
+expert iteration. Second, rolling out the learned policy where it hesitates
+improves on the look-ahead at about 1\% of its decision time, mainly by
+resting earlier. Third, expert iteration brings the network alone to the level
+of the look-ahead, and its rollout further below it. Finally, on routes with
+CS of different powers, the rollout is at the level of the look-ahead if the
+network was trained on such routes, and expert iteration brings this network
+alone within 1\,pp of it.
 
-Several directions could reduce the limitations of the present work. First,
-the comparison with the look-ahead relies on one realization of the travel
-times per route, and expert iteration was applied to one trained network and
-to the base case only. Finally, correlated travel times and uncertain queuing
-times would test the rollout under richer uncertainty.
+The present work has several limitations. The comparison with the look-ahead
+relies on one realization of the travel times per route and leaves out the
+routes on which it has no feasible run, and expert iteration was applied to
+one trained network per route type. Correlated travel times and
+uncertain queuing times would test the rollout under richer uncertainty.
 
 \begin{credits}
 \subsubsection{\ackname}

@@ -10,6 +10,7 @@ checked against the stored cluster test runs):
 
     A  tmlp_T144_phys_split_list_s0     base case + the 8 one-at-a-time truck types
     B  tmlp_T144_physmix_split_list_s0  A's data + the 238 mixed training routes
+    BX tmlp_T144_physmix_split_list_s0_exit2  B after two rounds of expert iteration
 
 Writes ML/results/mixed_charging.json ({method: {kW: kWh}}, plus per-route
 checks) and prints the shares.
@@ -31,13 +32,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..")))
 RES = os.path.join(HERE, "..", "results")
 OUT = os.path.join(RES, "mixed_charging.json")
 STUDENTS = [("A", "tmlp_T144_phys_split_list_s0", "dsr_mtest_tmlp_T144_phys_split_list_s0"),
-            ("B", "tmlp_T144_physmix_split_list_s0", "dsr_mtest_tmlp_T144_physmix_split_list_s0")]
+            ("B", "tmlp_T144_physmix_split_list_s0", "dsr_mtest_tmlp_T144_physmix_split_list_s0"),
+            ("BX", "tmlp_T144_physmix_split_list_s0_exit2", "xtest_B_r2")]
 _G = {}
 
 
-def _init():
+def _init(only=None):
     from rl_env import final_student
-    _G["pol"] = {lab: final_student("torch", tag) for lab, tag, _ in STUDENTS}
+    _G["pol"] = {lab: final_student("torch", tag) for lab, tag, _ in STUDENTS
+                 if only is None or lab in only}
 
 
 def charged(veh, E):
@@ -71,7 +74,7 @@ def one(job):
         if st in kw and c > 1e-3:
             E_by["Greedy"][kw[st]] += c
     dur = {}
-    for lab, _tag, _run in STUDENTS:
+    for lab in _G["pol"]:
         base = _G["pol"][lab]
         ch = RolloutChooser(base, futures=32, race=8)
         ch.route, ch.cv = name, cv
@@ -88,7 +91,11 @@ def one(job):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--only", default="",
+                    help="comma list of students to re-drive (e.g. BX); the other "
+                         "methods are kept from the existing mixed_charging.json")
     a = ap.parse_args()
+    only = set(a.only.split(",")) if a.only else None
     import mixed_eval as me
     me.ROUTE_SET = "test"
     jobs = []
@@ -97,6 +104,8 @@ def main():
         jobs += [j for j in me.instances([v], uniform=False) if j[1] in keep]
     stored = {}
     for lab, _tag, run in STUDENTS:
+        if only is not None and lab not in only:
+            continue
         for l in open(os.path.join(RES, f"rl_search_{run}.jsonl")):
             r = json.loads(l)
             stored[(lab, r["instance"])] = r["res"][0][0]["duration"]
@@ -105,7 +114,7 @@ def main():
     tot = collections.defaultdict(collections.Counter)
     mism = 0
     rows = []
-    with Pool(a.workers, initializer=_init) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(only,)) as pool:
         for n, r in enumerate(pool.imap_unordered(one, jobs), 1):
             rows.append(r)
             for m, c in r["E"].items():
@@ -116,12 +125,20 @@ def main():
                 mism += int(s is not None and abs(s - d) > 1e-6)
             if n % 8 == 0 or n == len(jobs):
                 print(f"  {n}/{len(jobs)}", flush=True)
-    out = dict(routes=len(rows), mismatches_vs_cluster=mism,
-               energy={m: {str(k): float(e) for k, e in sorted(c.items())} for m, c in tot.items()})
+    energy = {m: {str(k): float(e) for k, e in sorted(c.items())} for m, c in tot.items()}
+    if only is not None:
+        with open(OUT) as fh:
+            old = json.load(fh)
+        for m, c in old["energy"].items():
+            if m.split("+")[0] not in only:
+                energy[m] = c
+                tot[m] = collections.Counter({int(k): e for k, e in c.items()})
+        mism = dict(old=old.get("mismatches_vs_cluster"), new=mism)
+    out = dict(routes=len(rows), mismatches_vs_cluster=mism, energy=energy)
     with open(OUT, "w") as fh:
         json.dump(out, fh, indent=1)
     print(f"mismatches vs the stored cluster runs: {mism}")
-    order = ["oracle", "LA", "Greedy", "A", "A+rollout", "B", "B+rollout"]
+    order = ["oracle", "LA", "Greedy", "A", "A+rollout", "B", "B+rollout", "BX", "BX+rollout"]
     print(f"{'method':12s}" + "".join(f"{k:>8d} kW" for k in (150, 350, 700, 1000)))
     for m in order:
         c = tot[m]

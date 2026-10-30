@@ -37,6 +37,7 @@
 #     bash ML/hpc/run_jobs.sh rl-phys-test   # rollout on the other truck types (base / RL / all-types students), test
 #     bash ML/hpc/run_jobs.sh rl-exit-x B R  # expert iteration of the mixed-charger student, round R (A: base+truck types)
 #     bash ML/hpc/run_jobs.sh rl-exit-x-test B R  # that student on the 64 mixed test routes, once
+#     bash ML/hpc/run_jobs.sh rl-exit-new    # expert iteration on brand-new routes: generate, 2 rounds, validate, test, compare
 #
 # The stages are independent and can run at the same time.  On a plain
 # machine (no Slurm), start each in the background and give it its share of
@@ -837,12 +838,85 @@ rl-phys-test)
   log "rl-phys-test done"
   ;;
 
+rl-exit-new)
+  # Expert iteration on BRAND-NEW routes (2026-10-30, user): the same two
+  # rounds as rl-exit 1 / rl-exit 2, from the same original network, but the
+  # labels come from new routes of the 36 base classes (geometry, customers,
+  # windows and travel times all new) instead of the 639 training routes under
+  # new travel-time draws.  Same label budget: per class 32 new routes x 1 draw
+  # for training and 6 held out to pick the epoch (old: 16 routes x 2 draws and
+  # seeds 17-19 x 2 draws).  Everything resumes if the job is run again.
+  #   1. 1,368 new routes, seeds 26-63, with the generator of commit c11ba157b
+  #      (the one that made the base routes; src/ no longer reproduces them)
+  #      -> ML/instances_new/  (new_routes.py; needs the full git history)
+  #   2. round R = 1, 2: the current network drives every new route once, the
+  #      rollout labels its decisive stops -> data/rl_exit_exitnew_r<R>/;
+  #      the ORIGINAL network fine-tuned on rounds 1..R, early stopping on
+  #      seeds 58-63 -> models/tmlp_F95_split_list_s0_exitnew<R>
+  #   3. the round-2 network alone and with the rollout, plus the old expert-
+  #      iteration network alone (paired check), stored realisations, on the
+  #      66 validation and the 125 test routes
+  #      -> results/rl_search_exitnew_{val,test}_r2.jsonl
+  #   4. results/exit_new_compare.{json,txt} (new vs old, validation and test)
+  #      and results/rl_test_report_exitnew_{val,test}_r2.json
+  export OMP_NUM_THREADS=1
+  BASE0=tmlp_F95_split_list_s0
+  OLD=${BASE0}_exit2
+  GEN=c11ba157b
+  LOGF="$LOGS/rl_exit_new.log"
+  if ! git cat-file -e "${GEN}^{commit}" 2>/dev/null; then
+    log "rl-exit-new: commit $GEN not in this clone -- run 'git fetch --unshallow' first"; exit 1
+  fi
+  if ! command -v gurobi_cl >/dev/null; then
+    log "rl-exit-new: gurobi_cl not on PATH (the window centring needs it)"; exit 1
+  fi
+  for m in "$BASE0" "$OLD"; do
+    [ -f "ML/models/${m}_meta.json" ] || { log "rl-exit-new: ML/models/${m}_meta.json missing"; exit 1; }
+  done
+  GEN_SRC="${TMPDIR:-/tmp}/cab_gen_${GEN}_${SLURM_JOB_ID:-$$}"
+  rm -rf "$GEN_SRC" && mkdir -p "$GEN_SRC"
+  git archive "$GEN" src | tar -x -C "$GEN_SRC"
+  log "rl-exit-new: new routes, 36 classes x seeds 26-63, generator of $GEN ($NCPU workers)"
+  python -u ML/code/new_routes.py --gen-src "$GEN_SRC" --first-seed 26 --n-seeds 38 \
+    --workers "$NCPU" >> "$LOGF" 2>&1
+  rm -rf "$GEN_SRC"
+  PREV=$BASE0
+  DATA=""
+  for R in 1 2; do
+    NEW=${BASE0}_exitnew$R
+    DATA=${DATA:+$DATA,}exitnew_r$R
+    log "rl-exit-new $R: labels with $PREV on the new routes x 1 draw ($NCPU workers)"
+    python -u ML/code/rl_exit_collect.py --kind torch --tag "$PREV" --routes new --split fit \
+      --draws 1 --name "exitnew_r$R" --workers "$NCPU" >> "$LOGF" 2>&1
+    if [ -f "ML/models/${NEW}_meta.json" ]; then
+      log "rl-exit-new $R: $NEW exists, not retrained"
+    else
+      log "rl-exit-new $R: fine-tuning $BASE0 on $DATA -> $NEW"
+      python -u ML/code/rl_torch_ft.py --data "$DATA" --base "$BASE0" --out "$NEW" \
+        --hold 58,59,60,61,62,63 --threads $(( NCPU < 16 ? NCPU : 16 )) >> "$LOGF" 2>&1
+    fi
+    PREV=$NEW
+  done
+  TH="[{\"dsr\": 32, \"race\": 8}, {\"net\": \"torch:$OLD\"}]"
+  for SP in stop:val test:test; do
+    log "rl-exit-new: $PREV alone and + rollout, and $OLD alone, on the ${SP##*:} routes"
+    python -u ML/code/rl_search.py --kind torch --tag "$PREV" --routes base --split "${SP%%:*}" \
+      --draws 0 --realised --theta "$TH" --name "exitnew_${SP##*:}_r2" --workers "$NCPU" \
+      >> "$LOGF" 2>&1
+    python -u ML/code/rl_test_report.py --routes base --runs "exitnew_${SP##*:}_r2" \
+      --out "exitnew_${SP##*:}_r2" >> "$LOGF" 2>&1 || log "rl-exit-new: rl_test_report ${SP##*:} failed (see $LOGF)"
+  done
+  python -u ML/code/exit_new_compare.py >> "$LOGF" 2>&1 \
+    || log "rl-exit-new: exit_new_compare failed (see $LOGF)"
+  log "rl-exit-new done: results/exit_new_compare.txt"
+  ;;
+
 *)
   echo "usage: bash ML/hpc/run_jobs.sh check|pilot|b1|dagger|extract-pmix|pilot-models|test"
   echo "       |curve-build|curve-la i/n|dagger-pmix i/n|curve-train"
   echo "       |la-test i/n|dagger2 i/n|final"
   echo "       |mix-build|mix-la i/n|mix-oracle|mix-train|hybrid i/n|gate-val i/n|gate-val2 i/n|gate-test i/n|mixed-train|mixed-val-a i/n|mixed-val-b i/n"
-  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val|rl-mixed-exit|rl-phys-test|rl-exit-x A|B R|rl-exit-x-test A|B R"
+  echo "       |rl-test|rl-mixed-test|rl-mixed-eq|rl-exit R|rl-exit-test R|rl-window-val|rl-mixed-exit|rl-phys-test|rl-exit-x A|B R|rl-exit-x-test A|B R|rl-exit-new"
   exit 1
   ;;
 esac

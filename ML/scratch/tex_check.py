@@ -19,7 +19,7 @@ print("refs without label:", sorted(refs - labels))
 
 
 def words(t):
-    t = "\n".join(l.split("%")[0] if not l.strip().startswith("%") else "" for l in t.splitlines())
+    t = "\n".join(re.split(r"(?<!\\)%", l)[0] for l in t.splitlines())
     t = re.sub(re.escape(BS + "begin{tabular}") + ".*?" + re.escape(BS + "end{tabular}"), " ", t, flags=re.S)
     t = re.sub(re.escape(BS) + r"[a-zA-Z]+", " ", t)
     return len(re.findall(r"[A-Za-z0-9][A-Za-z0-9.,%'-]*", t))
