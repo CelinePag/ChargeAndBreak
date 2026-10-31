@@ -1,0 +1,24 @@
+Expert iteration: brand-new routes (new) vs the training routes (old), gap to the oracle with the window penalty, stored realizations
+
+validation: 66 routes run, 66 compared (0 with a broken run, 0 without an oracle or LA run left out)
+  old network alone re-run in the new job: identical on 66/66 routes (largest difference 0.000 h)
+  policy                              gap %     vs LA (pp) rests > LA  missed
+  LA                                   3.04
+  network, expert iteration (old)      3.37   +0.32 ± 0.29          1      71
+    + rollout (old)                    1.72   -1.33 ± 0.41          0      42
+  network, expert iteration (new)      2.72   -0.32 ± 0.52          2      66
+    + rollout (new)                    1.74   -1.30 ± 0.41          0      39
+  new - old, network alone     -0.64 ± 0.42 pp  (new better on 34, worse on 17 routes: no clear difference)
+  new - old, with the rollout  +0.03 ± 0.07 pp  (new better on 28, worse on 31 routes: no clear difference)
+
+test: 125 routes run, 125 compared (0 with a broken run, 0 without an oracle or LA run left out)
+  old network alone re-run in the new job: identical on 125/125 routes (largest difference 0.000 h)
+  policy                              gap %     vs LA (pp) rests > LA  missed
+  LA                                   3.05
+  network, expert iteration (old)      3.08   +0.03 ± 0.35          2      96
+    + rollout (old)                    1.84   -1.21 ± 0.32          0      58
+  network, expert iteration (new)      2.97   -0.08 ± 0.39          3      90
+    + rollout (new)                    2.04   -1.01 ± 0.31          0      65
+  new - old, network alone     -0.11 ± 0.20 pp  (new better on 54, worse on 37 routes: no clear difference)
+  new - old, with the rollout  +0.21 ± 0.13 pp  (new better on 48, worse on 51 routes: no clear difference)
+
